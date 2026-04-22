@@ -1,0 +1,156 @@
+services:
+
+  # ─────────────────────────────────────────────────────────────────
+  # 1. SOLO — тесты с перспективы тестируемого RU-сервера
+  # Usage: TEST_ID=selectel-spb-001 docker compose --profile solo up
+  # ─────────────────────────────────────────────────────────────────
+  solo:
+    profiles: [solo]
+    build:
+      context: .
+      dockerfile: packages/solo/Dockerfile
+    network_mode: host
+    cap_add: [NET_RAW, NET_ADMIN]
+    environment:
+      TEST_ID: ${TEST_ID:?TEST_ID is required}
+      RUNS_COUNT: ${RUNS_COUNT:-3}
+    volumes:
+      - ./:/workspace
+      - ~/.ssh:/root/.ssh:ro
+    working_dir: /workspace
+    restart: "no"
+
+  # ─────────────────────────────────────────────────────────────────
+  # 2. LISTENER — VPN-порты на тестируемом сервере
+  # Usage: TEST_ID=... SESSION_ID=client-home-rt-spb docker compose --profile listener up
+  # ─────────────────────────────────────────────────────────────────
+  listener:
+    profiles: [listener]
+    build:
+      context: .
+      dockerfile: packages/listener/Dockerfile
+    network_mode: host
+    cap_add: [NET_ADMIN, NET_RAW]
+    environment:
+      TEST_ID: ${TEST_ID:?TEST_ID is required}
+      SESSION_ID: ${SESSION_ID:?SESSION_ID is required}
+    volumes:
+      - ./:/workspace
+      - ~/.ssh:/root/.ssh:ro
+    working_dir: /workspace
+    stop_grace_period: 60s
+    restart: "no"
+
+  # ─────────────────────────────────────────────────────────────────
+  # 3. CLIENT — handshake-тесты с клиентской сети
+  # Usage: TEST_ID=... SERVER_HOST=1.2.3.4 docker compose --profile client up
+  # ─────────────────────────────────────────────────────────────────
+  client:
+    profiles: [client]
+    build:
+      context: .
+      dockerfile: packages/client/Dockerfile
+    network_mode: host
+    cap_add: [NET_RAW]
+    environment:
+      TEST_ID: ${TEST_ID:?TEST_ID is required}
+      SERVER_HOST: ${SERVER_HOST:?SERVER_HOST is required}
+    volumes:
+      - ./:/workspace
+      - ~/.ssh:/root/.ssh:ro
+    working_dir: /workspace
+    restart: "no"
+
+  # ─────────────────────────────────────────────────────────────────
+  # 4. CONTROL — эталонный baseline из чистой юрисдикции (DE VPS)
+  # Usage: docker compose --profile control up
+  # ─────────────────────────────────────────────────────────────────
+  control:
+    profiles: [control]
+    build:
+      context: .
+      dockerfile: packages/control/Dockerfile
+    network_mode: host
+    cap_add: [NET_RAW, NET_ADMIN]
+    environment:
+      RUNS_COUNT: ${RUNS_COUNT:-5}
+    volumes:
+      - ./:/workspace
+      - ~/.ssh:/root/.ssh:ro
+    working_dir: /workspace
+    restart: "no"
+
+  # ─────────────────────────────────────────────────────────────────
+  # 5. DASHBOARD — Grafana + Postgres + sync-api
+  # Usage: docker compose --profile dashboard up -d
+  # Open: http://localhost:3000 (admin/admin)
+  # ─────────────────────────────────────────────────────────────────
+  postgres:
+    profiles: [dashboard]
+    image: postgres:16
+    environment:
+      POSTGRES_DB: censprobe
+      POSTGRES_USER: censprobe
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-censprobe}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U censprobe"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  sync-api:
+    profiles: [dashboard]
+    build:
+      context: .
+      dockerfile: packages/dashboard/sync-api/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+asyncpg://censprobe:${DB_PASSWORD:-censprobe}@postgres/censprobe
+      WORKSPACE: /workspace
+    volumes:
+      - ./:/workspace
+      - ~/.ssh:/root/.ssh:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  grafana:
+    profiles: [dashboard]
+    image: grafana/grafana:11.2.0
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s:%(http_port)s/"
+      GF_INSTALL_PLUGINS: ""
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./packages/dashboard/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./packages/dashboard/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - postgres
+      - sync-api
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────────────────────────
+  # 6. REPORTER — HTML/PDF отчёты
+  # Usage: TEST_ID=... FORMAT=html,pdf docker compose --profile reporter up
+  # ─────────────────────────────────────────────────────────────────
+  reporter:
+    profiles: [reporter]
+    build:
+      context: .
+      dockerfile: packages/reporter/Dockerfile
+    environment:
+      TEST_ID: ${TEST_ID:?TEST_ID is required}
+      FORMAT: ${FORMAT:-html}
+    volumes:
+      - ./:/workspace
+    working_dir: /workspace
+    restart: "no"
+
+volumes:
+  db_data:
+  grafana_data:

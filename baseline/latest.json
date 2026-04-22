@@ -1,0 +1,16 @@
+{
+  "_comment": "Stub baseline — replace by running: docker compose --profile control up",
+  "version": "stub-0.0.0",
+  "generated_at": null,
+  "generated_from": null,
+  "probe_core_version": "0.1.0",
+  "targets_version": "initial",
+  "validity_until": null,
+  "runs_count": 0,
+  "dns": {},
+  "tls": {},
+  "http": {},
+  "telegram": {},
+  "throttling": {},
+  "sni_throttling": {}
+}

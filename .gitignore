@@ -1,0 +1,27 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+.env
+*.env
+*.log
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Docker volumes (local dev)
+pgdata/
+
+# SSH keys — never commit
+*.pem
+*.key
+id_rsa
+id_ed25519
+
+# Reports are tracked (they're the product)
+# baseline is tracked
+# targets/ and signatures/ are tracked
