@@ -12,10 +12,10 @@ Covers:
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -89,7 +89,7 @@ class TestResult(BaseModel):
     rtt_ms: Optional[float] = None
     attempts: int = 1
     control_comparison: Optional[ControlComparison] = None
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     notes: Optional[str] = None
 
 
@@ -185,13 +185,13 @@ class ServerMeta(BaseModel):
     kernel: Optional[str] = None
     distro: Optional[str] = None
     # Raw detected values (not stored in git)
-    _exit_ip: Optional[str] = None
+    _exit_ip: Optional[str] = PrivateAttr(default=None)
 
 
 class ReportMeta(BaseModel):
     """Structure of reports/<test_id>/meta.yaml"""
     test_id: str
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     description: Optional[str] = None
     server: ServerMeta = Field(default_factory=ServerMeta)
     purpose: str = "vpn-entry"   # vpn-entry | vpn-exit | vpn-relay
@@ -211,7 +211,7 @@ class ProtocolPhase(StrEnum):
 
 class ProtocolEvent(BaseModel):
     """Single protocol handshake/data event logged by listener."""
-    ts: datetime = Field(default_factory=datetime.utcnow)
+    ts: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     protocol: str
     phase: ProtocolPhase
     from_asn: Optional[str] = None

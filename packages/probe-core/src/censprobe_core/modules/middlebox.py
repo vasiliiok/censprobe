@@ -140,7 +140,7 @@ async def _test_invalid_request_line() -> Optional[TestResult]:
     test_name = "middlebox_invalid_request_line"
 
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def _send_raw():
             try:

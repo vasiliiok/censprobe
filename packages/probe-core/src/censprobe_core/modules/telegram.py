@@ -275,7 +275,7 @@ async def _stun_probe(dc_id: int, ip: str, port: int) -> TestResult:
     txid = os.urandom(12)
     stun_req = struct.pack(">HHI", 0x0001, 0x0000, 0x2112A442) + txid
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     t0 = time.monotonic()
 
     try:

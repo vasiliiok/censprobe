@@ -251,7 +251,7 @@ async def _validate_cert(domain: str, ip: str) -> Optional[bool]:
     """
     try:
         ctx = ssl.create_default_context()
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def _check() -> bool:
             try:

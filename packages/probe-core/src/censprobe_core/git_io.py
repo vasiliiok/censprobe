@@ -112,11 +112,11 @@ def _push_with_retry(max_attempts: int = 3, backoff_sec: float = 10.0) -> None:
 
 async def git_pull_async() -> str:
     """Async wrapper for git pull."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, git_pull)
 
 
 async def git_add_commit_push_async(message: str, paths: list[str] | None = None) -> None:
     """Async wrapper for git add/commit/push."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, git_add_commit_push, message, paths)

@@ -87,7 +87,6 @@ async def _single_tcp_attempt(ip: str, port: int) -> tuple[Verdict, Optional[int
     """
     Attempt a single TCP connect. Returns (verdict, rst_ttl_if_applicable).
     """
-    loop = asyncio.get_event_loop()
     try:
         t0 = time.monotonic()
         _, writer = await asyncio.wait_for(

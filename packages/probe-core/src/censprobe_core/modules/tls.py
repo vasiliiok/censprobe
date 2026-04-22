@@ -125,7 +125,7 @@ async def _tls_connect(
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def _do_handshake():
             try:
@@ -230,7 +230,7 @@ async def _test_ech(domain: str) -> Optional[TestResult]:
 async def _resolve_ip(domain: str) -> Optional[str]:
     """Quick resolution to get IP for TLS test."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         infos = await loop.getaddrinfo(domain, 443, type=socket.SOCK_STREAM)
         return infos[0][4][0]
     except Exception:
