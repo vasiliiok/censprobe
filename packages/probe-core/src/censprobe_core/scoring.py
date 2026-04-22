@@ -97,7 +97,10 @@ def compute_scores(
 
     # ── Exit score ────────────────────────────────────────────────────────────
     # Server can access external resources (uplink quality)
-    censorship_low = max(0.0, uplink_quality - 0.2 if scores.throttling_detected else uplink_quality)
+    if scores.throttling_detected:
+        censorship_low = max(0.0, uplink_quality - 0.2)
+    else:
+        censorship_low = uplink_quality
     scores.exit_score = round(
         uplink_quality * 40.0 +
         censorship_low * 40.0 +

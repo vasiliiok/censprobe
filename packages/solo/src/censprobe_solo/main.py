@@ -18,9 +18,9 @@ Important: Solo must run BEFORE listener.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -32,7 +32,13 @@ from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
-# Bootstrap logging before importing core
+from censprobe_core.git_io import git_add_commit_push, git_pull
+from censprobe_core.models import ReportMeta, ServerMeta
+from censprobe_core.runner import ProbeRunner
+from censprobe_core.scoring import compute_scores
+from censprobe_core.server_meta import detect_server_meta
+
+# Bootstrap logging (after imports to avoid E402)
 logging.basicConfig(
     level=logging.INFO,
     handlers=[RichHandler(rich_tracebacks=True, show_path=False)],
@@ -40,12 +46,6 @@ logging.basicConfig(
     datefmt="[%H:%M:%S]",
 )
 logger = logging.getLogger("censprobe.solo")
-
-from censprobe_core.git_io import git_add_commit_push, git_pull
-from censprobe_core.models import ReportMeta, ServerMeta, Verdict
-from censprobe_core.runner import ProbeRunner
-from censprobe_core.scoring import compute_scores
-from censprobe_core.server_meta import detect_server_meta
 
 console = Console()
 WORKSPACE = Path(os.getenv("WORKSPACE", "/workspace"))
@@ -152,7 +152,6 @@ async def _async_main(test_id: str, repeats: int, skip_push: bool) -> None:
 
 def _get_baseline_version() -> str:
     """Read baseline version from baseline/latest.json."""
-    import json
     path = WORKSPACE / "baseline" / "latest.json"
     try:
         data = json.loads(path.read_text())

@@ -19,7 +19,6 @@ import random
 import socket
 import ssl
 import string
-import time
 from typing import Optional
 
 from censprobe_core.models import TestResult, Verdict, BlockingMethod
@@ -87,11 +86,10 @@ async def _test_header_manipulation() -> list[TestResult]:
 
                 if r.status_code == 200:
                     reflected = r.json().get("headers", {})
-                    # Check if the modified-case header is preserved or normalized
+                    # Check if the modified-case header was normalized by a middlebox
                     original_key = tc["field"]
                     normalized_key = original_key.lower().replace("-", " ").title().replace(" ", "-")
 
-                    has_original = any(k for k in reflected if k.lower() == original_key.lower())
                     is_normalized = normalized_key in reflected and original_key not in reflected
 
                     middlebox_detected = is_normalized
@@ -206,7 +204,7 @@ async def _test_tcp_fragmentation() -> Optional[TestResult]:
     target_ip = None
 
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         infos = await loop.getaddrinfo(target_host, 443, type=socket.SOCK_STREAM)
         target_ip = infos[0][4][0]
     except Exception:
@@ -242,7 +240,7 @@ async def _test_tcp_fragmentation() -> Optional[TestResult]:
 
     try:
         result = await asyncio.wait_for(
-            asyncio.get_event_loop().run_in_executor(None, _fragmented_hello),
+            asyncio.get_running_loop().run_in_executor(None, _fragmented_hello),
             timeout=_TIMEOUT + 2,
         )
         return TestResult(

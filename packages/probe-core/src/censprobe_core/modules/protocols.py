@@ -17,7 +17,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import random
 import socket
 import struct
 import time
@@ -166,7 +165,7 @@ async def _udp_probe(
     block_method: BlockingMethod,
 ) -> TestResult:
     """Generic UDP probe: send payload, wait for response."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     t0 = time.monotonic()
 
     try:

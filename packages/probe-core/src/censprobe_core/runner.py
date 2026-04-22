@@ -19,11 +19,9 @@ import yaml
 from censprobe_core.baseline import BaselineComparator, load_baseline
 from censprobe_core.models import (
     BaselineData,
-    ReportMeta,
     ServerMeta,
     ServerScores,
     TestResult,
-    Verdict,
 )
 from censprobe_core.modules import dns, tcp, tls, http, telegram, throttling, middlebox, protocols
 
