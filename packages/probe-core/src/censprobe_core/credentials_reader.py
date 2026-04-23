@@ -32,6 +32,8 @@ class ProtocolCredentials:
     awg_jc: int = 4
     awg_jmin: int = 40
     awg_jmax: int = 70
+    awg_s1: int = 0
+    awg_s2: int = 0
     awg_h1: int = 0
     awg_h2: int = 0
     awg_h3: int = 0
@@ -75,6 +77,8 @@ def load_protocols_yaml(path: Path) -> ProtocolCredentials:
     c.awg_jc = awg.get("jc", 4)
     c.awg_jmin = awg.get("jmin", 40)
     c.awg_jmax = awg.get("jmax", 70)
+    c.awg_s1 = awg.get("s1", 0)
+    c.awg_s2 = awg.get("s2", 0)
     c.awg_h1 = awg.get("h1", 0)
     c.awg_h2 = awg.get("h2", 0)
     c.awg_h3 = awg.get("h3", 0)

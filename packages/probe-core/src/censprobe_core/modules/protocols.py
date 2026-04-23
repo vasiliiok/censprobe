@@ -106,11 +106,11 @@ async def run_protocol_tests(
             if pr.error:
                 r.evidence = {"error": pr.error}
             elif pr.verdict == Verdict.BLOCKED:
-                r.block_method = BlockingMethod.TCP_TIMEOUT if "tcp" in target else BlockingMethod.UDP_TIMEOUT
+                r.method = BlockingMethod.IP_DROPPED
                 r.evidence = {"reason": "Handshake timeout or reset"}
             elif pr.verdict == Verdict.HANDSHAKE_ONLY:
                 r.evidence = {"reason": "Handshake ok, but data transfer failed"}
-                r.block_method = BlockingMethod.THROTTLED
+                r.method = BlockingMethod.VPN_DATA_PHASE_BLOCKED
 
         except Exception as e:
             r.verdict = Verdict.ERROR

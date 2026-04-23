@@ -241,9 +241,8 @@ def _recommend_protocols(
                 recommended.append(f"{proto} (handshake only)")
     else:
         # No listener data — recommend based on known RU survivability
-        if "openvpn" not in blocked:
-            recommended.append("vless_reality")
-        if "wireguard" not in blocked and "amneziawg" not in blocked:
+        recommended.append("vless_reality")
+        if "amneziawg" not in blocked:
             recommended.append("amneziawg")
         recommended.extend(["hysteria2", "shadowsocks"])
 
