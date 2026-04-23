@@ -903,9 +903,9 @@ amneziawg:
   allowed_ips: "10.201.0.0/24"
   # AmneziaWG 2.0 параметры обфускации.
   # Должны быть одинаковыми на server и client, иначе handshake не пройдёт.
-  jc: 8                        # число junk packets перед handshake (4-12 рекомендуется)
-  jmin: 40                     # мин. размер junk packet (в байтах)
-  jmax: 70                     # макс. размер junk packet
+  jc: 4                        # число junk packets перед handshake (генерируется 3-7)
+  jmin: 40                     # мин. размер junk packet (в байтах, генерируется 40-59)
+  jmax: 70                     # макс. размер junk packet (генерируется 70-99)
   s1: 86                       # padding bytes перед handshake init (15-150; S1+56 != S2)
   s2: 42                       # padding bytes перед handshake response (15-150)
   h1: 1779637668               # magic header для init (из диапазона, случайно сгенерирован)
@@ -1012,7 +1012,7 @@ services:
     profiles: [dashboard]
     build: ./packages/dashboard/sync-api
     environment:
-      DATABASE_URL: postgresql://censprobe:${DB_PASSWORD:-censprobe}@postgres/censprobe
+      DATABASE_URL: postgresql+asyncpg://censprobe:${DB_PASSWORD:-censprobe}@postgres/censprobe
       WORKSPACE: /workspace
     volumes:
       - ./:/workspace          # репозиторий для git pull
@@ -1021,7 +1021,7 @@ services:
 
   grafana:
     profiles: [dashboard]
-    image: grafana/grafana:latest
+    image: grafana/grafana:11.2.0
     volumes:
       - grafana_data:/var/lib/grafana
       - ./packages/dashboard/grafana/provisioning:/etc/grafana/provisioning:ro
@@ -1977,139 +1977,7 @@ TEST_ID=selectel-spb-001 FORMAT=html,pdf \
 
 ---
 
-## Часть 12. Deployment — быстрый старт
 
-### 12.1. Первая настройка (один раз)
-
-**Шаг 1. Создай GitHub репозиторий.**
-
-На github.com создаёшь **один private репозиторий** `vasiliiok/censprobe`. Заливаешь туда содержимое проекта (см. структуру в Части 10.2). Всё остальное делается через SSH.
-
-**Шаг 2. Сгенерируй SSH-ключи на каждой машине.**
-
-На каждой машине, где будут запускаться контейнеры (тестируемый RU-сервер, немецкий control-VPS, ноут с dashboard, клиентский ноут/телефон), сгенерируй SSH-ключ:
-
-```bash
-ssh-keygen -t ed25519 -C "censprobe-<machine-name>"
-cat ~/.ssh/id_ed25519.pub
-```
-
-Добавь публичный ключ в GitHub **как Deploy Key** к репозиторию `censprobe`:
-- GitHub → ваш репозиторий → Settings → Deploy keys → Add deploy key.
-- Имя: `censprobe-<machine-name>` (для наглядности).
-- Ключ: содержимое `~/.ssh/id_ed25519.pub`.
-- **Поставь галку "Allow write access"** — для simplicity все ключи имеют одинаковые read+write права.
-
-Проверь доступ с каждой машины:
-```bash
-ssh -T git@github.com
-# → "Hi vasiliiok/censprobe! You've successfully authenticated..."
-```
-
-**Шаг 3. Разверни control-point на немецком VPS.**
-
-```bash
-ssh root@<de-vps-ip>
-git clone git@github.com:vasiliiok/censprobe.git
-cd censprobe
-
-# Первый прогон — генерирует стартовый baseline
-docker compose --profile control up
-```
-
-Через 5–10 минут baseline записан и запушен в репо. Контейнер завершился, ничего больше на VPS не работает.
-
-**Важно:** control не запускается автоматически. Решение об обновлении baseline — за тобой (обычно перед каждым новым испытанием). Повторный запуск — той же командой.
-
-### 12.2. Запуск dashboard
-
-На любой машине с SSH-доступом к репо (ноут, VPS, что угодно):
-```bash
-git clone git@github.com:vasiliiok/censprobe.git
-cd censprobe
-docker compose --profile dashboard up -d
-```
-
-Открой `http://<host>:3000` (admin / admin при первом входе). Нажми "Pull & Refresh" в Grafana — sync-api сделает `git pull` и обновит Postgres.
-
-### 12.3. Начать новый тест сервера
-
-На тестируемом RU-сервере (SSH-ключ уже добавлен как Deploy Key):
-```bash
-git clone git@github.com:vasiliiok/censprobe.git
-cd censprobe
-
-# Вариант A: helper-скрипт с enforced-порядком (рекомендуется)
-TEST_ID=selectel-spb-001 ./run-test.sh
-# 1. запускает solo разово
-# 2. ждёт завершения solo
-# 3. сообщает, что можно запускать listener отдельной командой с нужным SESSION_ID
-
-# Вариант B: вручную
-TEST_ID=selectel-spb-001 docker compose --profile solo up
-# solo завершился, далее — listener для каждой сети отдельно (см. 12.4)
-```
-
-**Почему именно такой порядок.** Listener открывает VPN-порты (1194/UDP, 51820/UDP, 8388/TCP, 443 TCP/UDP), ТСПУ обращает на это внимание и может применить более агрессивную фильтрацию к исходящему трафику сервера. Если запустить solo после listener, его тесты будут показывать не "чистое" состояние аплинка, а "аплинк под усиленным вниманием цензора" — результат искажён.
-
-### 12.4. Запуск listener для каждой клиентской сессии
-
-На том же тестируемом сервере, после solo:
-```bash
-# Сессия 1: тестируем с домашнего Ростелекома
-TEST_ID=selectel-spb-001 SESSION_ID=client-home-rt-spb \
-  docker compose --profile listener up
-# ... провести клиентский тест (см. 12.5) ...
-# Ctrl+C → listener коммитит отчёт session 1, git push, выходит
-
-# Сессия 2: тестируем с мобильного МТС
-TEST_ID=selectel-spb-001 SESSION_ID=client-mob-mts-msk \
-  docker compose --profile listener up
-# ... провести клиентский тест ...
-# Ctrl+C → отчёт session 2 → выход
-
-# И так для каждой сети.
-```
-
-### 12.5. Запуск client на разных сетях
-
-На ноуте/телефоне (клон репо один раз):
-```bash
-git clone git@github.com:vasiliiok/censprobe.git
-cd censprobe
-```
-
-Для каждой сессии:
-```bash
-# Подключись к нужной сети (домашний Wi-Fi / мобильный hotspot / etc.)
-# Убедись, что на сервере уже запущен listener с этим SESSION_ID
-cd censprobe
-git pull   # чтобы подтянуть свежий protocols.yaml от listener'а
-
-TEST_ID=selectel-spb-001 SERVER_HOST=<IP_или_FQDN_сервера> \
-  docker compose --profile client up
-
-# → видишь результат в терминале
-# → иди на сервер, нажми Ctrl+C на listener — он запушит отчёт сессии
-```
-
-### 12.6. Завершить тест
-
-Все сессии уже запушены (при каждом Ctrl+C на listener). На хосте dashboard'а:
-```
-# в Grafana нажми "Pull & Refresh"
-# → смотри Dashboard 7 "Server Suitability"
-```
-
-### 12.7. Сравнить два сервера
-
-```
-# запустили аналогичный тест для другого сервера (timeweb-msk-001)
-# в Grafana → Dashboard 6 "Compare Tests"
-# выбери test_id_a=selectel-spb-001, test_id_b=timeweb-msk-001
-```
-
----
 
 ## Часть 13. Privacy и opsec
 
@@ -2154,182 +2022,7 @@ TEST_ID=selectel-spb-001 SERVER_HOST=<IP_или_FQDN_сервера> \
 
 При запуске первый раз — дисклеймер, пользователь явно соглашается.
 
----
 
-## Часть 14. План реализации
-
-### 14.1. Mono-repo layout
-
-```
-censprobe/
-├── README.md
-├── docker-compose.yml                     # единый compose с профилями
-├── pyproject.toml                         # Python workspace
-├── run-test.sh                            # helper: solo → listener в правильном порядке
-│
-├── targets/                               # что тестировать
-│   ├── news.yaml
-│   ├── social.yaml
-│   ├── messengers.yaml
-│   ├── vpn.yaml
-│   ├── telegram.yaml
-│   └── neutral.yaml
-├── signatures/
-│   ├── protocols.yaml
-│   ├── blockpages.yaml
-│   └── dns_fingerprints.yaml
-├── protocols/
-│   └── default.yaml                       # какие VPN-протоколы и на каких портах
-├── baseline/                              # пишется control-контейнером
-│   ├── latest.json
-│   └── archive/
-├── reports/                               # пишется solo и listener
-│   └── <test_id>/
-│       ├── meta.yaml
-│       ├── protocols.yaml
-│       ├── server-solo-*.json.gz
-│       └── server-listener-<session>-*.json.gz
-│
-├── docs/
-│   ├── QUICKSTART.md
-│   └── BASELINE.md
-│
-├── packages/
-│   ├── probe-core/                        # общая библиотека
-│   │   └── src/censprobe_core/
-│   │       ├── modules/                   # dns, tcp, tls, http, telegram, throttling, protocols, middlebox
-│   │       ├── baseline.py
-│   │       ├── runner.py
-│   │       ├── models.py
-│   │       ├── scoring.py
-│   │       └── git_io.py                  # git pull/commit/push helpers
-│   │
-│   ├── solo/
-│   │   ├── src/censprobe_solo/main.py
-│   │   ├── Dockerfile
-│   │   └── pyproject.toml
-│   │
-│   ├── control/                           # генератор baseline, тот же движок что solo
-│   │   ├── src/censprobe_control/
-│   │   │   ├── main.py
-│   │   │   └── baseline_builder.py        # N-run aggregation → baseline.json
-│   │   ├── Dockerfile
-│   │   └── pyproject.toml
-│   │
-│   ├── listener/
-│   │   ├── src/censprobe_listener/
-│   │   │   ├── main.py
-│   │   │   ├── openvpn_responder.py
-│   │   │   ├── wg_responder.py
-│   │   │   ├── ss_responder.py
-│   │   │   ├── vless_reality_wrapper.py   # xray-core
-│   │   │   └── hysteria_wrapper.py
-│   │   ├── Dockerfile
-│   │   └── pyproject.toml
-│   │
-│   ├── client/
-│   │   ├── src/censprobe_client/
-│   │   │   ├── main.py
-│   │   │   ├── protocol_probes.py         # handshakes к server'у
-│   │   │   └── tunnel_test.py             # опц. VLESS tunnel check
-│   │   ├── Dockerfile
-│   │   └── pyproject.toml
-│   │
-│   ├── dashboard/
-│   │   ├── grafana/
-│   │   │   ├── dashboards/
-│   │   │   │   ├── 01-test-overview.json
-│   │   │   │   ├── 02-blocking-matrix.json
-│   │   │   │   ├── 03-telegram-deep.json
-│   │   │   │   ├── 04-vpn-reachability.json
-│   │   │   │   ├── 05-technique-attribution.json
-│   │   │   │   ├── 06-compare-tests.json
-│   │   │   │   └── 07-server-suitability.json
-│   │   │   └── provisioning/
-│   │   ├── sync-api/
-│   │   │   ├── src/sync_api/main.py       # FastAPI: POST /refresh
-│   │   │   ├── Dockerfile
-│   │   │   └── pyproject.toml
-│   │   └── db/migrations/
-│   │
-│   └── reporter/                          # CLI для HTML/PDF отчётов
-│       ├── src/reporter/
-│       ├── templates/
-│       ├── Dockerfile
-│       └── pyproject.toml
-│
-└── run-test.sh                            # helper: solo → listener с правильным порядком
-```
-
-Ключевое: **один `docker-compose.yml` в корне** с пятью профилями (`solo`, `listener`, `client`, `control`, `dashboard`). Никаких отдельных подпапок `deploy/<role>` — всё унифицировано.
-
-### 14.2. Итерации
-
-**M1 — probe-core + solo (2 недели).**
-- `probe-core`: DNS/TCP/TLS/HTTP модули + baseline comparison + scoring.
-- `solo` Docker-контейнер: одна команда запускает прогон, коммитит отчёт и делает git push.
-- Инициализация структуры репо: `targets/`, `signatures/`, `protocols/`, пустой `baseline/latest.json` (заглушка на первое время).
-- Первый рабочий тест "с сервера".
-
-**M2 — control + первый реальный baseline (1 неделя).**
-- `control` Docker-контейнер: структурно почти копия solo, но с baseline-builder'ом (N-run агрегация → статистики).
-- Результат — обновление `baseline/latest.json` + архив в `baseline/archive/`.
-- Развёртывание на немецком VPS.
-- После M2 у тебя есть настоящий эталонный baseline — solo уже сравнивается с ним корректно.
-
-**M3 — dashboard (1 неделя).**
-- `dashboard` стек: Postgres + sync-api + Grafana.
-- Dashboard 1 (Test Overview) + Dashboard 7 (Server Suitability).
-- Pull & Refresh кнопка.
-
-**M4 — Telegram-модуль (1 неделя).**
-- Полный набор Telegram-тестов (Часть 2.5.7).
-- Dashboard 3 (Telegram Deep Dive).
-- Добавить Telegram в control-прогон, чтобы baseline покрывал Telegram-ресурсы.
-
-**M5 — listener (2 недели).**
-- OpenVPN/WG/SS/VLESS+Reality/Hy2 responders.
-- Генерация credentials, commit+push `protocols.yaml` на первом старте.
-- Graceful shutdown на Ctrl+C + push отчёта сессии.
-
-**M6 — client (1–2 недели).**
-- Клиент: git pull, чтение `protocols.yaml`, handshakes к listener'у по всем протоколам.
-- Вывод результатов в stdout, без коммитов.
-- Opsec: jitter, mix.
-
-**M7 — остальные дашборды + reporter (1 неделя).**
-- Dashboards 2, 4, 5, 6.
-- CLI reporter → HTML/PDF.
-
-### 14.3. Зависимости
-
-**probe-core и probes (solo, client, control — все используют ядро):**
-```toml
-httpx[http2] dnspython[doh,doq] aiodns scapy cryptography aioquic
-pydantic pyyaml click rich jinja2 tenacity psutil
-PyGithub    # для GitHub API push/pull
-```
-
-**listener дополнительно:**
-```toml
-# + бинари в Dockerfile:
-# sing-box, xray-core, hysteria, wireguard-tools
-```
-
-**control дополнительно:**
-```toml
-# + numpy для percentile-агрегации в baseline-builder
-numpy
-```
-
-**dashboard:**
-```toml
-# sync-api:
-fastapi uvicorn sqlalchemy asyncpg alembic
-pygithub gitpython
-
-# Grafana + Postgres — готовые образы
-```
 
 ---
 
