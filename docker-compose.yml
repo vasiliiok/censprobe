@@ -12,7 +12,7 @@ services:
     network_mode: host
     cap_add: [NET_RAW, NET_ADMIN]
     environment:
-      TEST_ID: ${TEST_ID:?TEST_ID is required}
+      TEST_ID: ${TEST_ID:-}
       RUNS_COUNT: ${RUNS_COUNT:-3}
     volumes:
       - ./:/workspace
@@ -32,8 +32,8 @@ services:
     network_mode: host
     cap_add: [NET_ADMIN, NET_RAW]
     environment:
-      TEST_ID: ${TEST_ID:?TEST_ID is required}
-      SESSION_ID: ${SESSION_ID:?SESSION_ID is required}
+      TEST_ID: ${TEST_ID:-}
+      SESSION_ID: ${SESSION_ID:-}
     volumes:
       - ./:/workspace
       - ~/.ssh:/root/.ssh:ro
@@ -53,8 +53,9 @@ services:
     network_mode: host
     cap_add: [NET_RAW]
     environment:
-      TEST_ID: ${TEST_ID:?TEST_ID is required}
-      SERVER_HOST: ${SERVER_HOST:?SERVER_HOST is required}
+      TEST_ID: ${TEST_ID:-}
+      SESSION_ID: ${SESSION_ID:-}
+      SERVER_HOST: ${SERVER_HOST:-}
     volumes:
       - ./:/workspace
       - ~/.ssh:/root/.ssh:ro
@@ -147,7 +148,7 @@ services:
       context: .
       dockerfile: packages/reporter/Dockerfile
     environment:
-      TEST_ID: ${TEST_ID:?TEST_ID is required}
+      TEST_ID: ${TEST_ID:-}
       WORKSPACE: /workspace
     volumes:
       - ./:/workspace

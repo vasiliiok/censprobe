@@ -132,11 +132,11 @@ nobind
             try:
                 proc.terminate()
                 await asyncio.sleep(0.5)
-                if proc.poll() is None:
+                if proc.returncode is None:
                     proc.kill()
             except OSError:
                 pass
-            
+
     return result
 
 
@@ -305,7 +305,7 @@ async def probe_shadowsocks(host: str, port: int, method: str, password_b64: str
         try:
             # wait for sing-box to start
             await asyncio.sleep(1.0)
-            if proc.poll() is not None:
+            if proc.returncode is not None:
                 out = await proc.stdout.read()
                 result.error = f"sing-box failed to start: {out.decode(errors='replace')}"
                 return result
@@ -331,11 +331,11 @@ async def probe_shadowsocks(host: str, port: int, method: str, password_b64: str
             try:
                 proc.terminate()
                 await asyncio.sleep(0.5)
-                if proc.poll() is None:
+                if proc.returncode is None:
                     proc.kill()
             except OSError:
                 pass
-            
+
     return result
 
 
@@ -398,7 +398,7 @@ async def probe_vless_reality(
         
         try:
             await asyncio.sleep(1.0)
-            if proc.poll() is not None:
+            if proc.returncode is not None:
                 out = await proc.stdout.read()
                 result.error = f"xray failed to start: {out.decode(errors='replace')}"
                 return result
@@ -413,11 +413,11 @@ async def probe_vless_reality(
             try:
                 proc.terminate()
                 await asyncio.sleep(0.5)
-                if proc.poll() is None:
+                if proc.returncode is None:
                     proc.kill()
             except OSError:
                 pass
-            
+
     return result
 
 
@@ -456,7 +456,7 @@ socks5:
         
         try:
             await asyncio.sleep(1.0)
-            if proc.poll() is not None:
+            if proc.returncode is not None:
                 out = await proc.stdout.read()
                 result.error = f"hysteria failed to start: {out.decode(errors='replace')}"
                 return result
@@ -471,9 +471,9 @@ socks5:
             try:
                 proc.terminate()
                 await asyncio.sleep(0.5)
-                if proc.poll() is None:
+                if proc.returncode is None:
                     proc.kill()
             except OSError:
                 pass
-            
+
     return result

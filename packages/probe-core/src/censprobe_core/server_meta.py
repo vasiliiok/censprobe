@@ -12,7 +12,6 @@ Sensitive: exit IP is masked to /24 before writing to git.
 from __future__ import annotations
 
 import asyncio
-import ipaddress
 import logging
 import os
 import platform
@@ -119,28 +118,24 @@ def _parse_as_field(raw: str) -> tuple[Optional[str], Optional[str]]:
 
 def _mask_ip(ip: str) -> str:
     """Mask IP to /24 for privacy: 1.2.3.4 → XXX.XXX.XXX.0/24"""
-    try:
-        net = ipaddress.IPv4Network(f"{ip}/24", strict=False)
-        return "XXX.XXX.XXX.0/24"
-    except Exception:
-        return "XXX.XXX.XXX.0/24"
+    return "XXX.XXX.XXX.0/24"
 
 
 async def _check_ipv6() -> bool:
     """Check if IPv6 connectivity is available."""
+    sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
     try:
         loop = asyncio.get_running_loop()
-        sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
         sock.settimeout(3.0)
-        # Try connecting to Cloudflare IPv6
         await loop.run_in_executor(
             None,
             lambda: sock.connect(("2606:4700:4700::1111", 80)),
         )
-        sock.close()
         return True
     except Exception:
         return False
+    finally:
+        sock.close()
 
 
 def _detect_kernel() -> str:
