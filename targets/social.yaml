@@ -44,12 +44,12 @@ targets:
     category: social
     notes: "Blocked since November 2016 for GDPR-like data localization"
 
-  # CDN domains used by social platforms — test throttling
-  throttling_targets:
-    - domain: googlevideo.com
-      test_url: "https://manifest.googlevideo.com/"
-      notes: "YouTube CDN — primary throttling target"
+# CDN domains used by social platforms — test throttling
+throttling_targets:
+  - domain: googlevideo.com
+    test_url: "https://manifest.googlevideo.com/"
+    notes: "YouTube CDN — primary throttling target"
 
-    - domain: cdninstagram.com
-      test_url: "https://scontent.cdninstagram.com/"
-      notes: "Instagram CDN"
+  - domain: cdninstagram.com
+    test_url: "https://scontent.cdninstagram.com/"
+    notes: "Instagram CDN"

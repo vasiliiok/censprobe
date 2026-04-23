@@ -25,20 +25,23 @@ from censprobe_core.models import TestResult, Verdict, BlockingMethod
 
 logger = logging.getLogger(__name__)
 
-_CONNECT_TIMEOUT = 10.0   # seconds before declaring IP_DROPPED
+_CONNECT_TIMEOUT = 5.0    # seconds before declaring IP_DROPPED
 _SYN_FAST_RST_MS = 500    # RST within this time = likely injected
+_MAX_PARALLEL = 16        # concurrency cap for TCP probes
 
 
 async def run_tcp_tests(
     targets: list[tuple[str, int]],  # (ip, port) pairs
     repeats: int = 3,
 ) -> list[TestResult]:
-    """Run TCP reachability tests for a list of (ip, port) targets."""
-    results = []
-    for ip, port in targets:
-        res = await _test_tcp(ip, port, repeats)
-        results.append(res)
-    return results
+    """Run TCP reachability tests for a list of (ip, port) targets in parallel."""
+    sem = asyncio.Semaphore(_MAX_PARALLEL)
+
+    async def _bounded(ip: str, port: int) -> TestResult:
+        async with sem:
+            return await _test_tcp(ip, port, repeats)
+
+    return await asyncio.gather(*[_bounded(ip, port) for ip, port in targets])
 
 
 async def _test_tcp(ip: str, port: int, repeats: int) -> TestResult:
