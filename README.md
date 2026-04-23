@@ -177,6 +177,8 @@ baseline/
 - **M2** ✅ control + baseline builder
 - **M3** ✅ dashboard (Grafana + sync-api, 7 дашбордов)
 - **M4** ✅ Telegram-модуль (реализован в M1)
-- **M5** ✅ listener (6 VPN responders)
-- **M6** ✅ client (handshake probes)
+- **M5** ✅ listener (6 VPN responders, inc. DPI-resistant AmneziaWG and Hysteria 2)
+- **M6** ✅ client (handshake probes, jitter obfs)
 - **M7** ✅ reporter (HTML/PDF) + все дашборды
+
+**Status: Production Ready** ✅

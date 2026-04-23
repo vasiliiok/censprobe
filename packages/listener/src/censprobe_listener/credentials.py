@@ -35,6 +35,7 @@ class ProtocolCredentials:
     # WireGuard: server keypair + client pubkey
     wg_server_private: str = ""
     wg_server_public: str = ""
+    wg_client_private: str = ""
     wg_client_public: str = ""
     wg_preshared_key: str = ""
     wg_port: int = 51820
@@ -42,6 +43,7 @@ class ProtocolCredentials:
     # AmneziaWG: WG keypair + junk params
     awg_server_private: str = ""
     awg_server_public: str = ""
+    awg_client_private: str = ""
     awg_client_public: str = ""
     awg_preshared_key: str = ""
     awg_port: int = 51821
@@ -83,12 +85,12 @@ def generate_credentials() -> ProtocolCredentials:
 
     # WireGuard: use wg genkey/pubkey
     creds.wg_server_private, creds.wg_server_public = _wg_keypair()
-    _, creds.wg_client_public = _wg_keypair()
+    creds.wg_client_private, creds.wg_client_public = _wg_keypair()
     creds.wg_preshared_key = _wg_preshared_key()
 
     # AmneziaWG: same structure as WG + junk params
     creds.awg_server_private, creds.awg_server_public = _wg_keypair()
-    _, creds.awg_client_public = _wg_keypair()
+    creds.awg_client_private, creds.awg_client_public = _wg_keypair()
     creds.awg_preshared_key = _wg_preshared_key()
     # Random junk header values (32-bit)
     creds.awg_h1 = secrets.randbits(32)
@@ -96,8 +98,14 @@ def generate_credentials() -> ProtocolCredentials:
     creds.awg_h3 = secrets.randbits(32)
     creds.awg_h4 = secrets.randbits(32)
     creds.awg_jc = secrets.randbelow(5) + 3   # 3-7 junk packets
-    creds.awg_jmin = 40
-    creds.awg_jmax = 70
+    creds.awg_jmin = secrets.randbelow(20) + 40   # 40-59
+    creds.awg_jmax = secrets.randbelow(30) + 70   # 70-99
+    
+    # AmneziaWG padding sizes: Randomize S1 and S2, ensure S1+56 != S2
+    creds.awg_s1 = secrets.randbelow(135) + 15
+    creds.awg_s2 = secrets.randbelow(135) + 15
+    while creds.awg_s1 + 56 == creds.awg_s2:
+        creds.awg_s2 = secrets.randbelow(135) + 15
 
     # Shadowsocks 2022: 32-byte password
     creds.ss_password_b64 = base64.b64encode(os.urandom(32)).decode()
@@ -126,12 +134,14 @@ def save_protocols_yaml(creds: ProtocolCredentials, path: Path) -> None:
         "wireguard": {
             "port": creds.wg_port,
             "server_public_key": creds.wg_server_public,
+            "client_private_key": creds.wg_client_private,
             "client_public_key": creds.wg_client_public,
             "preshared_key": creds.wg_preshared_key,
         },
         "amneziawg": {
             "port": creds.awg_port,
             "server_public_key": creds.awg_server_public,
+            "client_private_key": creds.awg_client_private,
             "client_public_key": creds.awg_client_public,
             "preshared_key": creds.awg_preshared_key,
             "jc": creds.awg_jc,
@@ -178,6 +188,7 @@ def load_protocols_yaml(path: Path) -> ProtocolCredentials:
 
     wg = raw.get("wireguard", {})
     c.wg_server_public = wg.get("server_public_key", "")
+    c.wg_client_private = wg.get("client_private_key", "")
     c.wg_client_public = wg.get("client_public_key", "")
     c.wg_preshared_key = wg.get("preshared_key", "")
     c.wg_port = wg.get("port", 51820)
@@ -185,9 +196,13 @@ def load_protocols_yaml(path: Path) -> ProtocolCredentials:
     awg = raw.get("amneziawg", {})
     c.awg_server_public = awg.get("server_public_key", "")
     c.awg_port = awg.get("port", 51821)
+    c.awg_client_private = awg.get("client_private_key", "")
+    c.awg_client_public = awg.get("client_public_key", "")
     c.awg_jc = awg.get("jc", 4)
     c.awg_jmin = awg.get("jmin", 40)
     c.awg_jmax = awg.get("jmax", 70)
+    c.awg_s1 = awg.get("s1", 0)
+    c.awg_s2 = awg.get("s2", 0)
     c.awg_h1 = awg.get("h1", 0)
     c.awg_h2 = awg.get("h2", 0)
     c.awg_h3 = awg.get("h3", 0)

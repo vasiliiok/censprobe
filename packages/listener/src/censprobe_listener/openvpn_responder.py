@@ -1,18 +1,17 @@
 """
 openvpn_responder.py — OpenVPN static-key test responder.
 
-Runs openvpn in server/static-key mode.
-Listens on UDP/<port>, accepts handshake, records events.
+Runs openvpn in static-key (p2p) mode.
+Listens on UDP/<port>, accepts connection, records events.
 Does NOT forward traffic — purely a measurement endpoint.
 """
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
-import os
 import subprocess
 import tempfile
-import base64
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -20,10 +19,8 @@ logger = logging.getLogger(__name__)
 
 class OpenVPNResponder:
     """
-    Wraps openvpn process in static-key server mode.
-
-    Protocol: client sends P_CONTROL_HARD_RESET_CLIENT_V2 → server responds
-    with P_CONTROL_HARD_RESET_SERVER_V2. That's a successful handshake.
+    Wraps openvpn process in static-key p2p mode.
+    Protocol: client sends encrypted P_DATA_V1 -> server decrypts successfully.
     """
 
     def __init__(self, psk_b64: str, port: int = 1194) -> None:
@@ -31,7 +28,6 @@ class OpenVPNResponder:
         self.port = port
         self._proc: subprocess.Popen | None = None
         self._config_dir: tempfile.TemporaryDirectory | None = None
-        self.handshake_count = 0
 
     async def start(self) -> None:
         """Write config files and launch openvpn subprocess."""
@@ -44,21 +40,19 @@ class OpenVPNResponder:
         psk_path.write_bytes(psk_bytes)
         psk_path.chmod(0o600)
 
-        # Write OpenVPN config
+        # Write OpenVPN config (p2p mode, no 'mode server')
         config = f"""
-mode server
 proto udp
 port {self.port}
 dev tun
 secret {psk_path}
 ifconfig 10.200.0.1 10.200.0.2
 keepalive 10 60
-cipher AES-256-CBC
+cipher AES-256-GCM
 persist-key
 persist-tun
 status /tmp/openvpn-status.log
 verb 3
-daemon
 log /tmp/openvpn-censprobe.log
 """
         conf_path = tmpdir / "server.conf"
@@ -100,3 +94,23 @@ log /tmp/openvpn-censprobe.log
             self._config_dir = None
 
         logger.info("OpenVPN responder stopped")
+
+    @property
+    def connection_count(self) -> int:
+        """Dynamically check openvpn-status.log for data transfer."""
+        status_file = Path("/tmp/openvpn-status.log")
+        if not status_file.exists():
+            return 0
+        
+        try:
+            content = status_file.read_text()
+            # In p2p static key mode, there is no "CLIENT LIST". 
+            # We check the bytes received. If > 0, connection happened.
+            for line in content.splitlines():
+                if "TCP/UDP read bytes" in line:
+                    bytes_read = int(line.split(",")[1].strip())
+                    if bytes_read > 0:
+                        return 1
+            return 0
+        except Exception:
+            return 0

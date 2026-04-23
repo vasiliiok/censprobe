@@ -69,6 +69,8 @@ TEST_ID=selectel-spb-001 SESSION_ID=client-home-rt-spb SERVER_HOST=1.2.3.4 \
 
 `SERVER_HOST` — это IP тестируемого сервера (где работает listener). Указывай IP напрямую, не через DNS.
 
+> **Примечание:** Client тестирует 6 протоколов (OpenVPN, WireGuard, AmneziaWG, Shadowsocks-2022, VLESS+Reality, Hysteria 2). AmneziaWG и Hysteria 2 работают с включенными параметрами обфускации (DPI-resistant padding и salamander).
+
 ---
 
 ## Control (Эталонный Baseline)

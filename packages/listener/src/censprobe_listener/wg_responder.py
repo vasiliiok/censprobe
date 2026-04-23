@@ -52,6 +52,7 @@ class WireGuardResponder:
         config = f"""[Interface]
 ListenPort = {self.port}
 PrivateKey = {self.server_private_key}
+Address = 10.200.0.1/24
 
 [Peer]
 PublicKey = {self.client_public_key}
@@ -78,6 +79,10 @@ AllowedIPs = 0.0.0.0/0
                 subprocess.run(
                     ["ip", "link", "set", "up", self.interface],
                     check=True, capture_output=True,
+                )
+                subprocess.run(
+                    ["ip", "addr", "add", "10.200.0.1/24", "dev", self.interface],
+                    check=False, capture_output=True,
                 )
             except subprocess.CalledProcessError as e:
                 raise RuntimeError(
@@ -111,6 +116,20 @@ AllowedIPs = 0.0.0.0/0
 
         logger.info("WireGuard responder stopped")
 
+    @property
+    def connection_count(self) -> int:
+        """Dynamically check wg show for handshakes."""
+        try:
+            out = subprocess.check_output(["wg", "show", self.interface, "latest-handshakes"], text=True)
+            count = 0
+            for line in out.splitlines():
+                parts = line.split()
+                if len(parts) >= 2 and parts[1] != "0":
+                    count += 1
+            return count
+        except Exception:
+            return 0
+
 
 class AmneziaWGResponder:
     """
@@ -127,6 +146,8 @@ class AmneziaWGResponder:
         jc: int = 4,
         jmin: int = 40,
         jmax: int = 70,
+        s1: int = 0,
+        s2: int = 0,
         h1: int = 0,
         h2: int = 0,
         h3: int = 0,
@@ -140,6 +161,8 @@ class AmneziaWGResponder:
         self.jc = jc
         self.jmin = jmin
         self.jmax = jmax
+        self.s1 = s1
+        self.s2 = s2
         self.h1 = h1
         self.h2 = h2
         self.h3 = h3
@@ -156,11 +179,12 @@ class AmneziaWGResponder:
         config = f"""[Interface]
 ListenPort = {self.port}
 PrivateKey = {self.server_private_key}
+Address = 10.201.0.1/24
 Jc = {self.jc}
 Jmin = {self.jmin}
 Jmax = {self.jmax}
-S1 = 0
-S2 = 0
+S1 = {self.s1}
+S2 = {self.s2}
 H1 = {self.h1}
 H2 = {self.h2}
 H3 = {self.h3}
@@ -213,3 +237,17 @@ AllowedIPs = 0.0.0.0/0
             self._tmpdir = None
 
         logger.info("AmneziaWG responder stopped")
+
+    @property
+    def connection_count(self) -> int:
+        """Dynamically check wg show for handshakes."""
+        try:
+            out = subprocess.check_output(["wg", "show", self.interface, "latest-handshakes"], text=True)
+            count = 0
+            for line in out.splitlines():
+                parts = line.split()
+                if len(parts) >= 2 and parts[1] != "0":
+                    count += 1
+            return count
+        except Exception:
+            return 0

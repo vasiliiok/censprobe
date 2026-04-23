@@ -32,14 +32,14 @@ from rich.table import Table
 
 from censprobe_core.git_io import git_pull
 from censprobe_core.models import Verdict
-from censprobe_client.protocol_probes import (
+from censprobe_core.protocol_probes import (
     ProbeResult,
-    jitter,
     probe_hysteria2,
     probe_openvpn,
     probe_shadowsocks,
     probe_vless_reality,
     probe_wireguard,
+    probe_amneziawg,
 )
 
 logging.basicConfig(
@@ -137,7 +137,7 @@ async def _async_main(
     results: dict[str, ProbeResult] = {}
     for i, (name, probe_fn, _creds) in enumerate(protocols):
         if not no_jitter and i > 0:
-            await jitter()
+            await asyncio.sleep(random.uniform(0.5, 3.0))
 
         console.print(f"[dim]Probing {name}...[/dim]")
         try:
@@ -165,20 +165,25 @@ async def _run_wireguard(host: str, creds) -> ProbeResult:
         creds.wg_server_public,
         creds.wg_client_public,
         creds.wg_preshared_key,
+        creds.wg_client_private,
     )
 
 
 async def _run_amneziawg(host: str, creds) -> ProbeResult:
-    return await probe_wireguard(
+    return await probe_amneziawg(
         host, creds.awg_port,
         creds.awg_server_public,
         creds.awg_client_public,
         creds.awg_preshared_key,
+        creds.awg_client_private,
+        creds.awg_jc, creds.awg_jmin, creds.awg_jmax,
+        creds.awg_s1, creds.awg_s2,
+        creds.awg_h1, creds.awg_h2, creds.awg_h3, creds.awg_h4
     )
 
 
 async def _run_shadowsocks(host: str, creds) -> ProbeResult:
-    return await probe_shadowsocks(host, creds.ss_port, creds.ss_password_b64, creds.ss_method)
+    return await probe_shadowsocks(host, creds.ss_port, creds.ss_method, creds.ss_password_b64)
 
 
 async def _run_vless_reality(host: str, creds) -> ProbeResult:

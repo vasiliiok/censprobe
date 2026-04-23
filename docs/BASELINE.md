@@ -14,9 +14,9 @@ Baseline — это эталонные измерения с **чистого** 
 
 ```json
 {
-  "version": "2026-04-21-control-de-01-01",
-  "generated_at": "2026-04-21T10:00:00Z",
-  "validity_until": "2026-04-28T10:00:00Z",
+  "version": "2026-04-23-control-de-01-01",
+  "generated_at": "2026-04-23T10:00:00Z",
+  "validity_until": "2026-04-30T10:00:00Z",
   "runs_count": 5,
   "generated_from": {
     "control_id": "control-de-01",

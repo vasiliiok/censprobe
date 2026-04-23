@@ -212,6 +212,7 @@ async def _start_responders(creds: ProtocolCredentials) -> tuple[dict, dict]:
         ("amneziawg", AmneziaWGResponder(
             creds.awg_server_private, creds.awg_client_public, creds.awg_preshared_key,
             creds.awg_port, creds.awg_jc, creds.awg_jmin, creds.awg_jmax,
+            creds.awg_s1, creds.awg_s2,
             creds.awg_h1, creds.awg_h2, creds.awg_h3, creds.awg_h4,
         )),
         ("shadowsocks", ShadowsocksResponder(creds.ss_password_b64, creds.ss_port, creds.ss_method)),
