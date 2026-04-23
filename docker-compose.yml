@@ -111,6 +111,8 @@ services:
     volumes:
       - ./:/workspace
       - ~/.ssh:/root/.ssh:ro
+    ports:
+      - "8080:8080"
     depends_on:
       postgres:
         condition: service_healthy
@@ -123,6 +125,7 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
       GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s:%(http_port)s/"
       GF_INSTALL_PLUGINS: ""
+      DB_PASSWORD: ${DB_PASSWORD:-censprobe}
     volumes:
       - grafana_data:/var/lib/grafana
       - ./packages/dashboard/grafana/provisioning:/etc/grafana/provisioning:ro
@@ -145,7 +148,7 @@ services:
       dockerfile: packages/reporter/Dockerfile
     environment:
       TEST_ID: ${TEST_ID:?TEST_ID is required}
-      FORMAT: ${FORMAT:-html}
+      WORKSPACE: /workspace
     volumes:
       - ./:/workspace
     working_dir: /workspace

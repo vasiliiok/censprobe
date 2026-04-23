@@ -13,6 +13,7 @@ dependencies = [
     "asyncpg>=0.29",
     "alembic>=1.13",
     "gitpython>=3.1",
+    "pyyaml>=6.0",
 ]
 [tool.hatch.build.targets.wheel]
 packages = ["src/sync_api"]

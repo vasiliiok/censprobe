@@ -1,10 +1,23 @@
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
 [project]
 name = "censprobe-reporter"
 version = "0.1.0"
 requires-python = ">=3.11"
-dependencies = ["censprobe-core", "jinja2>=3.1", "weasyprint>=61"]
+dependencies = [
+    "censprobe-core",
+    "jinja2>=3.1",
+    "weasyprint>=61",
+    "click>=8.1",
+    "rich>=13.7",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+censprobe-report = "reporter.main:main"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/reporter"]
+artifacts = ["templates/*"]
