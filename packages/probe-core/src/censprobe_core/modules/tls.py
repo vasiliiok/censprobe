@@ -30,33 +30,39 @@ from censprobe_core.models import TestResult, Verdict, BlockingMethod
 logger = logging.getLogger(__name__)
 
 _TLS_TIMEOUT = 10.0  # seconds
+_MAX_PARALLEL = 6    # concurrency cap for TLS handshakes
 
 
 async def run_tls_tests(
     targets: list[dict],  # {"domain": ..., "ip": ..., "blocked_sni": ...}
     repeats: int = 2,
 ) -> list[TestResult]:
-    """Run TLS/SNI tests for each target."""
-    results = []
-    for t in targets:
-        domain = t["domain"]
-        ip = t.get("ip")  # if None, we'll resolve it
-        blocked_sni = t.get("blocked_sni", domain)
+    """Run TLS/SNI tests for each target in parallel (bounded)."""
+    sem = asyncio.Semaphore(_MAX_PARALLEL)
 
-        if not ip:
-            ip = await _resolve_ip(domain)
-        if not ip:
-            results.append(TestResult(
-                test=f"tls_{_slug(domain)}_no_ip",
-                category="tls",
-                target=domain,
-                verdict=Verdict.INCONCLUSIVE,
-                evidence={"reason": "could_not_resolve_ip"},
-            ))
-            continue
+    async def _one(t: dict) -> list[TestResult]:
+        async with sem:
+            domain = t["domain"]
+            ip = t.get("ip")
+            blocked_sni = t.get("blocked_sni", domain)
 
-        results.extend(await _test_sni_scenarios(domain, ip, blocked_sni, repeats))
+            if not ip:
+                ip = await _resolve_ip(domain)
+            if not ip:
+                return [TestResult(
+                    test=f"tls_{_slug(domain)}_no_ip",
+                    category="tls",
+                    target=domain,
+                    verdict=Verdict.INCONCLUSIVE,
+                    evidence={"reason": "could_not_resolve_ip"},
+                )]
 
+            return await _test_sni_scenarios(domain, ip, blocked_sni, repeats)
+
+    grouped = await asyncio.gather(*[_one(t) for t in targets])
+    results: list[TestResult] = []
+    for group in grouped:
+        results.extend(group)
     return results
 
 

@@ -46,7 +46,9 @@ PUBLIC_RESOLVERS = [
 
 DOH_RESOLVERS = [
     ("cloudflare", "https://cloudflare-dns.com/dns-query"),
-    ("google", "https://dns.google/dns-query"),
+    # Google's /dns-query endpoint only accepts RFC 8484 wire format.
+    # For the JSON API (application/dns-json), the endpoint is /resolve.
+    ("google", "https://dns.google/resolve"),
     ("mozilla", "https://mozilla.cloudflare-dns.com/dns-query"),
 ]
 

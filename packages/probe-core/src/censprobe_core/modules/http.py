@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 _TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=10.0)
 _MAX_BODY_READ = 512 * 1024  # 512 KB — enough for fingerprinting
+_MAX_PARALLEL = 8            # concurrency cap for HTTP probes
 _WORKSPACE = Path("/workspace")
 
 
@@ -55,16 +56,24 @@ async def run_http_tests(
     """Run HTTP/HTTPS tests for all targets."""
     results = []
 
+    sem = asyncio.Semaphore(_MAX_PARALLEL)
+
     async with httpx.AsyncClient(
         timeout=_TIMEOUT,
         http2=True,
         follow_redirects=True,
         verify=True,
     ) as client:
-        for target in targets:
-            for url in target.get("urls", []):
-                res = await _test_url(url, target, client, comparator, repeats)
-                results.append(res)
+        async def _bounded(url: str, target: dict) -> TestResult:
+            async with sem:
+                return await _test_url(url, target, client, comparator, repeats)
+
+        tasks = [
+            _bounded(url, target)
+            for target in targets
+            for url in target.get("urls", [])
+        ]
+        results = list(await asyncio.gather(*tasks))
 
     return results
 

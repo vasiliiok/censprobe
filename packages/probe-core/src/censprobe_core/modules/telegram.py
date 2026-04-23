@@ -196,15 +196,14 @@ async def _test_dc_port(dc_id: int, ip_ver: str, ip: str, port: int) -> TestResu
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def _test_https_domains(domains: list[str], prefix: str) -> list[TestResult]:
-    """Test HTTPS connectivity to a list of domains."""
-    results = []
+    """Test HTTPS connectivity to a list of domains in parallel."""
     async with httpx.AsyncClient(
         timeout=httpx.Timeout(_TIMEOUT),
         http2=True,
         follow_redirects=True,
         verify=True,
     ) as client:
-        for domain in domains:
+        async def _probe(domain: str) -> TestResult:
             url = f"https://{domain}/"
             test_name = f"{prefix}_{_slug(domain)}"
             try:
@@ -212,32 +211,33 @@ async def _test_https_domains(domains: list[str], prefix: str) -> list[TestResul
                 r = await client.get(url, headers={"User-Agent": _ua_tg()})
                 rtt = (time.monotonic() - t0) * 1000
                 verdict = Verdict.OK if r.status_code < 500 else Verdict.ANOMALY
-                results.append(TestResult(
+                return TestResult(
                     test=test_name,
                     category="telegram",
                     target=url,
                     verdict=verdict,
                     rtt_ms=rtt,
                     evidence={"status": r.status_code},
-                ))
+                )
             except httpx.ConnectTimeout:
-                results.append(TestResult(
+                return TestResult(
                     test=test_name, category="telegram", target=url,
                     verdict=Verdict.BLOCKED, method=BlockingMethod.IP_DROPPED,
                     evidence={"error": "connect_timeout"},
-                ))
+                )
             except httpx.SSLError as e:
-                results.append(TestResult(
+                return TestResult(
                     test=test_name, category="telegram", target=url,
                     verdict=Verdict.BLOCKED, method=BlockingMethod.TLS_HANDSHAKE_FAILURE,
                     evidence={"ssl_error": str(e)},
-                ))
+                )
             except Exception as e:
-                results.append(TestResult(
+                return TestResult(
                     test=test_name, category="telegram", target=url,
                     verdict=Verdict.ERROR, evidence={"error": str(e)},
-                ))
-    return results
+                )
+
+        return list(await asyncio.gather(*[_probe(d) for d in domains]))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -278,11 +278,9 @@ async def _stun_probe(dc_id: int, ip: str, port: int) -> TestResult:
     loop = asyncio.get_running_loop()
     t0 = time.monotonic()
 
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setblocking(False)
     try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.settimeout(3.0)
-        sock.setblocking(False)
-
         await loop.sock_sendto(sock, stun_req, (ip, port))
 
         try:
@@ -291,7 +289,6 @@ async def _stun_probe(dc_id: int, ip: str, port: int) -> TestResult:
                 timeout=3.0,
             )
             rtt = (time.monotonic() - t0) * 1000
-            sock.close()
             # STUN Binding Response type = 0x0101
             is_stun_response = len(data) >= 4 and struct.unpack(">H", data[:2])[0] == 0x0101
             return TestResult(
@@ -301,7 +298,6 @@ async def _stun_probe(dc_id: int, ip: str, port: int) -> TestResult:
                 evidence={"stun_response": is_stun_response, "bytes_received": len(data)},
             )
         except asyncio.TimeoutError:
-            sock.close()
             return TestResult(
                 test=test_name, category="telegram", target=target,
                 verdict=Verdict.BLOCKED, method=BlockingMethod.QUIC_DROPPED,
@@ -313,6 +309,8 @@ async def _stun_probe(dc_id: int, ip: str, port: int) -> TestResult:
             test=test_name, category="telegram", target=target,
             verdict=Verdict.ERROR, evidence={"error": str(e)},
         )
+    finally:
+        sock.close()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
