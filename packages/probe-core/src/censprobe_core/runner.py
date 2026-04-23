@@ -164,25 +164,65 @@ class ProbeRunner:
 
     def _collect_tcp_targets(self) -> list[tuple[str, int]]:
         """Collect (ip, port) pairs for TCP reachability tests."""
-        targets = []
+        targets: list[tuple[str, int]] = []
+        seen: set[tuple[str, int]] = set()
+
         # Telegram DCs
         tg = self._load_targets("telegram")
         for dc in tg.get("api_datacenters", []):
             for port in dc.get("ports", [443]):
                 if ip := dc.get("ipv4"):
-                    targets.append((ip, port))
-        return targets[:20]  # cap to avoid excessive tests
+                    entry = (ip, port)
+                    if entry not in seen:
+                        seen.add(entry)
+                        targets.append(entry)
+
+        # Additional explicit TCP targets from other YAML files
+        for tf in ["news", "social", "messengers"]:
+            data = self._load_targets(tf)
+            for t in data.get("targets", []):
+                for ip_port in t.get("tcp_endpoints", []):
+                    if ":" in str(ip_port):
+                        ip, port_s = str(ip_port).rsplit(":", 1)
+                        try:
+                            entry = (ip, int(port_s))
+                            if entry not in seen:
+                                seen.add(entry)
+                                targets.append(entry)
+                        except ValueError:
+                            pass
+
+        return targets[:30]  # cap to avoid excessive tests
 
     def _collect_tls_targets(self) -> list[dict]:
-        """Collect TLS test targets."""
+        """Collect TLS test targets from all target YAML files."""
         targets = []
-        # Sample of high-priority domains
-        priority_domains = [
-            {"domain": "meduza.io", "blocked_sni": "meduza.io"},
-            {"domain": "instagram.com", "blocked_sni": "instagram.com"},
-            {"domain": "youtube.com", "blocked_sni": "youtube.com"},
+        seen_domains: set[str] = set()
+
+        for tf in ["news", "social", "messengers", "vpn", "neutral"]:
+            data = self._load_targets(tf)
+            for t in data.get("targets", []):
+                domain = t.get("domain")
+                if domain and domain not in seen_domains:
+                    seen_domains.add(domain)
+                    targets.append({
+                        "domain": domain,
+                        "blocked_sni": domain,
+                        "url": t.get("url", f"https://{domain}"),
+                    })
+
+        # Always include a few known-blocked domains even if not in YAMLs
+        priority = [
+            {"domain": "meduza.io", "blocked_sni": "meduza.io", "url": "https://meduza.io"},
+            {"domain": "instagram.com", "blocked_sni": "instagram.com", "url": "https://instagram.com"},
+            {"domain": "youtube.com", "blocked_sni": "youtube.com", "url": "https://youtube.com"},
         ]
-        return priority_domains
+        for p in priority:
+            if p["domain"] not in seen_domains:
+                targets.insert(0, p)
+                seen_domains.add(p["domain"])
+
+        return targets
 
     def _collect_http_targets(self) -> list[dict]:
         """Collect HTTP test targets from all target files."""

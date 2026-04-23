@@ -35,7 +35,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from censprobe_core.git_io import git_add_commit_push, git_pull
-from censprobe_core.models import ListenerReport, ProtocolEvent, ProtocolPhase, ProtocolResult, Verdict
+from censprobe_core.models import ListenerReport, ProtocolResult, Verdict
 from censprobe_listener.credentials import (
     ProtocolCredentials,
     generate_credentials,

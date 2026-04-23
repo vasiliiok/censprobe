@@ -18,6 +18,7 @@ Important: Solo must run BEFORE listener.
 from __future__ import annotations
 
 import asyncio
+import gzip
 import json
 import logging
 import os
@@ -33,7 +34,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
 from censprobe_core.git_io import git_add_commit_push, git_pull
-from censprobe_core.models import ReportMeta, ServerMeta
+from censprobe_core.models import ListenerReport, ReportMeta, ServerMeta
 from censprobe_core.runner import ProbeRunner
 from censprobe_core.scoring import compute_scores
 from censprobe_core.server_meta import detect_server_meta
@@ -115,17 +116,22 @@ async def _async_main(test_id: str, repeats: int, skip_push: bool) -> None:
         results = await runner.run_all(repeats=repeats)
         progress.update(task, description=f"[green]Completed — {len(results)} results")
 
-    # ── Step 4: Compute scores ────────────────────────────────────────────────
-    scores = compute_scores(solo_results=results)
+    # ── Step 4: Load any existing listener reports ───────────────────────────
+    listener_reports = _load_listener_reports(WORKSPACE / "reports" / test_id)
+    if listener_reports:
+        console.print(f"[dim]Found {len(listener_reports)} listener session(s) — incorporating into scores[/dim]")
 
-    # ── Step 5: Print summary ─────────────────────────────────────────────────
+    # ── Step 5: Compute scores ────────────────────────────────────────────────
+    scores = compute_scores(solo_results=results, listener_reports=listener_reports or None)
+
+    # ── Step 6: Print summary ─────────────────────────────────────────────────
     _print_summary(results, scores)
 
-    # ── Step 6: Save report ───────────────────────────────────────────────────
+    # ── Step 7: Save report ───────────────────────────────────────────────────
     report_path = runner.save_report(results, server_meta=server_meta, scores=scores)
     console.print(f"[green]Report saved:[/green] {report_path.name}")
 
-    # ── Step 7: git push ──────────────────────────────────────────────────────
+    # ── Step 8: git push ──────────────────────────────────────────────────────
     if not skip_push:
         console.print("[dim]Pushing to GitHub...[/dim]")
         try:
@@ -196,6 +202,27 @@ def _print_summary(results, scores) -> None:
         console.print("[red]⚠ Throttling detected![/red]")
     if scores.detected_techniques:
         console.print(f"[red]Censorship techniques:[/red] {', '.join(scores.detected_techniques)}")
+
+
+def _load_listener_reports(reports_dir: Path) -> list[ListenerReport]:
+    """
+    Load all server-listener-*.json.gz files from the test_id reports directory.
+    Returns empty list if none exist or directory doesn't exist.
+    """
+    if not reports_dir.exists():
+        return []
+
+    reports: list[ListenerReport] = []
+    for gz_path in sorted(reports_dir.glob("server-listener-*.json.gz")):
+        try:
+            with gzip.open(gz_path, "rb") as f:
+                data = json.loads(f.read())
+            reports.append(ListenerReport.model_validate(data))
+            logger.debug("Loaded listener report: %s", gz_path.name)
+        except Exception as e:
+            logger.warning("Could not load %s: %s", gz_path.name, e)
+
+    return reports
 
 
 if __name__ == "__main__":
