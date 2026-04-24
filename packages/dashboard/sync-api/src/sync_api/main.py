@@ -30,6 +30,12 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from censprobe_core.git_io import _git_lock  # reuse the shared fcntl lock
+from censprobe_core.models import (
+    ListenerReport as CoreListenerReport,
+    TestResult as CoreTestResult,
+)
+from censprobe_core.scoring import compute_scores
 from sync_api.db import (
     ListenerSession,
     ProtocolResult,
@@ -40,6 +46,7 @@ from sync_api.db import (
     init_db,
 )
 from sync_api.parser import (
+    _load_gz,
     is_listener_report,
     is_solo_report,
     parse_listener_report,
@@ -104,13 +111,18 @@ class RefreshResponse(BaseModel):
 
 
 def _git_pull_sync(workspace: Path) -> None:
-    """Run `git pull --rebase` synchronously in a worker thread."""
-    subprocess.run(
-        ["git", "pull", "--rebase"],
-        cwd=workspace,
-        capture_output=True,
-        check=True,
-    )
+    """Run `git pull --rebase` synchronously in a worker thread.
+
+    Held under the process-global fcntl lock so we never race a concurrent
+    solo / listener commit on .git/index.lock.
+    """
+    with _git_lock():
+        subprocess.run(
+            ["git", "pull", "--rebase"],
+            cwd=workspace,
+            capture_output=True,
+            check=True,
+        )
 
 
 def _list_report_files(reports_root: Path) -> list[tuple[str, Path, list[Path]]]:
@@ -201,24 +213,51 @@ async def _do_refresh() -> RefreshResponse:
                 ).all()
             }
 
+            run_touched = False
             for report_file in report_files:
                 fn = report_file.name
                 if fn in imported_results or fn in imported_sessions:
                     continue
 
+                # Wrap each report in a savepoint so that a single bad
+                # file (oversize string, DB constraint violation, ...)
+                # aborts only its own import, not the whole batch. Without
+                # this, any failure poisons the outer transaction and
+                # every subsequent add()/commit() raises
+                # PendingRollbackError.
                 try:
-                    if is_solo_report(fn):
-                        n_r, n_run = await _import_solo_report(session, run, report_file)
-                        new_results += n_r
-                        if n_run:
-                            new_runs += 1
+                    async with session.begin_nested():
+                        if is_solo_report(fn):
+                            n_r, n_run = await _import_solo_report(session, run, report_file)
+                            new_results += n_r
+                            if n_run:
+                                new_runs += 1
+                                run_touched = True
 
-                    elif is_listener_report(fn):
-                        n_s = await _import_listener_report(session, run, report_file)
-                        new_sessions += n_s
+                        elif is_listener_report(fn):
+                            n_s = await _import_listener_report(session, run, report_file)
+                            new_sessions += n_s
+                            if n_s:
+                                run_touched = True
                 except Exception as e:
                     logger.error("Error importing %s: %s", fn, e)
                     errors.append(f"{fn}: {e}")
+
+            # Once we've consumed everything new for this test_id,
+            # recompute scores from raw report files on disk so the
+            # dashboard reflects the latest listener data. Solo's own
+            # scoring ran without any listener signal, leaving protocol
+            # reachability at the neutral 0.5 default.
+            if run_touched:
+                try:
+                    async with session.begin_nested():
+                        loaded = await asyncio.to_thread(
+                            _load_reports_for_scoring, report_files
+                        )
+                        _apply_scores(run, *loaded)
+                except Exception as e:
+                    logger.warning("score recompute failed for %s: %s", test_id, e)
+                    errors.append(f"scores[{test_id}]: {e}")
 
         await session.commit()
 
@@ -229,6 +268,76 @@ async def _do_refresh() -> RefreshResponse:
         new_sessions=new_sessions,
         errors=errors,
     )
+
+
+def _apply_scores(
+    run: TestRun,
+    solo_results: list[CoreTestResult],
+    listener_reports: list[CoreListenerReport],
+) -> None:
+    """Rebuild server scores and write them onto `run`.
+
+    Authoritative scoring lives here rather than in the solo container:
+    solo runs BEFORE listener, so any numbers it bakes into its own
+    report miss the real protocol-reachability signal. We re-blend the
+    latest solo run's raw TestResults with every listener session on
+    disk whenever either side adds a new report.
+    """
+    if not solo_results:
+        return
+    scores = compute_scores(
+        solo_results=solo_results,
+        listener_reports=listener_reports or None,
+    )
+    run.entry_score = scores.entry_score
+    run.exit_score = scores.exit_score
+    run.relay_score = scores.relay_score
+    run.overall_score = scores.overall
+    run.throttling_detected = scores.throttling_detected
+    run.dns_integrity = scores.dns_integrity
+    run.tls_integrity = scores.tls_integrity
+    run.telegram_health = scores.telegram_health
+    run.detected_techniques = (
+        list(scores.detected_techniques) if scores.detected_techniques else None
+    )
+    run.recommended_protocols = (
+        list(scores.recommended_protocols) if scores.recommended_protocols else None
+    )
+
+
+def _load_reports_for_scoring(
+    report_files: list[Path],
+) -> tuple[list[CoreTestResult], list[CoreListenerReport]]:
+    """Load the latest solo report + all listener reports as core pydantic models."""
+    solo_files = sorted(
+        (p for p in report_files if is_solo_report(p.name)),
+        key=lambda p: p.name,
+    )
+    listener_files = sorted(
+        p for p in report_files if is_listener_report(p.name)
+    )
+
+    solo_results: list[CoreTestResult] = []
+    if solo_files:
+        raw = _load_gz(solo_files[-1])
+        if raw:
+            for r in raw.get("results", []):
+                try:
+                    solo_results.append(CoreTestResult.model_validate(r))
+                except Exception:
+                    continue
+
+    listener_reports: list[CoreListenerReport] = []
+    for path in listener_files:
+        raw = _load_gz(path)
+        if not raw:
+            continue
+        try:
+            listener_reports.append(CoreListenerReport.model_validate(raw))
+        except Exception:
+            continue
+
+    return solo_results, listener_reports
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -382,27 +491,18 @@ async def _get_or_create_test_run(
 async def _import_solo_report(
     session: AsyncSession, run: TestRun, path: Path
 ) -> tuple[int, bool]:
-    """Import a solo report. Returns (n_results_added, is_new_run)."""
+    """Import a solo report. Returns (n_results_added, is_new_run).
+
+    Scores are NOT written here anymore — the solo report's meta.scores
+    were computed before any listener data was available, so using them
+    would permanently freeze recommended_protocols and entry_score at
+    their neutral defaults. `_apply_scores` recomputes them below once
+    per touched run.
+    """
     # parse_solo_report does disk I/O + gzip + JSON decoding — block off-loop.
-    meta, results = await asyncio.to_thread(parse_solo_report, path)
+    _meta, results = await asyncio.to_thread(parse_solo_report, path)
     if not results:
         return 0, False
-
-    # Update scores on the run from latest solo
-    scores = meta.get("scores", {})
-    if scores:
-        run.entry_score = scores.get("entry_score")
-        run.exit_score = scores.get("exit_score")
-        run.relay_score = scores.get("relay_score")
-        run.overall_score = scores.get("overall")
-        run.throttling_detected = scores.get("throttling_detected", False)
-        run.dns_integrity = scores.get("dns_integrity")
-        run.tls_integrity = scores.get("tls_integrity")
-        run.telegram_health = scores.get("telegram_health")
-        techniques = scores.get("detected_techniques") or []
-        run.detected_techniques = list(techniques) if techniques else None
-        protocols = scores.get("recommended_protocols") or []
-        run.recommended_protocols = list(protocols) if protocols else None
 
     run.last_synced_at = datetime.now(tz=timezone.utc)
 

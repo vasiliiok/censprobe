@@ -95,15 +95,29 @@ async def _test_url(
 
     for attempt in range(1, repeats + 1):
         try:
-            r = await client.get(url, headers={"User-Agent": _ua_chrome()})
+            # Stream the response so a malicious / misbehaving server
+            # can't feed us gigabytes — httpx.get() buffers the whole body
+            # into RAM, which means a TSPU block-page that streams an ISO
+            # image would OOM the probe process. We cap at _MAX_BODY_READ
+            # (enough for fingerprinting) and discard the rest.
+            async with client.stream(
+                "GET", url, headers={"User-Agent": _ua_chrome()}
+            ) as r:
+                buf = bytearray()
+                async for chunk in r.aiter_bytes():
+                    remaining = _MAX_BODY_READ - len(buf)
+                    if remaining <= 0:
+                        break
+                    buf.extend(chunk[:remaining])
+                body = bytes(buf)
+                body_length = len(body)
+                status = r.status_code
+                final_url = str(r.url)
+                content_type = r.headers.get("content-type", "")
 
-            body = r.content[:_MAX_BODY_READ]
-            body_length = len(body)
-            status = r.status_code
-
-            tls_ok = url.startswith("https://") and r.status_code < 600
+            tls_ok = url.startswith("https://") and status < 600
             is_blockpage = _is_blockpage(body, status)
-            cert_sha256_list = await _extract_cert_sha256(r, url)
+            cert_sha256_list = await _extract_cert_sha256(final_url, url)
             stable_frags = _extract_stable_fragments(body, target.get("stable_selectors", []))
 
             verdict, method = comparator.compare_http(url, status, body_length, tls_ok, is_blockpage)
@@ -122,8 +136,8 @@ async def _test_url(
                     "is_blockpage": is_blockpage,
                     "cert_chain_sha256": cert_sha256_list,
                     "stable_frags_sha256": stable_frags,
-                    "final_url": str(r.url),
-                    "content_type": r.headers.get("content-type", ""),
+                    "final_url": final_url,
+                    "content_type": content_type,
                 },
                 confidence=0.9,
             )
@@ -188,7 +202,7 @@ def _is_blockpage(body: bytes, status: int) -> bool:
     return False
 
 
-async def _extract_cert_sha256(response: httpx.Response, url: str) -> list[str]:
+async def _extract_cert_sha256(response_url: str, url: str) -> list[str]:
     """
     Extract leaf-cert SHA-256 for a response's TLS endpoint.
 
@@ -201,7 +215,7 @@ async def _extract_cert_sha256(response: httpx.Response, url: str) -> list[str]:
     Returns:
         [hex_sha256] on success, or [] on non-HTTPS / network failure.
     """
-    parsed = urlparse(str(response.url) or url)
+    parsed = urlparse(response_url or url)
     if parsed.scheme != "https" or not parsed.hostname:
         return []
 
@@ -215,6 +229,14 @@ async def _extract_cert_sha256(response: httpx.Response, url: str) -> list[str]:
         # here; we are hashing the leaf for baseline comparison.
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
+        # Advertise ALPN so CDNs/WAFs that reset bare-TLS connections
+        # (Cloudflare, Akamai) still complete the handshake and hand us a
+        # cert. Without this the cert-fingerprint check silently becomes
+        # a blind spot on modern endpoints.
+        try:
+            ctx.set_alpn_protocols(["h2", "http/1.1"])
+        except (NotImplementedError, ssl.SSLError):
+            pass
         try:
             with socket.create_connection((host, port), timeout=5.0) as sock:
                 with ctx.wrap_socket(sock, server_hostname=host) as tls_sock:

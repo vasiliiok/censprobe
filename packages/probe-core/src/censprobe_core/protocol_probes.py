@@ -105,28 +105,52 @@ _HS_FAILURE_TOKENS = (
 )
 
 
-async def _read_proc_output(proc: asyncio.subprocess.Process, max_bytes: int = 32768) -> str:
-    """Drain whatever is currently buffered on proc.stdout without blocking.
+async def _start_log_drain(
+    proc: asyncio.subprocess.Process,
+    buf: bytearray,
+    max_bytes: int = 65536,
+) -> Optional[asyncio.Task]:
+    """Drain proc.stdout continuously so the child never blocks on a full pipe.
 
-    The tunnel processes stay alive through proxy_echo; we want to peek
-    at what they've logged so far to decide if an upstream handshake
-    really succeeded. Using a very short wait_for keeps us from hanging
-    if the process is still producing output.
+    Linux pipes are ~64 KiB. If the tunnel binary (sing-box / xray /
+    hysteria) logs more than that while proxy_echo is still running and
+    nothing is reading, the child's next write() stalls and the whole
+    tunnel freezes — proxy_echo then times out and we wrongly report
+    "blocked". The drain task reads continuously into an in-memory buffer
+    (bounded so a chatty binary doesn't eat RAM); after proxy_echo
+    returns we decode the buffer for handshake-success classification.
     """
     if proc.stdout is None:
-        return ""
-    buf = bytearray()
+        return None
+
+    async def _drain() -> None:
+        assert proc.stdout is not None
+        try:
+            while True:
+                chunk = await proc.stdout.read(4096)
+                if not chunk:
+                    return
+                remaining = max_bytes - len(buf)
+                if remaining > 0:
+                    buf.extend(chunk[:remaining])
+                # Once the buffer is full, keep reading (and discarding) so
+                # the producer never blocks on a full pipe.
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            return
+
+    return asyncio.create_task(_drain())
+
+
+async def _stop_log_drain(task: Optional[asyncio.Task]) -> None:
+    if task is None or task.done():
+        return
+    task.cancel()
     try:
-        while len(buf) < max_bytes:
-            chunk = await asyncio.wait_for(proc.stdout.read(4096), timeout=0.1)
-            if not chunk:
-                break
-            buf.extend(chunk)
-    except asyncio.TimeoutError:
+        await task
+    except (asyncio.CancelledError, Exception):
         pass
-    except Exception:
-        pass
-    return bytes(buf).decode("utf-8", errors="replace")
 
 
 def _classify_proxy_outcome(
@@ -287,10 +311,18 @@ verb 1
 
             result.handshake_ok = hs_ok
             if hs_ok:
-                result.verdict = Verdict.HANDSHAKE_ONLY
-                if await ping_echo("10.200.0.1"):
-                    result.data_ok = True
-                    result.verdict = Verdict.OK
+                # Once handshake is done, openvpn keeps logging. Drain stdout
+                # in the background so verb-1 status pings don't fill the
+                # pipe and stall the tunnel during ping_echo.
+                drain_buf = bytearray()
+                drain_task = await _start_log_drain(proc, drain_buf)
+                try:
+                    result.verdict = Verdict.HANDSHAKE_ONLY
+                    if await ping_echo("10.200.0.1"):
+                        result.data_ok = True
+                        result.verdict = Verdict.OK
+                finally:
+                    await _stop_log_drain(drain_task)
         finally:
             await _graceful_terminate(proc)
 
@@ -547,15 +579,21 @@ socks5:
             stderr=asyncio.subprocess.STDOUT,
         )
 
+        log_buf = bytearray()
+        drain_task = await _start_log_drain(proc, log_buf)
         try:
             await asyncio.sleep(1.0)
             if proc.returncode is not None:
-                out = await proc.stdout.read()
-                result.error = f"hysteria failed to start: {out.decode(errors='replace')}"
+                # Wait for drain to finish capturing early startup output.
+                await _stop_log_drain(drain_task)
+                result.error = (
+                    f"hysteria failed to start: "
+                    f"{bytes(log_buf).decode(errors='replace')}"
+                )
                 return result
 
             status, rtt = await proxy_echo(local_port, ECHO_PORTS["hysteria2"], "socks5h")
-            log_text = await _read_proc_output(proc)
+            log_text = bytes(log_buf).decode("utf-8", errors="replace")
             hs_ok, is_hs_only = _classify_proxy_outcome(status, log_text)
             if status == "ok":
                 result.handshake_ok = True
@@ -569,6 +607,7 @@ socks5:
                 result.handshake_ok = hs_ok
                 result.verdict = Verdict.BLOCKED
         finally:
+            await _stop_log_drain(drain_task)
             await _graceful_terminate(proc)
 
     return result
@@ -598,15 +637,20 @@ async def _tunnel_via_singbox_or_xray(
             stderr=asyncio.subprocess.STDOUT,
         )
 
+        log_buf = bytearray()
+        drain_task = await _start_log_drain(proc, log_buf)
         try:
             await asyncio.sleep(1.0)
             if proc.returncode is not None:
-                out = await proc.stdout.read()
-                result.error = f"{cmd[0]} failed to start: {out.decode(errors='replace')}"
+                await _stop_log_drain(drain_task)
+                result.error = (
+                    f"{cmd[0]} failed to start: "
+                    f"{bytes(log_buf).decode(errors='replace')}"
+                )
                 return result
 
             status, rtt = await proxy_echo(local_port, ECHO_PORTS[proto_label], "socks5h")
-            log_text = await _read_proc_output(proc)
+            log_text = bytes(log_buf).decode("utf-8", errors="replace")
             hs_ok, is_hs_only = _classify_proxy_outcome(status, log_text)
             if status == "ok":
                 result.handshake_ok = True
@@ -620,6 +664,7 @@ async def _tunnel_via_singbox_or_xray(
                 result.handshake_ok = hs_ok
                 result.verdict = Verdict.BLOCKED
         finally:
+            await _stop_log_drain(drain_task)
             await _graceful_terminate(proc)
 
     return result

@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import subprocess
 import tempfile
 from pathlib import Path
 
@@ -38,7 +37,7 @@ class VlessRealityResponder:
         self.server_name = server_name
         self.port = port
         self.echo_port = echo_port or ECHO_PORTS["vless_reality"]
-        self._proc: subprocess.Popen | None = None
+        self._proc: asyncio.subprocess.Process | None = None
         self._tmpdir: tempfile.TemporaryDirectory | None = None
         self._log_task: asyncio.Task | None = None
         self.connection_count = 0
@@ -109,31 +108,37 @@ class VlessRealityResponder:
         conf_path = tmpdir / "config.json"
         conf_path.write_text(json.dumps(config, indent=2))
 
-        self._proc = subprocess.Popen(
-            ["xray", "run", "-c", str(conf_path)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
+        self._proc = await asyncio.create_subprocess_exec(
+            "xray", "run", "-c", str(conf_path),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
         )
         await asyncio.sleep(1.0)
-        if self._proc.poll() is not None:
-            out = self._proc.stdout.read() if self._proc.stdout else ""
-            raise RuntimeError(f"xray failed to start: {out}")
+        if self._proc.returncode is not None:
+            out = b""
+            if self._proc.stdout is not None:
+                try:
+                    out = await self._proc.stdout.read()
+                except Exception:
+                    pass
+            raise RuntimeError(
+                f"xray failed to start: {out.decode(errors='replace')}"
+            )
 
         self._log_task = asyncio.create_task(self._monitor_output())
         logger.info("VLESS+Reality responder started on TCP/%d (echo: 127.0.0.1:%d)",
                     self.port, self.echo_port)
 
     async def _monitor_output(self) -> None:
-        if not self._proc or not self._proc.stdout:
+        # Native async readline — see ss_responder for rationale.
+        if self._proc is None or self._proc.stdout is None:
             return
-        loop = asyncio.get_running_loop()
         try:
             while True:
-                line = await loop.run_in_executor(None, self._proc.stdout.readline)
-                if not line:
+                line_bytes = await self._proc.stdout.readline()
+                if not line_bytes:
                     break
-                line = line.strip()
+                line = line_bytes.decode(errors="replace").strip()
                 if line:
                     logger.debug("[xray] %s", line)
                     if "accepted" in line.lower():
@@ -152,10 +157,16 @@ class VlessRealityResponder:
 
         if self._proc:
             try:
-                self._proc.terminate()
-                await asyncio.sleep(0.5)
-                if self._proc.poll() is None:
-                    self._proc.kill()
+                if self._proc.returncode is None:
+                    self._proc.terminate()
+                    try:
+                        await asyncio.wait_for(self._proc.wait(), timeout=0.5)
+                    except asyncio.TimeoutError:
+                        self._proc.kill()
+                        try:
+                            await self._proc.wait()
+                        except Exception:
+                            pass
             except Exception as e:
                 logger.warning("xray stop error: %s", e)
             self._proc = None

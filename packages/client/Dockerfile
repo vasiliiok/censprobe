@@ -67,5 +67,7 @@ RUN git config --global user.email "starvasyaa@gmail.com" && \
     git config --global pull.rebase true && \
     git config --global --add safe.directory '*' && \
     mkdir -p /root/.ssh && \
-    ssh-keyscan github.com >> /root/.ssh/known_hosts 2>/dev/null
+    ssh-keyscan github.com >> /root/.ssh/known_hosts 2>/dev/null && \
+    ssh-keyscan github.com > /tmp/censprobe_known_hosts 2>/dev/null && \
+    chmod 0644 /tmp/censprobe_known_hosts
 ENTRYPOINT ["python", "-m", "censprobe_client.main"]

@@ -119,8 +119,12 @@ services:
     volumes:
       - ./:/workspace
       - ~/.ssh:/root/.ssh:ro
+    # Bind the port to loopback only. Grafana reaches us over the internal
+    # Docker network (service name "sync-api"), so we don't need to expose
+    # an unauthenticated POST /refresh endpoint (which triggers a heavy
+    # git pull) to the public internet.
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     depends_on:
       postgres:
         condition: service_healthy

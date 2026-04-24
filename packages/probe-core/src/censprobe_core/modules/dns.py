@@ -304,7 +304,9 @@ async def _ip_to_asn(ip: str) -> Optional[str]:
     global _ASN_BACKOFF_UNTIL
     now = _time.monotonic()
     if now < _ASN_BACKOFF_UNTIL:
-        _ASN_CACHE[ip] = None
+        # During the cool-down we return None transiently but do NOT cache
+        # it: once the backoff window ends we want the next probe to try
+        # ip-api again, not be stuck on a permanent None forever.
         return None
 
     try:
@@ -313,9 +315,9 @@ async def _ip_to_asn(ip: str) -> Optional[str]:
             if r.status_code == 429:
                 # ip-api returns plaintext 429 with a Retry-After-ish hint;
                 # be conservative and pause for 90s so we don't melt the
-                # whole suite.
+                # whole suite. Don't poison this IP in the cache — once
+                # the backoff expires we want to retry it.
                 _ASN_BACKOFF_UNTIL = now + 90.0
-                _ASN_CACHE[ip] = None
                 return None
             if r.status_code == 200:
                 data = r.json()
