@@ -1,0 +1,85 @@
+_note: One-time test credentials. Do not use for production VPN.
+openvpn:
+  port: 1194
+  protocol: udp
+  psk_pem: '#
+
+    # 2048 bit OpenVPN static key
+
+    #
+
+    -----BEGIN OpenVPN Static key V1-----
+
+    2a0a63a8e66d5325bf190fc154c6d275
+
+    ff79109253bc2bf25cd09ac60025e5d0
+
+    5d316b846d1ca85cecb8c129c6abc3c2
+
+    9f286f7380c411f75832fe9d53a120b2
+
+    aea16bc8505540632250339c1ce80179
+
+    693ee15dae5da63b8fb5fc699fe26da6
+
+    61c885fdbe8a8df5d47f0980d3bc2a41
+
+    79f8e70f4896bb373c45d0cc5f7a873b
+
+    329f972c52726bd740865d1a31e518f9
+
+    8ab6c308688ac3677a09ba29d0024f97
+
+    f2b7868e04f5e37f07db449b689a491d
+
+    52f43b4283dae3e2e9de42e3fd2c170f
+
+    6cec3c86c7e466bc6c59e7995bd0c0fd
+
+    76293f8fb163b0182ecf52865b67f528
+
+    eb8b313198c87f2b1b0aa5138d960314
+
+    7fd0d4e794cc63abb2c219ee65f1901d
+
+    -----END OpenVPN Static key V1-----
+
+    '
+wireguard:
+  port: 51820
+  server_private_key: 2Fcnro3hcx5HhtSYDGr5a8GR61LE2dPSJss6h1Y8GUs=
+  server_public_key: QO1+E62d8M9RC87KGO6k3VNZOhggPsNao2j005naXnA=
+  client_private_key: 2IZlq+6S+/qHA0CrjBiXi9JIVRg38FfRPSIXroYyqXo=
+  client_public_key: Oyb43wguxrzqPxgzhhjWpEKxHiR7nTK9E9kD54j7Fk8=
+  preshared_key: vyACkCYmCzVXdhKyQEDsYxYP+4rUQ0450c+swe/NqyU=
+amneziawg:
+  port: 51821
+  server_private_key: mIe4jIg+U5iQTvmWuRS0m7uu7KKjxLFJK6LnsVrxQVI=
+  server_public_key: c/UY/RY9bB2nsVAbGVVtD/J388d6oGWmE0UL9ni3TBI=
+  client_private_key: QL8yPjNHHG9Kc4kyHnN9AYbImzcPjwLR44xU3z1u4VM=
+  client_public_key: ngRcpVUjPDVThdAHDyf69bKzUconL9aaq0usZ/E7MSs=
+  preshared_key: sv1yg6yIkLVufVfAQE7XsG8/S29RZuzSDJXGkVTUE3E=
+  jc: 5
+  jmin: 54
+  jmax: 88
+  s1: 140
+  s2: 35
+  h1: 647264202
+  h2: 1702749288
+  h3: 3323340335
+  h4: 2143766217
+shadowsocks:
+  port: 8388
+  method: 2022-blake3-aes-256-gcm
+  password_b64: VpLbH4CrUxnRVXxtgaa+/tRA9GcjIx0gCZAUTs20Sj8=
+vless_reality:
+  port: 443
+  uuid: 9f637e2f-2b5a-4bb5-badf-39177bf0a4b5
+  private_key: 8BzSEXWrae8t4cX78AIahpe85kt92nzGGTXj8z3B5WA
+  public_key: GyF7HrvpaoLVsKvTjYgRe_8UitiR9CrYOBaEvUfnCzc
+  short_id: 8520a583
+  server_name: apimaps.yandex.ru
+hysteria2:
+  port: 443
+  auth: zVWooxiX4NPSVp2SsycstgrRBQn8SW29
+  obfs_password: jRScF1MMU8e22UR-rbAeccHlgRM
