@@ -1,0 +1,1468 @@
+{
+  "version": "2026-04-24-control-control-de-01-01",
+  "generated_at": "2026-04-24T22:06:12.793403Z",
+  "generated_from": {
+    "control_id": "control-de-01",
+    "asn": "AS20473",
+    "country": "DE",
+    "city": "Frankfurt am Main",
+    "ipv6_available": false
+  },
+  "probe_core_version": "0.3.0",
+  "targets_version": "2026-04-24-d1dafe9",
+  "validity_until": "2026-05-01T22:06:12.793403Z",
+  "runs_count": 5,
+  "dns": {
+    "bbc.com": {
+      "a_records_asn": [
+        "AS54113"
+      ],
+      "aaaa_records_asn": [],
+      "observed_ips_v4": [
+        "151.101.0.81",
+        "151.101.128.81",
+        "151.101.192.81",
+        "151.101.64.81"
+      ],
+      "ttl_range": [
+        94,
+        300
+      ]
+    },
+    "bellingcat.com": {
+      "a_records_asn": [
+        "AS13335"
+      ],
+      "aaaa_records_asn": [],
+      "observed_ips_v4": [
+        "104.20.30.192",
+        "172.66.172.84"
+      ],
+      "ttl_range": [
+        93,
+        300
+      ]
+    },
+    "cloudflare.com": {
+      "a_records_asn": [
+        "AS13335"
+      ],
+      "aaaa_records_asn": [],
+      "observed_ips_v4": [
+        "104.16.132.229",
+        "104.16.133.229"
+      ],
+      "ttl_range": [
+        15,
+        269
+      ]
+    },
+    "currenttime.tv": {
+      "a_records_asn": [
+        "AS20940"
+      ],
+      "aaaa_records_asn": [],
+      "observed_ips_v4": [
+        "104.126.37.154",
+        "104.126.37.168",
+        "184.86.103.214",
+        "184.86.103.219",
+        "23.36.162.204",
+        "23.36.162.217"
+      ],
+      "ttl_range": [
+        20,
+        30
+      ]
+    },
+    "discord.com": {
+      "a_records_asn": [
+        "AS13335"
+      ],
+      "aaaa_records_asn": [],
+      "observed_ips_v4": [
+        "162.159.128.233",
+        "162.159.135.232",
+        "162.159.136.232",
+        "162.159.137.232",
+        "162.159.138.232"
+      ],
+      "ttl_range": [
+        30,
+        279
+      ]
+    },
+    "dw.com": {
+      "a_records_asn": [
+        "AS200777"
+      ],
+      "aaaa_records_asn": [],
+      "observed_ips_v4": [
+        "194.55.26.46",
+        "194.55.30.46"
+      ],
+      "ttl_range": [
+        50,
+        300
+      ]
+    },
+    "facebook.com": {
+      "a_records_asn": [
+        "AS32934"
+      ],
+      "aaaa_records_asn": [],
+      "observed_ips_v4": [
+        "157.240.0.35",
+        "57.144.244.1",
+        "57.144.248.1",
+        "57.144.68.1"
+      ],
+      "ttl_range": [
+        4,
+        60
+      ]
+    },
+    "google.com": {
+      "a_records_asn": [
+        "AS15169"
+      ],
+      "aaaa_records_asn": [],
+      "observed_ips_v4": [
+        "142.250.154.100",
+        "142.250.154.101",
+        "142.250.154.102",
+        "142.250.154.113",
+        "142.250.154.138",
+        "142.250.154.139",
+        "142.251.110.100",
+        "142.251.110.101",
+        "142.251.110.102",
+        "142.251.110.113",
+        "142.251.110.138",
+        "142.251.110.139",
+        "142.251.127.100",
+        "142.251.127.101",
+        "142.251.127.102",
+        "142.251.127.113",
+        "142.251.127.138",
+        "142.251.127.139",
+        "142.251.13.100",
+        "142.251.13.101",
+        "142.251.13.102",
+        "142.251.13.113",
+        "142.251.13.138",
+        "142.251.13.139",
+        "142.251.14.100",
+        "142.251.14.101",
+        "142.251.14.102",
+        "142.251.14.113",
+        "142.251.14.138",
+        "142.251.14.139",
+        "142.251.20.100",
+        "142.251.20.101",
+        "142.251.20.102",
+        "142.251.20.113",
+        "142.251.20.138",
+        "142.251.20.139",
+        "142.251.98.100",
+        "142.251.98.101",
+        "142.251.98.102",
+        "142.251.98.113",
+        "142.251.98.138",
+        "142.251.98.139",
+        "192.178.183.100",
+        "192.178.183.101",
+        "192.178.183.102",
+        "192.178.183.113",
+        "192.178.183.138",
+        "192.178.183.139",
+        "216.58.207.14"
+      ],
+      "ttl_range": [
+        37,
+        284
+      ]
+    },
+    "inopressa.ru": {
+      "a_records_asn": [
+        "AS8560"
+      ],
+      "aaaa_records_asn": [],
+      "observed_ips_v4": [
+        "212.227.190.190"
+      ],
+      "ttl_range": [
+        3393,
+        3600
+      ]
+    },
+    "instagram.com": {
+      "a_records_asn": [
+        "AS32934"
+      ],
+      "aaaa_records_asn": [],
+      "observed_ips_v4": [
+        "157.240.0.174",
+        "157.240.253.174",
+        "57.144.244.34",
+        "57.144.248.34",
+        "57.144.68.34"
+      ],
+      "ttl_range": [
+        8,
+        55
+      ]
+    },
+    "linkedin.com": {
+      "a_records_asn": [
+        "AS8075"
+      ],
+      "aaaa_records_asn": [],
+      "observed_ips_v4": [
+        "150.171.22.12"
+      ],
+      "ttl_range": [
+        33,
+        281
+      ]
+    },
+    "mediazona.ca": {
+      "a_records_asn": [
+        "AS13335"
+      ],
+      "aaaa_records_asn": [],
+      "observed_ips_v4": [
+        "104.21.64.6",
+        "172.67.173.185"
+      ],
+      "ttl_range": [
+        94,
+        300
+      ]
+    },
+    "meduza.io": {
+      "a_records_asn": [
+        "AS13335"
+      ],
+      "aaaa_records_asn": [],
+      "observed_ips_v4": [
+        "104.18.0.79",
+        "104.18.1.79"
+      ],
+      "ttl_range": [
+        158,
+        300
+      ]
+    },
+    "novayagazeta.eu": {
+      "a_records_asn": [
+        "AS13335"
+      ],
+      "aaaa_records_asn": [],
+      "observed_ips_v4": [
+        "104.20.36.103",
+        "172.66.151.241"
+      ],
+      "ttl_range": [
+        107,
+        300
+      ]
+    },
+    "rferl.org": {
+      "a_records_asn": [
+        "AS20940"
+      ],
+      "aaaa_records_asn": [],
+      "observed_ips_v4": [
+        "104.126.37.137",
+        "104.126.37.176",
+        "184.86.103.200",
+        "184.86.103.214"
+      ],
+      "ttl_range": [
+        5,
+        30
+      ]
+    },
+    "signal.org": {
+      "a_records_asn": [
+        "AS13335"
+      ],
+      "aaaa_records_asn": [],
+      "observed_ips_v4": [
+        "104.18.10.47",
+        "104.18.11.47"
+      ],
+      "ttl_range": [
+        94,
+        300
+      ]
+    },
+    "tiktok.com": {
+      "a_records_asn": [
+        "AS20940"
+      ],
+      "aaaa_records_asn": [],
+      "observed_ips_v4": [
+        "104.126.37.123",
+        "104.126.37.128",
+        "104.126.37.129",
+        "104.126.37.130",
+        "104.126.37.131",
+        "104.126.37.136",
+        "104.126.37.137",
+        "104.126.37.138",
+        "104.126.37.139",
+        "104.126.37.144",
+        "104.126.37.145",
+        "104.126.37.146",
+        "104.126.37.147",
+        "104.126.37.153",
+        "104.126.37.163",
+        "104.126.37.169",
+        "104.126.37.171",
+        "104.126.37.179",
+        "104.126.37.184",
+        "104.126.37.185",
+        "184.86.103.144",
+        "184.86.103.159",
+        "184.86.103.198",
+        "184.86.103.199",
+        "184.86.103.201",
+        "184.86.103.203",
+        "184.86.103.207",
+        "184.86.103.210",
+        "184.86.103.212",
+        "184.86.103.215",
+        "184.86.103.216",
+        "184.86.103.217",
+        "184.86.103.220",
+        "184.86.103.221",
+        "184.86.103.223",
+        "2.18.64.10",
+        "2.18.64.21",
+        "23.36.162.199",
+        "23.36.162.207",
+        "23.36.162.209",
+        "23.36.162.213",
+        "23.36.162.214",
+        "23.36.162.215",
+        "23.36.162.219",
+        "23.36.162.221"
+      ],
+      "ttl_range": [
+        20,
+        20
+      ]
+    },
+    "tvrain.ru": {
+      "a_records_asn": [
+        "AS13335"
+      ],
+      "aaaa_records_asn": [],
+      "observed_ips_v4": [
+        "109.234.211.253",
+        "109.234.211.254"
+      ],
+      "ttl_range": [
+        104,
+        300
+      ]
+    },
+    "twitter.com": {
+      "a_records_asn": [
+        "AS13335"
+      ],
+      "aaaa_records_asn": [],
+      "observed_ips_v4": [
+        "151.101.66.146",
+        "162.159.140.229",
+        "172.66.0.227"
+      ],
+      "ttl_range": [
+        30,
+        207
+      ]
+    },
+    "viber.com": {
+      "a_records_asn": [
+        "AS14618"
+      ],
+      "aaaa_records_asn": [],
+      "observed_ips_v4": [
+        "44.207.86.245",
+        "52.205.155.161"
+      ],
+      "ttl_range": [
+        9,
+        60
+      ]
+    },
+    "vk.com": {
+      "a_records_asn": [
+        "AS47541"
+      ],
+      "aaaa_records_asn": [],
+      "observed_ips_v4": [
+        "87.240.129.133",
+        "87.240.132.67",
+        "87.240.132.72",
+        "87.240.132.78",
+        "87.240.137.164",
+        "93.186.225.194"
+      ],
+      "ttl_range": [
+        194,
+        641
+      ]
+    },
+    "web.telegram.org": {
+      "a_records_asn": [
+        "AS62041"
+      ],
+      "aaaa_records_asn": [],
+      "observed_ips_v4": [
+        "149.154.167.99"
+      ],
+      "ttl_range": [
+        5,
+        265
+      ]
+    },
+    "web.whatsapp.com": {
+      "a_records_asn": [
+        "AS32934"
+      ],
+      "aaaa_records_asn": [],
+      "observed_ips_v4": [
+        "157.240.0.60",
+        "157.240.253.60",
+        "157.240.30.54",
+        "163.70.128.60",
+        "57.144.245.32",
+        "57.144.69.32"
+      ],
+      "ttl_range": [
+        3,
+        42
+      ]
+    },
+    "whatsapp.com": {
+      "a_records_asn": [
+        "AS32934"
+      ],
+      "aaaa_records_asn": [],
+      "observed_ips_v4": [
+        "157.240.0.60",
+        "157.240.200.60",
+        "157.240.253.60",
+        "57.144.245.32",
+        "57.144.249.32",
+        "57.144.69.32"
+      ],
+      "ttl_range": [
+        8,
+        60
+      ]
+    },
+    "wikipedia.org": {
+      "a_records_asn": [
+        "AS14907"
+      ],
+      "aaaa_records_asn": [],
+      "observed_ips_v4": [
+        "185.15.59.224"
+      ],
+      "ttl_range": [
+        13,
+        180
+      ]
+    },
+    "yandex.ru": {
+      "a_records_asn": [
+        "AS13238"
+      ],
+      "aaaa_records_asn": [],
+      "observed_ips_v4": [
+        "5.255.255.77",
+        "77.88.44.55",
+        "77.88.55.88"
+      ],
+      "ttl_range": [
+        20,
+        238
+      ]
+    },
+    "youtube.com": {
+      "a_records_asn": [
+        "AS15169"
+      ],
+      "aaaa_records_asn": [],
+      "observed_ips_v4": [
+        "142.250.154.136",
+        "142.250.154.190",
+        "142.250.154.91",
+        "142.250.154.93",
+        "142.250.181.238",
+        "142.251.110.136",
+        "142.251.110.190",
+        "142.251.110.91",
+        "142.251.110.93",
+        "142.251.14.136",
+        "142.251.14.190",
+        "142.251.14.91",
+        "142.251.14.93",
+        "142.251.98.136",
+        "142.251.98.190",
+        "142.251.98.91",
+        "142.251.98.93"
+      ],
+      "ttl_range": [
+        6,
+        300
+      ]
+    }
+  },
+  "tls": {
+    "meduza.io": {
+      "cert_chain_sha256": [
+        "9880a9283a6bab3c054577f3ff9f6e4031baada22dda19d4dacdbfa27dfe19fa"
+      ],
+      "cert_subject_cn": "meduza.io",
+      "cert_issuer_cn": "E7",
+      "ja4_server": null,
+      "alpn": []
+    },
+    "cloudflare.com": {
+      "cert_chain_sha256": [
+        "da9fca34e821865e3066db0f029492013b6517f14aaf5a693abde9a48a174c19"
+      ],
+      "cert_subject_cn": null,
+      "cert_issuer_cn": null,
+      "ja4_server": null,
+      "alpn": []
+    },
+    "novayagazeta.eu": {
+      "cert_chain_sha256": [
+        "73ccb9d8c24a4191724ff208ec3fa506ad86f79fa4335b6a9ade571ecb83938f"
+      ],
+      "cert_subject_cn": "novayagazeta.eu",
+      "cert_issuer_cn": "WE1",
+      "ja4_server": null,
+      "alpn": []
+    },
+    "mediazona.ca": {
+      "cert_chain_sha256": [
+        "556bfb9642b9782bd57675254c11b730a57dd29bb8851238c8250c577a15a189"
+      ],
+      "cert_subject_cn": "mediazona.ca",
+      "cert_issuer_cn": "WE1",
+      "ja4_server": null,
+      "alpn": []
+    },
+    "tvrain.ru": {
+      "cert_chain_sha256": [
+        "e38af3992f1582472fea6cefaa844c89879004b6b4f3a7ba4a10efde151043a8"
+      ],
+      "cert_subject_cn": "tvrain.ru",
+      "cert_issuer_cn": "WE1",
+      "ja4_server": null,
+      "alpn": []
+    },
+    "bbc.com": {
+      "cert_chain_sha256": [
+        "87a4d12db9b57d6864b54d2efdcc66cdc17a051713948cf40bef42a0865b59cb"
+      ],
+      "cert_subject_cn": "www.bbc.com",
+      "cert_issuer_cn": "GlobalSign RSA OV SSL CA 2018",
+      "ja4_server": null,
+      "alpn": []
+    },
+    "dw.com": {
+      "cert_chain_sha256": [
+        "dfbdd63097056f470140b4c0ab8623b4c6deb58679b835dc4b7f4c5eb90c8fd0"
+      ],
+      "cert_subject_cn": "*.dw.com",
+      "cert_issuer_cn": "Thawte TLS RSA CA G1",
+      "ja4_server": null,
+      "alpn": []
+    },
+    "rferl.org": {
+      "cert_chain_sha256": [
+        "b8fa74f185319ed9e5076f86bed444295468c72242b05db124966acb505b084d"
+      ],
+      "cert_subject_cn": "rfe-prod-4.cert.pangeadigital.io",
+      "cert_issuer_cn": "R12",
+      "ja4_server": null,
+      "alpn": []
+    },
+    "currenttime.tv": {
+      "cert_chain_sha256": [
+        "ea7e868a2d92947c58bbc04bc18444dfae0f32db0e5ed4e77df9810dd16048db"
+      ],
+      "cert_subject_cn": "rfe-prod-9.cert.pangeadigital.io",
+      "cert_issuer_cn": "R13",
+      "ja4_server": null,
+      "alpn": []
+    },
+    "inopressa.ru": {
+      "cert_chain_sha256": [
+        "fb2b8fb91a7970db1f4a81073a6335ad219c9dae6b30b1baa0e7111d3ff40da3"
+      ],
+      "cert_subject_cn": "*.inopressa.ru",
+      "cert_issuer_cn": "E7",
+      "ja4_server": null,
+      "alpn": []
+    },
+    "bellingcat.com": {
+      "cert_chain_sha256": [
+        "119a066b552c638db7fd9ecb1e16d1963fd7e068679a6e2a388d5df2d1a1aa34"
+      ],
+      "cert_subject_cn": "bellingcat.com",
+      "cert_issuer_cn": "WE1",
+      "ja4_server": null,
+      "alpn": []
+    },
+    "youtube.com": {
+      "cert_chain_sha256": [
+        "99e14b50600ec394cb2c15858e68fff19cb70c9ee08cb7295218128167c43823"
+      ],
+      "cert_subject_cn": "*.google.com",
+      "cert_issuer_cn": "WR2",
+      "ja4_server": null,
+      "alpn": []
+    },
+    "instagram.com": {
+      "cert_chain_sha256": [
+        "b5a2f5cc859454efc4bbab461abc5eea33ad9070961609f2a426413e3a83c1e8"
+      ],
+      "cert_subject_cn": "*.instagram.com",
+      "cert_issuer_cn": "DigiCert Global G2 TLS RSA SHA256 2020 CA1",
+      "ja4_server": null,
+      "alpn": []
+    },
+    "facebook.com": {
+      "cert_chain_sha256": [
+        "c41b79fe7f65835a43eddc147b7a543ecaa5d3edf7be2e702cb505ebcd6b7cf6"
+      ],
+      "cert_subject_cn": "*.facebook.com",
+      "cert_issuer_cn": "DigiCert Global G2 TLS RSA SHA256 2020 CA1",
+      "ja4_server": null,
+      "alpn": []
+    },
+    "twitter.com": {
+      "cert_chain_sha256": [
+        "76136867264a97353e9058d6769aaeeff8095ee1657cf96c5f9a48051f3286ad"
+      ],
+      "cert_subject_cn": "twitter.com",
+      "cert_issuer_cn": "E7",
+      "ja4_server": null,
+      "alpn": []
+    },
+    "tiktok.com": {
+      "cert_chain_sha256": [
+        "0109b4e1a32aab7ea8ffec74be6dc7de02c90c63bcc4c150a1d1b0ff57949249"
+      ],
+      "cert_subject_cn": "*.tiktok.com",
+      "cert_issuer_cn": "RapidSSL TLS ECC CA G1",
+      "ja4_server": null,
+      "alpn": []
+    },
+    "linkedin.com": {
+      "cert_chain_sha256": [
+        "ed13bd4d797ad34fb6bec16fa98ca2914f3b53f2b045ee5508b9d5335f7dbe36"
+      ],
+      "cert_subject_cn": "www.linkedin.com",
+      "cert_issuer_cn": "DigiCert Global G2 TLS RSA SHA256 2020 CA1",
+      "ja4_server": null,
+      "alpn": []
+    },
+    "signal.org": {
+      "cert_chain_sha256": [
+        "7201f2fb02d26d201480961798325d0dbc5f540eda039a626fdf81c41b8e03d4"
+      ],
+      "cert_subject_cn": "signal.org",
+      "cert_issuer_cn": "WE1",
+      "ja4_server": null,
+      "alpn": []
+    },
+    "whatsapp.com": {
+      "cert_chain_sha256": [
+        "473549b8198d8e075bd0a1c1a75c3a0f19e440aa9b31b0893d3a84f521fc0972"
+      ],
+      "cert_subject_cn": "*.whatsapp.net",
+      "cert_issuer_cn": "DigiCert Global G2 TLS RSA SHA256 2020 CA1",
+      "ja4_server": null,
+      "alpn": []
+    },
+    "web.whatsapp.com": {
+      "cert_chain_sha256": [
+        "473549b8198d8e075bd0a1c1a75c3a0f19e440aa9b31b0893d3a84f521fc0972"
+      ],
+      "cert_subject_cn": "*.whatsapp.net",
+      "cert_issuer_cn": "DigiCert Global G2 TLS RSA SHA256 2020 CA1",
+      "ja4_server": null,
+      "alpn": []
+    },
+    "discord.com": {
+      "cert_chain_sha256": [
+        "e339a6843b0f4890e9bc50ca6c882a318dd238cbc643b6c8b711c4f476dd2d0c"
+      ],
+      "cert_subject_cn": "discord.com",
+      "cert_issuer_cn": "WE1",
+      "ja4_server": null,
+      "alpn": []
+    },
+    "viber.com": {
+      "cert_chain_sha256": [
+        "d2657b8665c9f5d6f1f9efcf2eb47918bae7cda12461c0ef850f5c86a8311d23"
+      ],
+      "cert_subject_cn": "*.viber.com",
+      "cert_issuer_cn": "Amazon RSA 2048 M04",
+      "ja4_server": null,
+      "alpn": []
+    },
+    "vk.com": {
+      "cert_chain_sha256": [
+        "4c2849a6f1e102920c390ff41fab0a413bca1412e6a0f37a030304ed13d876dc"
+      ],
+      "cert_subject_cn": "*.vk.com",
+      "cert_issuer_cn": "GlobalSign ECC OV SSL CA 2018",
+      "ja4_server": null,
+      "alpn": []
+    },
+    "yandex.ru": {
+      "cert_chain_sha256": [
+        "004b73abc7082568a07182924623a26973fb7f4ab4ed30a5f022c3fa17c355eb"
+      ],
+      "cert_subject_cn": "*.yandex.tr",
+      "cert_issuer_cn": "GlobalSign ECC OV SSL CA 2018",
+      "ja4_server": null,
+      "alpn": []
+    },
+    "wikipedia.org": {
+      "cert_chain_sha256": [
+        "4720a86f440eb48c9792e5cba9c8fe8b127c806f15ea60750724bf3325497a9b"
+      ],
+      "cert_subject_cn": "*.wikipedia.org",
+      "cert_issuer_cn": "E7",
+      "ja4_server": null,
+      "alpn": []
+    },
+    "google.com": {
+      "cert_chain_sha256": [
+        "210f478de4275dd6283abd2a8fcca589d1b78c89ec9ad7a414056a3cc932dc74"
+      ],
+      "cert_subject_cn": "*.google.com",
+      "cert_issuer_cn": "WE2",
+      "ja4_server": null,
+      "alpn": []
+    }
+  },
+  "http": {
+    "https://meduza.io/": {
+      "status": 200,
+      "title_regex": null,
+      "body_length_range": [
+        408905,
+        499772
+      ],
+      "stable_fragments_sha256": {}
+    },
+    "https://novayagazeta.eu/": {
+      "status": 200,
+      "title_regex": null,
+      "body_length_range": [
+        471859,
+        576716
+      ],
+      "stable_fragments_sha256": {}
+    },
+    "https://mediazona.ca/": {
+      "status": 200,
+      "title_regex": null,
+      "body_length_range": [
+        61835,
+        75577
+      ],
+      "stable_fragments_sha256": {}
+    },
+    "https://tvrain.ru/": {
+      "status": 200,
+      "title_regex": null,
+      "body_length_range": [
+        147843,
+        180697
+      ],
+      "stable_fragments_sha256": {}
+    },
+    "https://www.bbc.com/russian/": {
+      "status": 200,
+      "title_regex": null,
+      "body_length_range": [
+        471859,
+        576716
+      ],
+      "stable_fragments_sha256": {}
+    },
+    "https://www.dw.com/ru/": {
+      "status": 200,
+      "title_regex": null,
+      "body_length_range": [
+        251472,
+        307355
+      ],
+      "stable_fragments_sha256": {}
+    },
+    "https://www.rferl.org/": {
+      "status": 403,
+      "title_regex": null,
+      "body_length_range": [
+        328,
+        403
+      ],
+      "stable_fragments_sha256": {}
+    },
+    "https://www.currenttime.tv/": {
+      "status": 403,
+      "title_regex": null,
+      "body_length_range": [
+        333,
+        409
+      ],
+      "stable_fragments_sha256": {}
+    },
+    "https://www.inopressa.ru/": {
+      "status": 200,
+      "title_regex": null,
+      "body_length_range": [
+        40344,
+        49309
+      ],
+      "stable_fragments_sha256": {}
+    },
+    "https://www.bellingcat.com/": {
+      "status": 200,
+      "title_regex": null,
+      "body_length_range": [
+        107166,
+        130981
+      ],
+      "stable_fragments_sha256": {}
+    },
+    "https://www.youtube.com/": {
+      "status": 200,
+      "title_regex": null,
+      "body_length_range": [
+        471859,
+        576716
+      ],
+      "stable_fragments_sha256": {}
+    },
+    "https://www.instagram.com/": {
+      "status": 200,
+      "title_regex": null,
+      "body_length_range": [
+        471859,
+        576716
+      ],
+      "stable_fragments_sha256": {}
+    },
+    "https://www.facebook.com/": {
+      "status": 400,
+      "title_regex": null,
+      "body_length_range": [
+        1387,
+        1696
+      ],
+      "stable_fragments_sha256": {}
+    },
+    "https://twitter.com/": {
+      "status": 200,
+      "title_regex": null,
+      "body_length_range": [
+        227012,
+        277459
+      ],
+      "stable_fragments_sha256": {}
+    },
+    "https://x.com/": {
+      "status": 200,
+      "title_regex": null,
+      "body_length_range": [
+        227012,
+        277459
+      ],
+      "stable_fragments_sha256": {}
+    },
+    "https://www.tiktok.com/": {
+      "status": 200,
+      "title_regex": null,
+      "body_length_range": [
+        253254,
+        341921
+      ],
+      "stable_fragments_sha256": {}
+    },
+    "https://www.linkedin.com/": {
+      "status": 200,
+      "title_regex": null,
+      "body_length_range": [
+        130981,
+        161702
+      ],
+      "stable_fragments_sha256": {}
+    },
+    "https://signal.org/": {
+      "status": 200,
+      "title_regex": null,
+      "body_length_range": [
+        19974,
+        24413
+      ],
+      "stable_fragments_sha256": {}
+    },
+    "https://www.whatsapp.com/": {
+      "status": 400,
+      "title_regex": null,
+      "body_length_range": [
+        5650,
+        6905
+      ],
+      "stable_fragments_sha256": {}
+    },
+    "https://web.whatsapp.com/": {
+      "status": 400,
+      "title_regex": null,
+      "body_length_range": [
+        5650,
+        6905
+      ],
+      "stable_fragments_sha256": {}
+    },
+    "https://discord.com/": {
+      "status": 200,
+      "title_regex": null,
+      "body_length_range": [
+        146685,
+        179295
+      ],
+      "stable_fragments_sha256": {}
+    },
+    "https://www.viber.com/": {
+      "status": 200,
+      "title_regex": null,
+      "body_length_range": [
+        46614,
+        56974
+      ],
+      "stable_fragments_sha256": {}
+    },
+    "https://vk.com/": {
+      "status": 200,
+      "title_regex": null,
+      "body_length_range": [
+        152891,
+        186914
+      ],
+      "stable_fragments_sha256": {}
+    },
+    "https://yandex.ru/": {
+      "status": 200,
+      "title_regex": null,
+      "body_length_range": [
+        2203,
+        2696
+      ],
+      "stable_fragments_sha256": {}
+    },
+    "https://ru.wikipedia.org/wiki/%D0%97%D0%B0%D0%B3%D0%BB%D0%B0%D0%B2%D0%BD%D0%B0%D1%8F_%D1%81%D1%82%D1%80%D0%B0%D0%BD%D0%B8%D1%86%D0%B0": {
+      "status": 200,
+      "title_regex": null,
+      "body_length_range": [
+        198998,
+        243219
+      ],
+      "stable_fragments_sha256": {}
+    },
+    "https://en.wikipedia.org/": {
+      "status": 200,
+      "title_regex": null,
+      "body_length_range": [
+        210159,
+        256861
+      ],
+      "stable_fragments_sha256": {}
+    },
+    "https://www.google.com/": {
+      "status": 200,
+      "title_regex": null,
+      "body_length_range": [
+        233324,
+        297548
+      ],
+      "stable_fragments_sha256": {}
+    },
+    "https://www.cloudflare.com/cdn-cgi/trace": {
+      "status": 200,
+      "title_regex": null,
+      "body_length_range": [
+        285,
+        354
+      ],
+      "stable_fragments_sha256": {}
+    }
+  },
+  "telegram": {
+    "telegram_dc1_v4_443": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc1_v4_80": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc1_v4_5222": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc1_v4_2001": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc1_v6_443": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc1_v6_80": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc1_v6_5222": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc1_v6_2001": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc2_v4_443": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc2_v4_80": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc2_v4_5222": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc2_v4_2001": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc2_v6_443": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc2_v6_80": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc2_v6_5222": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc2_v6_2001": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc3_v4_443": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc3_v4_80": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc3_v4_5222": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc3_v4_2001": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc3_v6_443": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc3_v6_80": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc3_v6_5222": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc3_v6_2001": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc4_v4_443": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc4_v4_80": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc4_v4_5222": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc4_v4_2001": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc4_v6_443": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc4_v6_80": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc4_v6_5222": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc4_v6_2001": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc5_v4_443": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc5_v4_80": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc5_v4_5222": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc5_v4_2001": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc5_v6_443": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc5_v6_80": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc5_v6_5222": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_dc5_v6_2001": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_web_web_telegram_org": {
+      "reachable": true,
+      "rtt_range_ms": [
+        34.355885605327785,
+        71.04425278957933
+      ]
+    },
+    "telegram_web_k_web_telegram_org": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_web_a_web_telegram_org": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_aux_core_telegram_org": {
+      "reachable": true,
+      "rtt_range_ms": [
+        102.27943600621074,
+        173.57655958039686
+      ]
+    },
+    "telegram_aux_my_telegram_org": {
+      "reachable": true,
+      "rtt_range_ms": [
+        74.17163520585746,
+        199.29690359858796
+      ]
+    },
+    "telegram_aux_translations_telegram_org": {
+      "reachable": true,
+      "rtt_range_ms": [
+        96.89112959895283,
+        164.59645677823573
+      ]
+    },
+    "telegram_aux_t_me": {
+      "reachable": true,
+      "rtt_range_ms": [
+        109.05640560667962,
+        196.63594679441303
+      ]
+    },
+    "telegram_aux_telegram_org": {
+      "reachable": true,
+      "rtt_range_ms": [
+        47.95917759183794,
+        167.9276148090139
+      ]
+    },
+    "telegram_aux_desktop_telegram_org": {
+      "reachable": true,
+      "rtt_range_ms": [
+        93.03296080324799,
+        167.41903679212555
+      ]
+    },
+    "telegram_aux_macos_telegram_org": {
+      "reachable": true,
+      "rtt_range_ms": [
+        92.51921598333865,
+        162.4661771929823
+      ]
+    },
+    "telegram_cdn_cdn1_cdn_telegram_org": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_cdn_cdn2_cdn_telegram_org": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_cdn_cdn3_cdn_telegram_org": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_cdn_cdn4_cdn_telegram_org": {
+      "reachable": true,
+      "rtt_range_ms": [
+        85.15058800112456,
+        159.243687603157
+      ]
+    },
+    "telegram_cdn_cdn5_cdn_telegram_org": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_voice_dc1_udp_7670": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_voice_dc1_udp_7680": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_voice_dc2_udp_7670": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    },
+    "telegram_voice_dc2_udp_7680": {
+      "reachable": false,
+      "rtt_range_ms": [
+        0.0,
+        9999.0
+      ]
+    }
+  },
+  "throttling": {
+    "speed.cloudflare.com": {
+      "bandwidth_mbps_p50": 428.82,
+      "bandwidth_mbps_p10": 362.08,
+      "ttfb_ms_p50": 0.0
+    },
+    "speedtest.selectel.ru": {
+      "bandwidth_mbps_p50": 0.32,
+      "bandwidth_mbps_p10": 0.26,
+      "ttfb_ms_p50": 0.0
+    },
+    "youtube.com": {
+      "bandwidth_mbps_p50": 712.04,
+      "bandwidth_mbps_p10": 602.04,
+      "ttfb_ms_p50": 0.0
+    }
+  },
+  "sni_throttling": {
+    "target_ip_host": "speedtest.selectel.ru",
+    "runs": {
+      "correct_sni": {
+        "sni": "speedtest.selectel.ru",
+        "bandwidth_mbps_p50": 0.3,
+        "drop_pattern": "none"
+      },
+      "googlevideo_sni": {
+        "sni": "googlevideo.com",
+        "bandwidth_mbps_p50": 0.31,
+        "drop_pattern": "none"
+      },
+      "typo_sni": {
+        "sni": "googleviideo.com",
+        "bandwidth_mbps_p50": 0.28,
+        "drop_pattern": "none"
+      }
+    }
+  }
+}
