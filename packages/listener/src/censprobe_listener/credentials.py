@@ -231,7 +231,15 @@ def load_protocols_yaml(path: Path) -> ProtocolCredentials:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _wg_keypair() -> tuple[str, str]:
-    """Generate a WireGuard keypair using wg tool. Falls back to random bytes."""
+    """
+    Generate a WireGuard (Curve25519) keypair.
+
+    Preferred: `wg genkey` / `wg pubkey` — exact binary-compatible behaviour.
+    Fallback: the `cryptography` library, which produces a properly clamped
+    X25519 private key. A naive os.urandom(32) is NOT a valid Curve25519 key
+    (spec requires clamping bits 0/1/2 of byte 0 and bits 6/7 of byte 31),
+    and `wg` would reject it at startup.
+    """
     try:
         private = subprocess.check_output(["wg", "genkey"]).decode().strip()
         public = subprocess.check_output(
@@ -239,18 +247,30 @@ def _wg_keypair() -> tuple[str, str]:
         ).decode().strip()
         return private, public
     except Exception:
-        # Fallback: base64-encoded random bytes (not cryptographically WG-correct, but usable for tests)
-        private = base64.b64encode(os.urandom(32)).decode()
-        public = base64.b64encode(os.urandom(32)).decode()
-        return private, public
+        from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+        from cryptography.hazmat.primitives.serialization import (
+            Encoding,
+            NoEncryption,
+            PrivateFormat,
+            PublicFormat,
+        )
+        key = X25519PrivateKey.generate()
+        priv_bytes = key.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
+        pub_bytes = key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+        return base64.b64encode(priv_bytes).decode(), base64.b64encode(pub_bytes).decode()
 
 
 def _wg_preshared_key() -> str:
-    """Generate a WireGuard preshared key."""
+    """
+    Generate a WireGuard preshared key.
+
+    The PSK is an opaque 32-byte symmetric secret (HKDF input), so plain
+    random bytes are correct — no Curve25519 clamping needed.
+    """
     try:
         return subprocess.check_output(["wg", "genpsk"]).decode().strip()
     except Exception:
-        return base64.b64encode(os.urandom(32)).decode()
+        return base64.b64encode(secrets.token_bytes(32)).decode()
 
 
 def _generate_uuid() -> str:
@@ -277,13 +297,18 @@ def _reality_keypair() -> tuple[str, str]:
         public = lines[1].split(": ", 1)[1].strip()
         return private, public
     except Exception:
-        # Fallback using cryptography library
-        try:
-            from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
-            key = X25519PrivateKey.generate()
-            from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat, PrivateFormat, NoEncryption
-            private_bytes = key.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
-            public_bytes = key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
-            return base64.b64encode(private_bytes).decode(), base64.b64encode(public_bytes).decode()
-        except Exception:
-            return base64.b64encode(os.urandom(32)).decode(), base64.b64encode(os.urandom(32)).decode()
+        # Fallback: cryptography library produces a correctly clamped X25519
+        # private key. We intentionally do NOT fall back further to os.urandom,
+        # because raw random bytes are not valid Curve25519 private keys per
+        # RFC 7748 and would fail VLESS+Reality handshake setup.
+        from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+        from cryptography.hazmat.primitives.serialization import (
+            Encoding,
+            NoEncryption,
+            PrivateFormat,
+            PublicFormat,
+        )
+        key = X25519PrivateKey.generate()
+        private_bytes = key.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
+        public_bytes = key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+        return base64.b64encode(private_bytes).decode(), base64.b64encode(public_bytes).decode()

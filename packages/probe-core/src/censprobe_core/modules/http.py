@@ -12,9 +12,11 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import socket
 import ssl
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 
 import httpx
 import yaml
@@ -101,7 +103,7 @@ async def _test_url(
 
             tls_ok = url.startswith("https://") and r.status_code < 600
             is_blockpage = _is_blockpage(body, status)
-            cert_sha256_list = _extract_cert_sha256(r)
+            cert_sha256_list = await _extract_cert_sha256(r, url)
             stable_frags = _extract_stable_fragments(body, target.get("stable_selectors", []))
 
             verdict, method = comparator.compare_http(url, status, body_length, tls_ok, is_blockpage)
@@ -186,11 +188,48 @@ def _is_blockpage(body: bytes, status: int) -> bool:
     return False
 
 
-def _extract_cert_sha256(response: httpx.Response) -> list[str]:
-    """Extract cert chain SHA256 from response (best effort)."""
-    # httpx doesn't expose cert chain directly in public API
-    # We'd need to use the underlying SSL socket — skip for now, noted as TODO
-    return []
+async def _extract_cert_sha256(response: httpx.Response, url: str) -> list[str]:
+    """
+    Extract leaf-cert SHA-256 for a response's TLS endpoint.
+
+    httpx doesn't expose the peer cert directly, so we run a separate,
+    minimal TLS handshake to the same host:port and hash the server cert
+    in DER form. That SHA is fed into BaselineComparator.compare_tls for
+    MITM / cert-rotation detection — an empty list there would silently
+    disable the check.
+
+    Returns:
+        [hex_sha256] on success, or [] on non-HTTPS / network failure.
+    """
+    parsed = urlparse(str(response.url) or url)
+    if parsed.scheme != "https" or not parsed.hostname:
+        return []
+
+    host = parsed.hostname
+    port = parsed.port or 443
+
+    def _fetch_cert() -> Optional[bytes]:
+        ctx = ssl.create_default_context()
+        # We want the server's cert even if its chain is not trusted locally
+        # (e.g. internal CA, expired cert) — verification is NOT our goal
+        # here; we are hashing the leaf for baseline comparison.
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        try:
+            with socket.create_connection((host, port), timeout=5.0) as sock:
+                with ctx.wrap_socket(sock, server_hostname=host) as tls_sock:
+                    return tls_sock.getpeercert(binary_form=True)
+        except Exception:
+            return None
+
+    try:
+        der = await asyncio.wait_for(asyncio.to_thread(_fetch_cert), timeout=7.0)
+    except asyncio.TimeoutError:
+        return []
+
+    if not der:
+        return []
+    return [hashlib.sha256(der).hexdigest()]
 
 
 def _extract_stable_fragments(body: bytes, selectors: list[str]) -> dict[str, str]:

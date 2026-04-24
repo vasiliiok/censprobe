@@ -17,7 +17,6 @@ import asyncio
 import logging
 import random
 import socket
-import ssl
 import string
 from typing import Optional
 
@@ -195,64 +194,36 @@ async def _test_invalid_request_line() -> Optional[TestResult]:
 
 async def _test_tcp_fragmentation() -> Optional[TestResult]:
     """
-    Send TLS ClientHello split into two TCP segments.
-    Some DPI systems fail to reassemble → allow when they would normally block.
-    Compare with a normal TLS handshake to the same target.
+    TCP-fragmentation circumvention test.
+
+    A real implementation would craft a TLS ClientHello split across two
+    TCP segments (either via raw sockets / Scapy or via the kernel socket
+    buffer with TCP_NODELAY + tiny send chunks) and compare reachability
+    with and without the split, to detect middleboxes that fail to
+    reassemble.
+
+    That is NOT what this MVP does. Returning Verdict.OK from a plain
+    `tls_sock.do_handshake()` would be actively misleading — it would
+    suggest that fragmentation-based circumvention works when no
+    fragmentation has been exercised at all. We therefore return
+    INCONCLUSIVE with a clear "not_implemented_in_mvp" marker so the
+    dashboard reflects reality.
     """
     test_name = "middlebox_tcp_fragmentation"
     target_host = "cloudflare.com"
-    target_ip = None
-
-    try:
-        loop = asyncio.get_running_loop()
-        infos = await loop.getaddrinfo(target_host, 443, type=socket.SOCK_STREAM)
-        target_ip = infos[0][4][0]
-    except Exception:
-        return TestResult(
-            test=test_name, category="middlebox", target=target_host,
-            verdict=Verdict.INCONCLUSIVE, evidence={"reason": "dns_failed"},
-        )
-
-    def _fragmented_hello():
-        """Send a real TLS ClientHello in two fragments."""
-        try:
-            # Build a minimal TLS ClientHello using ssl/socket
-            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-
-            # First get the full ClientHello by capturing what ssl would send
-            # We use MSG_PEEK trick — simpler: just split the raw handshake
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(_TIMEOUT)
-            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            sock.connect((target_ip, 443))
-
-            # Minimal TLS 1.3 ClientHello (simplified)
-            # Real implementation would use scapy or craft raw bytes
-            # For MVP: just do a normal connect and flag as "basic test done"
-            tls_sock = ctx.wrap_socket(sock, server_hostname=target_host, do_handshake_on_connect=False)
-            tls_sock.do_handshake()
-            tls_sock.close()
-            return {"ok": True, "method": "normal_tls_succeeded"}
-        except Exception as e:
-            return {"ok": False, "error": str(e)}
-
-    try:
-        result = await asyncio.wait_for(
-            asyncio.get_running_loop().run_in_executor(None, _fragmented_hello),
-            timeout=_TIMEOUT + 2,
-        )
-        return TestResult(
-            test=test_name,
-            category="middlebox",
-            target=f"{target_host}:443",
-            verdict=Verdict.OK if result.get("ok") else Verdict.ANOMALY,
-            evidence=result,
-            notes="TCP fragmentation test — basic TLS connect (full fragmentation requires scapy)",
-        )
-    except Exception as e:
-        return TestResult(
-            test=test_name, category="middlebox", target=target_host,
-            verdict=Verdict.ERROR, evidence={"error": str(e)},
-        )
+    return TestResult(
+        test=test_name,
+        category="middlebox",
+        target=f"{target_host}:443",
+        verdict=Verdict.INCONCLUSIVE,
+        confidence=0.0,
+        evidence={
+            "status": "not_implemented_in_mvp",
+            "reason": (
+                "Real TCP fragmentation requires raw-socket or low-level "
+                "send-chunk control; the previous placeholder only ran a "
+                "normal TLS handshake and was misleading."
+            ),
+        },
+        notes="TCP fragmentation circumvention not implemented in MVP.",
+    )

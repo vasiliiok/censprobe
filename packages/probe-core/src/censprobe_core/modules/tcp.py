@@ -1,16 +1,24 @@
 """
 modules/tcp.py — TCP reachability measurement module.
 
-Tests TCP SYN connectivity to (IP, port) pairs.
-Distinguishes:
-  OK          — SYN-ACK received
-  IP_DROPPED  — SYN sent, timeout (null-route / blackhole)
-  RST_INJECTED — RST received with anomalous TTL (injected by DPI)
-  REFUSED     — legitimate RST from the host (port closed, service down)
+Tests TCP connectivity to (IP, port) pairs using asyncio.open_connection
+(full 3-way handshake — no raw sockets / Scapy).
 
-TTL analysis:
-  Injected RSTs often come with TTL values that differ from the real server's TTL.
-  We use asyncio socket approach — raw socket (Scapy) analysis is attempted if available.
+Verdicts:
+  OK            — connect() succeeded
+  IP_DROPPED    — SYN sent, timeout (null-route / blackhole)
+  REFUSED       — legitimate RST from the host (port closed, service down)
+  RST_INJECTED  — HEURISTIC ONLY: RST that arrives in less than
+                  _SYN_FAST_RST_MS after connect(). This is a rough
+                  timing heuristic, NOT a TTL-anomaly analysis: low-latency
+                  networks (same datacenter, localhost) can legitimately
+                  return a REFUSED RST faster than the threshold and be
+                  mislabeled as RST_INJECTED. Treat this verdict as a hint,
+                  not a conclusion.
+
+True TTL-delta analysis requires raw sockets (Scapy or eBPF) and is
+deliberately not implemented in the MVP — we surface the heuristic RTT
+in evidence.rtts_ms so reviewers can sanity-check it.
 """
 from __future__ import annotations
 
@@ -68,6 +76,9 @@ async def _test_tcp(ip: str, port: int, repeats: int) -> TestResult:
     elif final_verdict == Verdict.IP_DROPPED:
         method = BlockingMethod.IP_DROPPED
 
+    # RST_INJECTED is only a timing heuristic here — flag that explicitly
+    # in evidence and lower confidence so baseline/scoring can discount it.
+    is_heuristic_rst = final_verdict == Verdict.RST_INJECTED
     return TestResult(
         test=f"tcp_{_slug(ip)}_{port}",
         category="tcp",
@@ -76,10 +87,18 @@ async def _test_tcp(ip: str, port: int, repeats: int) -> TestResult:
         method=method,
         rtt_ms=min(rtts) if rtts else None,
         attempts=repeats,
+        confidence=0.5 if is_heuristic_rst else 1.0,
+        notes=(
+            "RST_INJECTED is a timing heuristic (fast RST, no TTL check); "
+            "treat as a hint, not a conclusion."
+            if is_heuristic_rst
+            else None
+        ),
         evidence={
             "all_verdicts": verdicts,
             "rtts_ms": rtts,
             "rst_ttls": rst_ttls,
+            "rst_detection": "rtt_heuristic_no_scapy",
         },
     )
 

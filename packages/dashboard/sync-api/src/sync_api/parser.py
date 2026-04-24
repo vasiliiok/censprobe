@@ -1,9 +1,9 @@
 """
-parser.py — Parse censprobe .json.gz report files into DB models.
+parser.py — Parse censprobe report files (.json or legacy .json.gz) into DB models.
 
 Handles:
-  - server-solo-<ts>.json.gz  → TestRun + TestResult rows
-  - server-listener-<session>-<ts>.json.gz → ListenerSession + ProtocolResult rows
+  - server-solo-<ts>.json[.gz]            → TestRun + TestResult rows
+  - server-listener-<session>-<ts>.json[.gz] → ListenerSession + ProtocolResult rows
 """
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ def parse_solo_report(
     path: Path,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """
-    Parse a server-solo-*.json.gz report.
+    Parse a server-solo-*.json[.gz] report.
 
     Returns:
         (meta_dict, list_of_result_dicts)
@@ -68,7 +68,7 @@ def parse_listener_report(
     path: Path,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """
-    Parse a server-listener-<session>-*.json.gz report.
+    Parse a server-listener-<session>-*.json[.gz] report.
 
     Returns:
         (session_dict, list_of_protocol_result_dicts)

@@ -7,7 +7,7 @@ Lifecycle:
   3. Load baseline/latest.json + targets/*.yaml + signatures/*.yaml
   4. Run full probe suite (runner.run_all())
   5. Compute scores (scoring.compute_scores())
-  6. Save report as reports/<TEST_ID>/server-solo-<timestamp>.json.gz
+  6. Save report as reports/<TEST_ID>/server-solo-<timestamp>.json
   7. git add && git commit && git push
   8. Exit
 
@@ -219,21 +219,30 @@ def _print_summary(results, scores) -> None:
 
 def _load_listener_reports(reports_dir: Path) -> list[ListenerReport]:
     """
-    Load all server-listener-*.json.gz files from the test_id reports directory.
+    Load all server-listener-*.json[.gz] files from the test_id reports directory.
+    Accepts both the new plain .json layout and legacy .json.gz archives so
+    old reports on disk keep working after the format switch.
     Returns empty list if none exist or directory doesn't exist.
     """
     if not reports_dir.exists():
         return []
 
     reports: list[ListenerReport] = []
-    for gz_path in sorted(reports_dir.glob("server-listener-*.json.gz")):
+    paths = sorted(
+        list(reports_dir.glob("server-listener-*.json"))
+        + list(reports_dir.glob("server-listener-*.json.gz"))
+    )
+    for path in paths:
         try:
-            with gzip.open(gz_path, "rb") as f:
-                data = json.loads(f.read())
+            if path.suffix == ".gz":
+                with gzip.open(path, "rb") as f:
+                    data = json.loads(f.read())
+            else:
+                data = json.loads(path.read_text(encoding="utf-8"))
             reports.append(ListenerReport.model_validate(data))
-            logger.debug("Loaded listener report: %s", gz_path.name)
+            logger.debug("Loaded listener report: %s", path.name)
         except Exception as e:
-            logger.warning("Could not load %s: %s", gz_path.name, e)
+            logger.warning("Could not load %s: %s", path.name, e)
 
     return reports
 

@@ -243,7 +243,7 @@ class ProtocolResult(BaseModel):
 
 
 class ListenerReport(BaseModel):
-    """Output of censprobe-listener — reports/<test_id>/server-listener-<session>-<ts>.json.gz"""
+    """Output of censprobe-listener — reports/<test_id>/server-listener-<session>-<ts>.json"""
     test_id: str
     session_id: str
     listener_started_at: datetime
