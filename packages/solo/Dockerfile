@@ -4,10 +4,12 @@
 FROM python:3.12-slim
 
 # Install system dependencies
+# build-essential + golang-go for amneziawg-{tools,go} source builds.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl wget openssh-client iputils-ping dnsutils \
     net-tools tcpdump iproute2 ca-certificates libssl-dev \
     wireguard-tools iptables openssl openvpn unzip \
+    build-essential libmnl-dev pkg-config golang-go \
     && rm -rf /var/lib/apt/lists/*
 
 # Install scapy dependencies
@@ -52,16 +54,15 @@ RUN ARCH=$(dpkg --print-architecture) && \
     chmod +x /usr/local/bin/hysteria
 
 # ── AmneziaWG (userspace, amneziawg-go) ──────────────────────────────────────
-RUN curl -fsSL https://raw.githubusercontent.com/amnezia-vpn/amneziawg-go/master/install.sh \
-    -o /tmp/awg-install.sh 2>/dev/null && \
-    if [ -f /tmp/awg-install.sh ]; then \
-        sh /tmp/awg-install.sh 2>/dev/null || true; \
-    fi; \
-    rm -f /tmp/awg-install.sh; \
-    if ! command -v awg-quick >/dev/null 2>&1; then \
-        printf '#!/bin/sh\nwg-quick "$@"\n' > /usr/local/bin/awg-quick && \
-        chmod +x /usr/local/bin/awg-quick; \
-    fi
+# See listener Dockerfile for rationale.
+RUN git clone --depth 1 https://github.com/amnezia-vpn/amneziawg-tools.git /tmp/awg-tools && \
+    make -C /tmp/awg-tools/src -j"$(nproc)" && \
+    make -C /tmp/awg-tools/src install && \
+    rm -rf /tmp/awg-tools && \
+    git clone --depth 1 https://github.com/amnezia-vpn/amneziawg-go.git /tmp/awg-go && \
+    cd /tmp/awg-go && make && \
+    install -m 0755 amneziawg-go /usr/local/bin/amneziawg-go && \
+    rm -rf /tmp/awg-go /root/.cache/go-build /root/go
 
 WORKDIR /workspace
 
@@ -78,7 +79,8 @@ RUN pip install --no-cache-dir \
 RUN git config --global user.email "starvasyaa@gmail.com" && \
     git config --global user.name "censprobe-bot" && \
     git config --global init.defaultBranch main && \
-    git config --global pull.rebase true
+    git config --global pull.rebase true && \
+    git config --global --add safe.directory '*'
 
 # SSH known hosts for GitHub
 RUN mkdir -p /root/.ssh && \

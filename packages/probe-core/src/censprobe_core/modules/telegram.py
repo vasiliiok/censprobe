@@ -133,12 +133,16 @@ async def _test_dc_port(dc_id: int, ip_ver: str, ip: str, port: int) -> TestResu
         rtt_connect = (time.monotonic() - t0) * 1000
 
         # Send MTProto auth_key_id=0 (unencrypted) ReqPqMulti
-        # This is the simplest valid MTProto init — 20 bytes
-        # auth_key_id(8) + message_id(8) + message_len(4) + constructor(4)
         # constructor for req_pq_multi = 0xbe7e8ef1
+        # MTProto payload: auth_key_id(8) + message_id(8) + message_len(4) + ctor(4) = 20B
+        # Telegram requires a transport framing header on TCP — a bare
+        # MTProto payload is dropped by the DC without reply. We use the
+        # abridged transport: first-byte 0xef (connection header), then
+        # per-message length in 4-byte units (20 / 4 = 5).
         msg_id = int(time.time() * 2**32)
-        payload = struct.pack("<qqi", 0, msg_id, 4) + b"\xf1\x8e\x7e\xbe"
-        writer.write(payload)
+        mtproto = struct.pack("<qqi", 0, msg_id, 4) + b"\xf1\x8e\x7e\xbe"
+        assert len(mtproto) == 20 and (len(mtproto) % 4) == 0
+        writer.write(b"\xef" + bytes([len(mtproto) // 4]) + mtproto)
         await writer.drain()
 
         # Expect response within timeout
@@ -278,7 +282,15 @@ async def _test_voice(dcs: list[dict]) -> list[TestResult]:
 
 
 async def _stun_probe(dc_id: int, ip: str, port: int) -> TestResult:
-    """Send STUN Binding Request and check for response."""
+    """Send STUN Binding Request and check for response.
+
+    Note: Telegram VoIP uses its own MTProto-over-UDP protocol, not RFC
+    5389 STUN. A standard STUN binding request is silently dropped by
+    the DC regardless of censorship, so "no reply" is NOT evidence of
+    blocking — treat it as INCONCLUSIVE with a marker. A valid STUN
+    reply would be an active positive signal (e.g. middlebox answering
+    on our behalf); we keep the parser for that case.
+    """
     test_name = f"telegram_voice_dc{dc_id}_udp_{port}"
     target = f"{ip}:{port}/udp"
 
@@ -318,8 +330,13 @@ async def _stun_probe(dc_id: int, ip: str, port: int) -> TestResult:
         except asyncio.TimeoutError:
             return TestResult(
                 test=test_name, category="telegram", target=target,
-                verdict=Verdict.BLOCKED, method=BlockingMethod.QUIC_DROPPED,
-                evidence={"error": "udp_timeout"},
+                verdict=Verdict.INCONCLUSIVE, confidence=0.1,
+                evidence={
+                    "status": "no_reply_expected",
+                    "reason": "Telegram VoIP uses MTProto/UDP, not STUN; "
+                              "timeout is not evidence of censorship.",
+                },
+                notes="STUN probe to Telegram VoIP port is informational only.",
             )
 
     except Exception as e:

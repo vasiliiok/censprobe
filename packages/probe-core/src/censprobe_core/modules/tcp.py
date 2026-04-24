@@ -32,7 +32,13 @@ from censprobe_core.models import TestResult, Verdict, BlockingMethod
 logger = logging.getLogger(__name__)
 
 _CONNECT_TIMEOUT = 5.0    # seconds before declaring IP_DROPPED
-_SYN_FAST_RST_MS = 500    # RST within this time = likely injected
+# RST within this time ≈ locally injected by an in-path middlebox.
+# A legitimate RST from a geographically close datacenter (Moscow→EU,
+# ~40-50ms RTT) easily beats a 500ms threshold, triggering false
+# positives. 30ms roughly matches the "in-AS / first-hop" window; we
+# simultaneously lower confidence to reflect the limits of a pure
+# RTT heuristic (a TTL-delta test would need raw sockets).
+_SYN_FAST_RST_MS = 30
 _MAX_PARALLEL = 16        # concurrency cap for TCP probes
 
 

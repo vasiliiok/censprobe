@@ -6,6 +6,10 @@ them to reports/<test_id>/protocols.yaml so the client container
 can read them via git pull.
 
 Credentials are single-use test keys — not production VPN credentials.
+Both server and client sides read the same file, so server-only secrets
+(WG server private keys, Reality private key, OpenVPN PEM PSK) are
+persisted too; otherwise a listener restart on the next SESSION_ID
+would load empty strings and the VPN binaries would refuse to start.
 """
 from __future__ import annotations
 
@@ -14,6 +18,7 @@ import logging
 import os
 import secrets
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -26,8 +31,10 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ProtocolCredentials:
     """All credentials needed for one test session."""
-    # OpenVPN: static-key PSK
-    openvpn_psk_b64: str = ""
+    # OpenVPN: static-key PSK in OpenVPN "Static key V1" PEM format
+    # (headers + 2048 hex bits). Raw base64 bytes are NOT valid input for
+    # the `secret` directive.
+    openvpn_psk_pem: str = ""
     openvpn_port: int = 1194
 
     # WireGuard: server keypair + client pubkey
@@ -78,8 +85,10 @@ def generate_credentials() -> ProtocolCredentials:
     """Generate fresh one-time credentials for all protocols."""
     creds = ProtocolCredentials()
 
-    # OpenVPN PSK: 256 random bytes, base64 encoded
-    creds.openvpn_psk_b64 = base64.b64encode(os.urandom(256)).decode()
+    # OpenVPN PSK: must be in OpenVPN's "Static key V1" PEM envelope
+    # (16 lines of 32 hex chars wrapped in BEGIN/END markers). Raw random
+    # bytes — even if base64-encoded — are rejected by `openvpn --secret`.
+    creds.openvpn_psk_pem = _openvpn_static_key()
 
     # WireGuard: use wg genkey/pubkey
     creds.wg_server_private, creds.wg_server_public = _wg_keypair()
@@ -121,16 +130,25 @@ def generate_credentials() -> ProtocolCredentials:
 
 
 def save_protocols_yaml(creds: ProtocolCredentials, path: Path) -> None:
-    """Write credentials to reports/<test_id>/protocols.yaml."""
+    """Write credentials to reports/<test_id>/protocols.yaml.
+
+    Server-only secrets (WG server private keys, Reality private key) are
+    persisted alongside the client-facing material because the listener
+    may be restarted across sessions — on the next boot it reads back
+    this file, and empty strings would prevent the VPN binaries from
+    coming up. The repo is assumed private and these are single-use test
+    keys.
+    """
     data: dict[str, Any] = {
         "_note": "One-time test credentials. Do not use for production VPN.",
         "openvpn": {
             "port": creds.openvpn_port,
             "protocol": "udp",
-            "psk_b64": creds.openvpn_psk_b64,
+            "psk_pem": creds.openvpn_psk_pem,
         },
         "wireguard": {
             "port": creds.wg_port,
+            "server_private_key": creds.wg_server_private,
             "server_public_key": creds.wg_server_public,
             "client_private_key": creds.wg_client_private,
             "client_public_key": creds.wg_client_public,
@@ -138,6 +156,7 @@ def save_protocols_yaml(creds: ProtocolCredentials, path: Path) -> None:
         },
         "amneziawg": {
             "port": creds.awg_port,
+            "server_private_key": creds.awg_server_private,
             "server_public_key": creds.awg_server_public,
             "client_private_key": creds.awg_client_private,
             "client_public_key": creds.awg_client_public,
@@ -160,6 +179,7 @@ def save_protocols_yaml(creds: ProtocolCredentials, path: Path) -> None:
         "vless_reality": {
             "port": creds.vless_port,
             "uuid": creds.vless_uuid,
+            "private_key": creds.vless_pvk,
             "public_key": creds.vless_pbk,
             "short_id": creds.vless_short_id,
             "server_name": creds.vless_server_name,
@@ -181,10 +201,11 @@ def load_protocols_yaml(path: Path) -> ProtocolCredentials:
     c = ProtocolCredentials()
 
     ovpn = raw.get("openvpn", {})
-    c.openvpn_psk_b64 = ovpn.get("psk_b64", "")
+    c.openvpn_psk_pem = ovpn.get("psk_pem", "")
     c.openvpn_port = ovpn.get("port", 1194)
 
     wg = raw.get("wireguard", {})
+    c.wg_server_private = wg.get("server_private_key", "")
     c.wg_server_public = wg.get("server_public_key", "")
     c.wg_client_private = wg.get("client_private_key", "")
     c.wg_client_public = wg.get("client_public_key", "")
@@ -192,10 +213,12 @@ def load_protocols_yaml(path: Path) -> ProtocolCredentials:
     c.wg_port = wg.get("port", 51820)
 
     awg = raw.get("amneziawg", {})
+    c.awg_server_private = awg.get("server_private_key", "")
     c.awg_server_public = awg.get("server_public_key", "")
     c.awg_port = awg.get("port", 51821)
     c.awg_client_private = awg.get("client_private_key", "")
     c.awg_client_public = awg.get("client_public_key", "")
+    c.awg_preshared_key = awg.get("preshared_key", "")
     c.awg_jc = awg.get("jc", 4)
     c.awg_jmin = awg.get("jmin", 40)
     c.awg_jmax = awg.get("jmax", 70)
@@ -214,6 +237,7 @@ def load_protocols_yaml(path: Path) -> ProtocolCredentials:
     vless = raw.get("vless_reality", {})
     c.vless_port = vless.get("port", 443)
     c.vless_uuid = vless.get("uuid", "")
+    c.vless_pvk = vless.get("private_key", "")
     c.vless_pbk = vless.get("public_key", "")
     c.vless_short_id = vless.get("short_id", "")
     c.vless_server_name = vless.get("server_name", "apimaps.yandex.ru")
@@ -282,8 +306,10 @@ def _generate_uuid() -> str:
 def _reality_keypair() -> tuple[str, str]:
     """
     Generate an x25519 keypair for VLESS+Reality using xray x25519.
-    Returns (private_key_b64, public_key_b64).
-    Falls back to raw random bytes if xray not available.
+    Returns (private_key_urlsafe_b64, public_key_urlsafe_b64).
+    Xray/Reality parses keys with Go's base64.RawURLEncoding — URL-safe
+    alphabet and NO padding. Standard base64 (`+`/`/` with `=` padding)
+    is rejected at server startup.
     """
     try:
         out = subprocess.check_output(
@@ -311,4 +337,39 @@ def _reality_keypair() -> tuple[str, str]:
         key = X25519PrivateKey.generate()
         private_bytes = key.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
         public_bytes = key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
-        return base64.b64encode(private_bytes).decode(), base64.b64encode(public_bytes).decode()
+        return (
+            base64.urlsafe_b64encode(private_bytes).rstrip(b"=").decode(),
+            base64.urlsafe_b64encode(public_bytes).rstrip(b"=").decode(),
+        )
+
+
+def _openvpn_static_key() -> str:
+    """
+    Generate an OpenVPN static key in the exact PEM envelope that
+    `openvpn --secret` expects:
+
+        -----BEGIN OpenVPN Static key V1-----
+        <16 × 32 hex chars>
+        -----END OpenVPN Static key V1-----
+
+    Preferred path: call `openvpn --genkey secret /dev/stdout`.
+    Fallback: assemble the envelope from os.urandom(256) so a missing
+    openvpn binary during credential generation doesn't block tests.
+    """
+    try:
+        # Some openvpn builds refuse to write the key to /dev/stdout; use a
+        # tmpfile and read it back for portability.
+        with tempfile.NamedTemporaryFile(prefix="censprobe_ovpn_", delete=True) as tf:
+            subprocess.check_call(
+                ["openvpn", "--genkey", "secret", tf.name],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            return Path(tf.name).read_text(encoding="utf-8")
+    except Exception:
+        hex_str = os.urandom(256).hex()
+        lines = [hex_str[i:i + 32] for i in range(0, len(hex_str), 32)]
+        return (
+            "-----BEGIN OpenVPN Static key V1-----\n"
+            + "\n".join(lines)
+            + "\n-----END OpenVPN Static key V1-----\n"
+        )

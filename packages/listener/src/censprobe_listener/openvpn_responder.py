@@ -8,7 +8,6 @@ Does NOT forward traffic — purely a measurement endpoint.
 from __future__ import annotations
 
 import asyncio
-import base64
 import logging
 import subprocess
 import tempfile
@@ -25,8 +24,8 @@ class OpenVPNResponder:
     observe as "TCP/UDP read bytes" > 0 in status file.
     """
 
-    def __init__(self, psk_b64: str, port: int = 1194) -> None:
-        self.psk_b64 = psk_b64
+    def __init__(self, psk_pem: str, port: int = 1194) -> None:
+        self.psk_pem = psk_pem
         self.port = port
         self._proc: subprocess.Popen | None = None
         self._config_dir: tempfile.TemporaryDirectory | None = None
@@ -40,18 +39,19 @@ class OpenVPNResponder:
         self._config_dir = tempfile.TemporaryDirectory(prefix="censprobe_ovpn_")
         tmpdir = Path(self._config_dir.name)
 
-        # Write PSK file
+        # Write PSK file in OpenVPN "Static key V1" PEM format.
         psk_path = tmpdir / "static.key"
-        psk_bytes = base64.b64decode(self.psk_b64)
-        psk_path.write_bytes(psk_bytes)
+        psk_path.write_text(self.psk_pem, encoding="utf-8")
         psk_path.chmod(0o600)
 
         # Status/log files colocated with config (never shared across instances).
         self._status_path = tmpdir / "status.log"
         log_path = tmpdir / "openvpn.log"
 
-        # verb=1 keeps logging minimal so even if we missed a reader the pipes
-        # would not fill up; we also redirect stdio to DEVNULL below.
+        # AEAD ciphers (GCM / ChaCha20-Poly1305) require TLS mode; in
+        # static-key / `secret` mode OpenVPN 2.4+ refuses them with
+        # "AEAD cipher options --cipher is not allowed in --secret mode".
+        # Use AES-256-CBC instead — the only realistic option for p2p PSK.
         config = f"""
 proto udp
 port {self.port}
@@ -59,7 +59,7 @@ dev tun
 secret {psk_path}
 ifconfig 10.200.0.1 10.200.0.2
 keepalive 10 60
-cipher AES-256-GCM
+cipher AES-256-CBC
 persist-key
 persist-tun
 status {self._status_path} 5

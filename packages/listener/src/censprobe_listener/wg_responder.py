@@ -20,7 +20,12 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 _WG_INTERFACE = "censwg0"
-_MIN_ECHO_BYTES = 64  # above pure-handshake noise
+
+# A pure WireGuard handshake (initiation 148 + response 92 bytes) already
+# pushes rx well above any small constant. To distinguish "handshake only"
+# from "handshake + real data", require rx to exceed the worst-case
+# handshake-plus-keepalive budget (~148 + a few 32-byte keepalives).
+_MIN_ECHO_BYTES = 250
 
 
 def _read_wg_transfer(interface: str) -> tuple[int, int, int]:
@@ -87,15 +92,22 @@ class WireGuardResponder:
         pk_path.write_text(self.server_private_key)
         pk_path.chmod(0o600)
 
+        # The kernel `wg setconf` parser rejects `Address =` — that's a
+        # wg-quick bash-wrapper directive, not a kernel-interface key. The
+        # IP is assigned separately with `ip addr add` below.
+        #
+        # WG must NOT share its /24 with OpenVPN (which also runs on this
+        # host in network_mode: host). Otherwise the kernel routes replies
+        # for 10.200.0.2 onto OpenVPN's /32 tun peer route, producing a
+        # silent blackhole for WG's own data phase.
         config = f"""[Interface]
 ListenPort = {self.port}
 PrivateKey = {self.server_private_key}
-Address = 10.200.0.1/24
 
 [Peer]
 PublicKey = {self.client_public_key}
 PresharedKey = {self.preshared_key}
-AllowedIPs = 10.200.0.2/32
+AllowedIPs = 10.202.0.2/32
 """
         conf_path = tmpdir / f"{self.interface}.conf"
         conf_path.write_text(config)
@@ -121,7 +133,7 @@ AllowedIPs = 10.200.0.2/32
                     check=True, capture_output=True,
                 )
                 subprocess.run(
-                    ["ip", "addr", "add", "10.200.0.1/24", "dev", self.interface],
+                    ["ip", "addr", "add", "10.202.0.1/24", "dev", self.interface],
                     check=False, capture_output=True,
                 )
                 subprocess.run(

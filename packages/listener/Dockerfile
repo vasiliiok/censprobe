@@ -3,11 +3,14 @@
 
 FROM python:3.12-slim AS base
 
-# System tools + VPN protocol binaries (Debian packages)
+# System tools + VPN protocol binaries (Debian packages).
+# build-essential + go are needed to compile amneziawg-tools and
+# amneziawg-go from source (no upstream deb / release binaries).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git openssh-client curl wget iproute2 net-tools \
     wireguard-tools iptables openssl openvpn \
     ca-certificates unzip \
+    build-essential libmnl-dev pkg-config golang-go \
     && rm -rf /var/lib/apt/lists/*
 
 # ── sing-box (Shadowsocks 2022 inbound) ──────────────────────────────────────
@@ -47,18 +50,19 @@ RUN ARCH=$(dpkg --print-architecture) && \
     chmod +x /usr/local/bin/hysteria
 
 # ── AmneziaWG (userspace, amneziawg-go) ──────────────────────────────────────
-# Installed from source or official release — using shell script installer
-RUN curl -fsSL https://raw.githubusercontent.com/amnezia-vpn/amneziawg-go/master/install.sh \
-    -o /tmp/awg-install.sh 2>/dev/null && \
-    if [ -f /tmp/awg-install.sh ]; then \
-        sh /tmp/awg-install.sh 2>/dev/null || true; \
-    fi; \
-    rm -f /tmp/awg-install.sh; \
-    # If awg-quick not found, create a stub that falls back to wg-quick
-    if ! command -v awg-quick >/dev/null 2>&1; then \
-        printf '#!/bin/sh\nwg-quick "$@"\n' > /usr/local/bin/awg-quick && \
-        chmod +x /usr/local/bin/awg-quick; \
-    fi
+# Build both amneziawg-tools (awg, awg-quick) and amneziawg-go (userspace
+# implementation, runs without a kernel module). A wg-quick fallback is
+# NOT acceptable: vanilla wg rejects the obfuscation directives
+# (Jc/Jmin/Jmax/S1/S2/H1-H4) with "Line unrecognized", so AWG would be
+# silently non-functional while reporting success.
+RUN git clone --depth 1 https://github.com/amnezia-vpn/amneziawg-tools.git /tmp/awg-tools && \
+    make -C /tmp/awg-tools/src -j"$(nproc)" && \
+    make -C /tmp/awg-tools/src install && \
+    rm -rf /tmp/awg-tools && \
+    git clone --depth 1 https://github.com/amnezia-vpn/amneziawg-go.git /tmp/awg-go && \
+    cd /tmp/awg-go && make && \
+    install -m 0755 amneziawg-go /usr/local/bin/amneziawg-go && \
+    rm -rf /tmp/awg-go /root/.cache/go-build /root/go
 
 # ── Python packages ───────────────────────────────────────────────────────────
 WORKDIR /workspace
@@ -69,9 +73,13 @@ COPY packages/listener /tmp/listener
 RUN pip install --no-cache-dir /tmp/probe-core /tmp/listener
 
 # ── Git config ────────────────────────────────────────────────────────────────
+# safe.directory '*' is required because /workspace is bind-mounted from
+# the host with different ownership; git 2.35+ aborts with "detected
+# dubious ownership" otherwise.
 RUN git config --global user.email "starvasyaa@gmail.com" && \
     git config --global user.name "censprobe-bot" && \
     git config --global pull.rebase true && \
+    git config --global --add safe.directory '*' && \
     mkdir -p /root/.ssh && \
     ssh-keyscan github.com >> /root/.ssh/known_hosts 2>/dev/null
 

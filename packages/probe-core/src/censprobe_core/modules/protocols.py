@@ -70,7 +70,7 @@ async def run_protocol_tests(
         
         try:
             if protocol == "openvpn":
-                pr = await probe_openvpn(ip, port, ep.get("psk_b64", ""))
+                pr = await probe_openvpn(ip, port, ep.get("psk_pem", ""))
             elif protocol == "wireguard":
                 pr = await probe_wireguard(
                     ip, port, ep.get("server_public_key", ""),

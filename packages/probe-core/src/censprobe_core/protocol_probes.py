@@ -71,6 +71,91 @@ async def run_cmd(cmd: list[str], timeout: float = PROBE_TIMEOUT) -> tuple[int, 
         return -1, "", "Timeout"
 
 
+_HS_SUCCESS_TOKENS = (
+    # sing-box / xray / hysteria2 success markers when a remote tunnel
+    # session has actually been established. If none of these show up
+    # in the tunnel's stdout by the time proxy_echo completed, a curl
+    # timeout means the upstream handshake never finished — not a
+    # "handshake_only" (reachable) state.
+    "inbound connection",
+    "connection established",
+    "handshake complete",
+    "tunnel established",
+    "authenticated",
+    "accepted tcp:",
+    "started listen",
+    "client connected",
+    "server connected",
+    "reality: ",
+    "new connection:",
+)
+
+_HS_FAILURE_TOKENS = (
+    "handshake failed",
+    "connection refused",
+    "no route to host",
+    "i/o timeout",
+    "context deadline exceeded",
+    "tls: ",
+    "reality verify failed",
+    "auth failed",
+    "authentication failed",
+    "dial tcp",
+    "dial udp",
+)
+
+
+async def _read_proc_output(proc: asyncio.subprocess.Process, max_bytes: int = 32768) -> str:
+    """Drain whatever is currently buffered on proc.stdout without blocking.
+
+    The tunnel processes stay alive through proxy_echo; we want to peek
+    at what they've logged so far to decide if an upstream handshake
+    really succeeded. Using a very short wait_for keeps us from hanging
+    if the process is still producing output.
+    """
+    if proc.stdout is None:
+        return ""
+    buf = bytearray()
+    try:
+        while len(buf) < max_bytes:
+            chunk = await asyncio.wait_for(proc.stdout.read(4096), timeout=0.1)
+            if not chunk:
+                break
+            buf.extend(chunk)
+    except asyncio.TimeoutError:
+        pass
+    except Exception:
+        pass
+    return bytes(buf).decode("utf-8", errors="replace")
+
+
+def _classify_proxy_outcome(
+    status: str,
+    log_text: str,
+) -> tuple[bool, bool]:
+    """Return (handshake_ok, is_real_handshake_only).
+
+    Given proxy_echo's status and tunnel log, decide whether a "handshake_only"
+    verdict from proxy_echo actually reflects a completed upstream handshake.
+    If no success marker appeared in the logs, downgrade to BLOCKED.
+    """
+    if status == "ok":
+        return True, False
+    if status == "blocked":
+        return False, False
+
+    # status == "handshake_only" — inspect logs.
+    low = log_text.lower()
+    saw_success = any(tok in low for tok in _HS_SUCCESS_TOKENS)
+    saw_failure = any(tok in low for tok in _HS_FAILURE_TOKENS)
+    if saw_success and not saw_failure:
+        return True, True
+    # No positive signal → treat as BLOCKED. This corrects the previous
+    # bias of calling any curl timeout "handshake_only" even when the
+    # outer tunnel never came up.
+    return False, False
+
+
 async def _graceful_terminate(proc: asyncio.subprocess.Process, timeout: float = 0.5) -> None:
     """
     Terminate an asyncio subprocess and reap it.
@@ -149,19 +234,20 @@ async def proxy_echo(
 # ─────────────────────────────────────────────────────────────────────────────
 # OpenVPN probe
 # ─────────────────────────────────────────────────────────────────────────────
-async def probe_openvpn(host: str, port: int, psk_b64: str) -> ProbeResult:
+async def probe_openvpn(host: str, port: int, psk_pem: str) -> ProbeResult:
     result = ProbeResult()
     with tempfile.TemporaryDirectory(prefix="censprobe_client_ovpn_") as tmpdir:
         tmp_path = Path(tmpdir)
         psk_path = tmp_path / "static.key"
-        try:
-            psk_path.write_bytes(base64.b64decode(psk_b64))
-        except Exception as e:
-            result.error = f"bad PSK: {e}"
+        if not psk_pem or "BEGIN OpenVPN Static key" not in psk_pem:
+            result.error = "bad PSK: missing OpenVPN Static key V1 envelope"
             return result
+        psk_path.write_text(psk_pem, encoding="utf-8")
         psk_path.chmod(0o600)
 
         # Server side uses ifconfig 10.200.0.1 10.200.0.2 → client mirrors.
+        # Cipher must match the server (AES-256-CBC; AEAD ciphers are not
+        # allowed with `secret` / static-key mode).
         config = f"""
 proto udp
 remote {host} {port}
@@ -169,7 +255,7 @@ dev tun
 secret {psk_path}
 ifconfig 10.200.0.2 10.200.0.1
 keepalive 10 60
-cipher AES-256-GCM
+cipher AES-256-CBC
 resolv-retry infinite
 nobind
 verb 1
@@ -229,19 +315,25 @@ async def probe_wireguard(
 
     with tempfile.TemporaryDirectory(prefix="censprobe_client_wg_") as tmpdir:
         tmp_path = Path(tmpdir)
+        # WG client subnet must match listener (moved off 10.200/24 to
+        # avoid OpenVPN-tun routing collision in host netns).
         config = f"""[Interface]
 PrivateKey = {private_key}
-Address = 10.200.0.2/24
+Address = 10.202.0.2/24
 
 [Peer]
 PublicKey = {server_public}
 PresharedKey = {preshared}
 Endpoint = {host}:{port}
-AllowedIPs = 10.200.0.1/32
+AllowedIPs = 10.202.0.1/32
 PersistentKeepalive = 25
 """
         conf_path = tmp_path / "censwg1.conf"
         conf_path.write_text(config)
+
+        # Remove any stale censwg1 from a previously killed run. wg-quick
+        # up would otherwise fail with "File exists" in host netns.
+        await run_cmd(["ip", "link", "del", "censwg1"], timeout=3.0)
 
         code, _, err = await run_cmd(["wg-quick", "up", str(conf_path)])
         if code != 0:
@@ -269,7 +361,7 @@ PersistentKeepalive = 25
             result.handshake_ok = hs_ok
             if hs_ok:
                 result.verdict = Verdict.HANDSHAKE_ONLY
-                if await ping_echo("10.200.0.1"):
+                if await ping_echo("10.202.0.1"):
                     result.data_ok = True
                     result.verdict = Verdict.OK
         finally:
@@ -320,6 +412,9 @@ PersistentKeepalive = 25
 """
         conf_path = tmp_path / "censawg1.conf"
         conf_path.write_text(config)
+
+        # Remove any stale censawg1 from a previously killed run.
+        await run_cmd(["ip", "link", "del", "censawg1"], timeout=3.0)
 
         code, _, err = await run_cmd(["awg-quick", "up", str(conf_path)])
         if code != 0:
@@ -460,15 +555,18 @@ socks5:
                 return result
 
             status, rtt = await proxy_echo(local_port, ECHO_PORTS["hysteria2"], "socks5h")
+            log_text = await _read_proc_output(proc)
+            hs_ok, is_hs_only = _classify_proxy_outcome(status, log_text)
             if status == "ok":
                 result.handshake_ok = True
                 result.data_ok = True
                 result.verdict = Verdict.OK
                 result.rtt_ms = rtt
-            elif status == "handshake_only":
+            elif is_hs_only:
                 result.handshake_ok = True
                 result.verdict = Verdict.HANDSHAKE_ONLY
             else:
+                result.handshake_ok = hs_ok
                 result.verdict = Verdict.BLOCKED
         finally:
             await _graceful_terminate(proc)
@@ -508,15 +606,18 @@ async def _tunnel_via_singbox_or_xray(
                 return result
 
             status, rtt = await proxy_echo(local_port, ECHO_PORTS[proto_label], "socks5h")
+            log_text = await _read_proc_output(proc)
+            hs_ok, is_hs_only = _classify_proxy_outcome(status, log_text)
             if status == "ok":
                 result.handshake_ok = True
                 result.data_ok = True
                 result.verdict = Verdict.OK
                 result.rtt_ms = rtt
-            elif status == "handshake_only":
+            elif is_hs_only:
                 result.handshake_ok = True
                 result.verdict = Verdict.HANDSHAKE_ONLY
             else:
+                result.handshake_ok = hs_ok
                 result.verdict = Verdict.BLOCKED
         finally:
             await _graceful_terminate(proc)
