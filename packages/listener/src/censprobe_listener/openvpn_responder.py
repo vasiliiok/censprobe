@@ -20,7 +20,9 @@ logger = logging.getLogger(__name__)
 class OpenVPNResponder:
     """
     Wraps openvpn process in static-key p2p mode.
-    Protocol: client sends encrypted P_DATA_V1 -> server decrypts successfully.
+    Client connects, OpenVPN establishes tunnel, client can ping the server IP
+    through the tunnel — kernel replies to ICMP on its own tun IP, which we
+    observe as "TCP/UDP read bytes" > 0 in status file.
     """
 
     def __init__(self, psk_b64: str, port: int = 1194) -> None:
@@ -28,6 +30,10 @@ class OpenVPNResponder:
         self.port = port
         self._proc: subprocess.Popen | None = None
         self._config_dir: tempfile.TemporaryDirectory | None = None
+        self._status_path: Path | None = None
+        # Cached snapshot of connection/transfer state captured before teardown.
+        self._final_handshake_count: int = 0
+        self._final_bytes_received: int = 0
 
     async def start(self) -> None:
         """Write config files and launch openvpn subprocess."""
@@ -40,7 +46,12 @@ class OpenVPNResponder:
         psk_path.write_bytes(psk_bytes)
         psk_path.chmod(0o600)
 
-        # Write OpenVPN config (p2p mode, no 'mode server')
+        # Status/log files colocated with config (never shared across instances).
+        self._status_path = tmpdir / "status.log"
+        log_path = tmpdir / "openvpn.log"
+
+        # verb=1 keeps logging minimal so even if we missed a reader the pipes
+        # would not fill up; we also redirect stdio to DEVNULL below.
         config = f"""
 proto udp
 port {self.port}
@@ -51,9 +62,9 @@ keepalive 10 60
 cipher AES-256-GCM
 persist-key
 persist-tun
-status /tmp/openvpn-status.log
-verb 3
-log /tmp/openvpn-censprobe.log
+status {self._status_path} 5
+log-append {log_path}
+verb 1
 """
         conf_path = tmpdir / "server.conf"
         conf_path.write_text(config)
@@ -63,19 +74,42 @@ log /tmp/openvpn-censprobe.log
             None,
             lambda: subprocess.Popen(
                 ["openvpn", "--config", str(conf_path)],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             ),
         )
         # Give it a moment to start
         await asyncio.sleep(1.0)
         if self._proc.poll() is not None:
-            stderr = self._proc.stderr.read().decode(errors="replace")
-            raise RuntimeError(f"OpenVPN failed to start: {stderr}")
+            tail = log_path.read_text(errors="replace") if log_path.exists() else "<no log>"
+            raise RuntimeError(f"OpenVPN failed to start:\n{tail[-2000:]}")
         logger.info("OpenVPN responder started on UDP/%d", self.port)
 
+    def _read_status(self) -> tuple[int, int]:
+        """Parse status file → (handshake_count_approx, bytes_received)."""
+        if not self._status_path or not self._status_path.exists():
+            return 0, 0
+        try:
+            content = self._status_path.read_text(errors="replace")
+            bytes_read = 0
+            for line in content.splitlines():
+                if "TCP/UDP read bytes" in line:
+                    parts = line.split(",")
+                    if len(parts) >= 2:
+                        try:
+                            bytes_read = int(parts[1].strip())
+                        except ValueError:
+                            pass
+            handshake = 1 if bytes_read > 0 else 0
+            return handshake, bytes_read
+        except Exception:
+            return 0, 0
+
     async def stop(self) -> None:
-        """Terminate openvpn and cleanup."""
+        """Capture final state, then terminate openvpn and cleanup."""
+        # Capture status BEFORE teardown so data_transfer_ok is observable.
+        self._final_handshake_count, self._final_bytes_received = self._read_status()
+
         if self._proc:
             try:
                 self._proc.terminate()
@@ -93,24 +127,24 @@ log /tmp/openvpn-censprobe.log
                 pass
             self._config_dir = None
 
-        logger.info("OpenVPN responder stopped")
+        logger.info(
+            "OpenVPN responder stopped (handshakes: %d, bytes: %d)",
+            self._final_handshake_count,
+            self._final_bytes_received,
+        )
 
     @property
     def connection_count(self) -> int:
-        """Dynamically check openvpn-status.log for data transfer."""
-        status_file = Path("/tmp/openvpn-status.log")
-        if not status_file.exists():
-            return 0
-        
-        try:
-            content = status_file.read_text()
-            # In p2p static key mode, there is no "CLIENT LIST". 
-            # We check the bytes received. If > 0, connection happened.
-            for line in content.splitlines():
-                if "TCP/UDP read bytes" in line:
-                    bytes_read = int(line.split(",")[1].strip())
-                    if bytes_read > 0:
-                        return 1
-            return 0
-        except Exception:
-            return 0
+        """Handshake count snapshot (falls back to live read while running)."""
+        if self._final_handshake_count:
+            return self._final_handshake_count
+        hs, _ = self._read_status()
+        return hs
+
+    @property
+    def data_transfer_ok(self) -> bool:
+        """Data traversed the tunnel if we observed read bytes > a small threshold."""
+        if self._final_bytes_received:
+            return self._final_bytes_received > 64  # above handshake noise
+        _, b = self._read_status()
+        return b > 64

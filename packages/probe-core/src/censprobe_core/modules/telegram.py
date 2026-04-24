@@ -289,11 +289,17 @@ async def _stun_probe(dc_id: int, ip: str, port: int) -> TestResult:
                 timeout=3.0,
             )
             rtt = (time.monotonic() - t0) * 1000
-            # STUN Binding Response type = 0x0101
-            is_stun_response = len(data) >= 4 and struct.unpack(">H", data[:2])[0] == 0x0101
+            # STUN Binding Response type = 0x0101 AND magic cookie must match our txid transaction.
+            is_stun_response = (
+                len(data) >= 20
+                and struct.unpack(">H", data[:2])[0] == 0x0101
+                and data[4:8] == b"\x21\x12\xa4\x42"
+                and data[8:20] == txid
+            )
+            verdict = Verdict.OK if is_stun_response else Verdict.ANOMALY
             return TestResult(
                 test=test_name, category="telegram", target=target,
-                verdict=Verdict.OK,
+                verdict=verdict,
                 rtt_ms=rtt,
                 evidence={"stun_response": is_stun_response, "bytes_received": len(data)},
             )

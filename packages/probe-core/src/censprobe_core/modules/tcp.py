@@ -16,8 +16,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import socket
-import struct
 import time
 from typing import Optional
 

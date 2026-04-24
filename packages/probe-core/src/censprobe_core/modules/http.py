@@ -85,11 +85,12 @@ async def _test_url(
     comparator: BaselineComparator,
     repeats: int,
 ) -> TestResult:
-    """Fetch a URL and analyze the response."""
+    """Fetch a URL and analyze the response. Retries on transient failures."""
     domain = target.get("domain", url)
     test_name = f"http_{_slug(domain)}"
+    last_error: Optional[TestResult] = None
 
-    for attempt in range(repeats):
+    for attempt in range(1, repeats + 1):
         try:
             r = await client.get(url, headers={"User-Agent": _ua_chrome()})
 
@@ -97,19 +98,11 @@ async def _test_url(
             body_length = len(body)
             status = r.status_code
 
-            # TLS status (did TLS handshake succeed?)
             tls_ok = url.startswith("https://") and r.status_code < 600
-
-            # Block page detection
             is_blockpage = _is_blockpage(body, status)
-
-            # Cert chain hash (if HTTPS)
             cert_sha256_list = _extract_cert_sha256(r)
-
-            # Stable fragment SHA256
             stable_frags = _extract_stable_fragments(body, target.get("stable_selectors", []))
 
-            # Compare with baseline
             verdict, method = comparator.compare_http(url, status, body_length, tls_ok, is_blockpage)
 
             return TestResult(
@@ -118,7 +111,7 @@ async def _test_url(
                 target=url,
                 verdict=verdict,
                 method=method,
-                attempts=attempt + 1,
+                attempts=attempt,
                 evidence={
                     "status": status,
                     "body_length": body_length,
@@ -132,59 +125,49 @@ async def _test_url(
                 confidence=0.9,
             )
 
-        except httpx.ConnectTimeout:
-            if attempt < repeats - 1:
-                await asyncio.sleep(2)
-                continue
-            return _timeout_result(test_name, url)
-
         except httpx.SSLError as e:
+            # TLS failures are not retried — same cert error will repeat.
             return TestResult(
-                test=test_name,
-                category="http",
-                target=url,
+                test=test_name, category="http", target=url,
                 verdict=Verdict.BLOCKED,
                 method=BlockingMethod.TLS_HANDSHAKE_FAILURE,
+                attempts=attempt,
                 evidence={"ssl_error": str(e)},
             )
 
         except httpx.ConnectError as e:
             err = str(e).lower()
             if "connection reset" in err:
+                # RST is not retried — repeat would be identical.
                 return TestResult(
-                    test=test_name,
-                    category="http",
-                    target=url,
+                    test=test_name, category="http", target=url,
                     verdict=Verdict.BLOCKED,
                     method=BlockingMethod.TCP_RST_INJECTION,
+                    attempts=attempt,
                     evidence={"error": str(e)},
                 )
-            if attempt < repeats - 1:
-                await asyncio.sleep(2)
-                continue
-            return TestResult(
-                test=test_name,
-                category="http",
-                target=url,
-                verdict=Verdict.BLOCKED,
-                method=BlockingMethod.IP_DROPPED,
+            last_error = TestResult(
+                test=test_name, category="http", target=url,
+                verdict=Verdict.BLOCKED, method=BlockingMethod.IP_DROPPED,
+                attempts=attempt,
                 evidence={"connect_error": str(e)},
             )
 
+        except httpx.ConnectTimeout:
+            last_error = _timeout_result(test_name, url, attempts=attempt)
+
         except Exception as e:
             logger.debug("HTTP test error for %s: %s", url, e)
-            if attempt < repeats - 1:
-                await asyncio.sleep(2)
-                continue
-            return TestResult(
-                test=test_name,
-                category="http",
-                target=url,
-                verdict=Verdict.ERROR,
+            last_error = TestResult(
+                test=test_name, category="http", target=url,
+                verdict=Verdict.ERROR, attempts=attempt,
                 evidence={"error": str(e)},
             )
 
-    return _timeout_result(test_name, url)
+        if attempt < repeats:
+            await asyncio.sleep(2)
+
+    return last_error or _timeout_result(test_name, url, attempts=repeats)
 
 
 def _is_blockpage(body: bytes, status: int) -> bool:
@@ -217,13 +200,14 @@ def _extract_stable_fragments(body: bytes, selectors: list[str]) -> dict[str, st
     return {}
 
 
-def _timeout_result(test_name: str, url: str) -> TestResult:
+def _timeout_result(test_name: str, url: str, attempts: int = 1) -> TestResult:
     return TestResult(
         test=test_name,
         category="http",
         target=url,
         verdict=Verdict.BLOCKED,
         method=BlockingMethod.IP_DROPPED,
+        attempts=attempts,
         evidence={"reason": "connect_timeout_after_retries"},
     )
 

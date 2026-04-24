@@ -1,9 +1,13 @@
 """
-wg_responder.py — WireGuard test responder.
+wg_responder.py — WireGuard / AmneziaWG test responders.
 
-Uses wireguard-go (userspace WireGuard) or kernel WireGuard (via ip/wg).
-Sets up a temporary WireGuard interface, listens for handshake initiations,
-records events, tears down interface on stop.
+Use kernel WireGuard (via ip/wg) and amneziawg-go (via awg-quick).
+Both set up a temporary interface, listen for handshake initiations,
+record events, tear down interface on stop.
+
+State snapshot is captured in stop() BEFORE teardown so
+data_transfer_ok and handshake_count can be read after the interface
+has been removed.
 """
 from __future__ import annotations
 
@@ -16,12 +20,47 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 _WG_INTERFACE = "censwg0"
+_MIN_ECHO_BYTES = 64  # above pure-handshake noise
+
+
+def _read_wg_transfer(interface: str) -> tuple[int, int, int]:
+    """
+    Return (peer_count_with_handshake, rx_bytes, tx_bytes) from `wg show`.
+
+    `wg show <iface> transfer`   → "<pubkey>\t<rx>\t<tx>"
+    `wg show <iface> latest-handshakes` → "<pubkey>\t<unix_ts>"
+    """
+    try:
+        out_tr = subprocess.check_output(
+            ["wg", "show", interface, "transfer"], text=True, stderr=subprocess.DEVNULL
+        )
+        out_hs = subprocess.check_output(
+            ["wg", "show", interface, "latest-handshakes"], text=True, stderr=subprocess.DEVNULL
+        )
+    except Exception:
+        return 0, 0, 0
+
+    rx = tx = 0
+    for line in out_tr.splitlines():
+        parts = line.split()
+        if len(parts) >= 3:
+            try:
+                rx += int(parts[1])
+                tx += int(parts[2])
+            except ValueError:
+                pass
+
+    hs_peers = 0
+    for line in out_hs.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[1] != "0":
+            hs_peers += 1
+
+    return hs_peers, rx, tx
 
 
 class WireGuardResponder:
-    """
-    Brings up a temporary WireGuard interface for handshake testing.
-    """
+    """Temporary WireGuard interface for handshake + data-phase testing."""
 
     def __init__(
         self,
@@ -37,18 +76,17 @@ class WireGuardResponder:
         self.port = port
         self.interface = interface
         self._tmpdir: tempfile.TemporaryDirectory | None = None
+        self._final_hs_count: int = 0
+        self._final_rx_bytes: int = 0
 
     async def start(self) -> None:
-        """Configure and bring up WireGuard interface."""
         self._tmpdir = tempfile.TemporaryDirectory(prefix="censprobe_wg_")
         tmpdir = Path(self._tmpdir.name)
 
-        # Write private key to file
         pk_path = tmpdir / "privatekey"
         pk_path.write_text(self.server_private_key)
         pk_path.chmod(0o600)
 
-        # Write wg config
         config = f"""[Interface]
 ListenPort = {self.port}
 PrivateKey = {self.server_private_key}
@@ -57,7 +95,7 @@ Address = 10.200.0.1/24
 [Peer]
 PublicKey = {self.client_public_key}
 PresharedKey = {self.preshared_key}
-AllowedIPs = 0.0.0.0/0
+AllowedIPs = 10.200.0.2/32
 """
         conf_path = tmpdir / f"{self.interface}.conf"
         conf_path.write_text(config)
@@ -65,8 +103,7 @@ AllowedIPs = 0.0.0.0/0
 
         loop = asyncio.get_running_loop()
 
-        def _bring_up():
-            # Create interface using wg-quick or ip + wg setconf
+        def _bring_up() -> None:
             try:
                 subprocess.run(
                     ["ip", "link", "add", self.interface, "type", "wireguard"],
@@ -77,12 +114,12 @@ AllowedIPs = 0.0.0.0/0
                     check=True, capture_output=True,
                 )
                 subprocess.run(
-                    ["ip", "link", "set", "up", self.interface],
-                    check=True, capture_output=True,
-                )
-                subprocess.run(
                     ["ip", "addr", "add", "10.200.0.1/24", "dev", self.interface],
                     check=False, capture_output=True,
+                )
+                subprocess.run(
+                    ["ip", "link", "set", "up", self.interface],
+                    check=True, capture_output=True,
                 )
             except subprocess.CalledProcessError as e:
                 raise RuntimeError(
@@ -93,10 +130,14 @@ AllowedIPs = 0.0.0.0/0
         logger.info("WireGuard responder started on UDP/%d (iface: %s)", self.port, self.interface)
 
     async def stop(self) -> None:
-        """Bring down WireGuard interface."""
+        # Snapshot peer stats BEFORE tearing the interface down.
+        hs, rx, _ = _read_wg_transfer(self.interface)
+        self._final_hs_count = hs
+        self._final_rx_bytes = rx
+
         loop = asyncio.get_running_loop()
 
-        def _tear_down():
+        def _tear_down() -> None:
             try:
                 subprocess.run(
                     ["ip", "link", "del", self.interface],
@@ -114,28 +155,28 @@ AllowedIPs = 0.0.0.0/0
                 pass
             self._tmpdir = None
 
-        logger.info("WireGuard responder stopped")
+        logger.info(
+            "WireGuard responder stopped (handshakes=%d, rx=%d bytes)",
+            self._final_hs_count, self._final_rx_bytes,
+        )
 
     @property
     def connection_count(self) -> int:
-        """Dynamically check wg show for handshakes."""
-        try:
-            out = subprocess.check_output(["wg", "show", self.interface, "latest-handshakes"], text=True)
-            count = 0
-            for line in out.splitlines():
-                parts = line.split()
-                if len(parts) >= 2 and parts[1] != "0":
-                    count += 1
-            return count
-        except Exception:
-            return 0
+        if self._final_hs_count:
+            return self._final_hs_count
+        hs, _, _ = _read_wg_transfer(self.interface)
+        return hs
+
+    @property
+    def data_transfer_ok(self) -> bool:
+        if self._final_rx_bytes:
+            return self._final_rx_bytes > _MIN_ECHO_BYTES
+        _, rx, _ = _read_wg_transfer(self.interface)
+        return rx > _MIN_ECHO_BYTES
 
 
 class AmneziaWGResponder:
-    """
-    AmneziaWG responder using amneziawg-go binary.
-    Identical structure to WireGuard but with junk packet parameters.
-    """
+    """AmneziaWG responder using awg-quick. Identical structure, plus junk params."""
 
     def __init__(
         self,
@@ -158,21 +199,16 @@ class AmneziaWGResponder:
         self.client_public_key = client_public_key
         self.preshared_key = preshared_key
         self.port = port
-        self.jc = jc
-        self.jmin = jmin
-        self.jmax = jmax
-        self.s1 = s1
-        self.s2 = s2
-        self.h1 = h1
-        self.h2 = h2
-        self.h3 = h3
-        self.h4 = h4
+        self.jc, self.jmin, self.jmax = jc, jmin, jmax
+        self.s1, self.s2 = s1, s2
+        self.h1, self.h2, self.h3, self.h4 = h1, h2, h3, h4
         self.interface = interface
-        self._proc: subprocess.Popen | None = None
         self._tmpdir: tempfile.TemporaryDirectory | None = None
+        self._conf_path: Path | None = None
+        self._final_hs_count: int = 0
+        self._final_rx_bytes: int = 0
 
     async def start(self) -> None:
-        """Start amneziawg-go process."""
         self._tmpdir = tempfile.TemporaryDirectory(prefix="censprobe_awg_")
         tmpdir = Path(self._tmpdir.name)
 
@@ -193,22 +229,21 @@ H4 = {self.h4}
 [Peer]
 PublicKey = {self.client_public_key}
 PresharedKey = {self.preshared_key}
-AllowedIPs = 0.0.0.0/0
+AllowedIPs = 10.201.0.2/32
 """
-        conf_path = tmpdir / f"{self.interface}.conf"
-        conf_path.write_text(config)
-        conf_path.chmod(0o600)
+        self._conf_path = tmpdir / f"{self.interface}.conf"
+        self._conf_path.write_text(config)
+        self._conf_path.chmod(0o600)
 
         loop = asyncio.get_running_loop()
 
-        def _start():
+        def _start() -> None:
             try:
                 subprocess.run(
-                    ["awg-quick", "up", str(conf_path)],
+                    ["awg-quick", "up", str(self._conf_path)],
                     check=True, capture_output=True,
                 )
             except subprocess.CalledProcessError as e:
-                # Fallback: try wg-quick (some distributions bundle awg as wg)
                 raise RuntimeError(
                     f"AmneziaWG start failed: {e.stderr.decode(errors='replace')}"
                 )
@@ -217,14 +252,20 @@ AllowedIPs = 0.0.0.0/0
         logger.info("AmneziaWG responder started on UDP/%d", self.port)
 
     async def stop(self) -> None:
-        if self._tmpdir:
-            tmpdir = Path(self._tmpdir.name)
-            conf_path = tmpdir / f"{self.interface}.conf"
+        # Snapshot stats BEFORE teardown.
+        hs, rx, _ = _read_wg_transfer(self.interface)
+        self._final_hs_count = hs
+        self._final_rx_bytes = rx
+
+        if self._tmpdir and self._conf_path:
             loop = asyncio.get_running_loop()
 
-            def _stop():
+            def _stop() -> None:
                 try:
-                    subprocess.run(["awg-quick", "down", str(conf_path)], capture_output=True)
+                    subprocess.run(
+                        ["awg-quick", "down", str(self._conf_path)],
+                        capture_output=True,
+                    )
                 except Exception as e:
                     logger.warning("AmneziaWG stop error: %s", e)
 
@@ -236,18 +277,21 @@ AllowedIPs = 0.0.0.0/0
                 pass
             self._tmpdir = None
 
-        logger.info("AmneziaWG responder stopped")
+        logger.info(
+            "AmneziaWG responder stopped (handshakes=%d, rx=%d bytes)",
+            self._final_hs_count, self._final_rx_bytes,
+        )
 
     @property
     def connection_count(self) -> int:
-        """Dynamically check wg show for handshakes."""
-        try:
-            out = subprocess.check_output(["wg", "show", self.interface, "latest-handshakes"], text=True)
-            count = 0
-            for line in out.splitlines():
-                parts = line.split()
-                if len(parts) >= 2 and parts[1] != "0":
-                    count += 1
-            return count
-        except Exception:
-            return 0
+        if self._final_hs_count:
+            return self._final_hs_count
+        hs, _, _ = _read_wg_transfer(self.interface)
+        return hs
+
+    @property
+    def data_transfer_ok(self) -> bool:
+        if self._final_rx_bytes:
+            return self._final_rx_bytes > _MIN_ECHO_BYTES
+        _, rx, _ = _read_wg_transfer(self.interface)
+        return rx > _MIN_ECHO_BYTES

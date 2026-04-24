@@ -11,17 +11,15 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING
+from typing import Optional
 
 from censprobe_core.models import (
     BaselineData,
     Verdict,
     BlockingMethod,
 )
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
@@ -52,12 +50,29 @@ def load_baseline(path: Path | None = None) -> BaselineData:
                 baseline.runs_count,
             )
         else:
-            logger.info(
-                "Loaded baseline v%s (runs=%d, valid_until=%s)",
-                baseline.version,
-                baseline.runs_count,
-                baseline.validity_until,
-            )
+            # Warn if validity_until has passed — stale baseline produces
+            # false positives (DNS/TLS results compared against outdated ASNs/certs).
+            if baseline.validity_until is not None:
+                now = datetime.now(tz=timezone.utc)
+                exp = baseline.validity_until
+                if exp.tzinfo is None:
+                    exp = exp.replace(tzinfo=timezone.utc)
+                if exp < now:
+                    logger.warning(
+                        "Baseline v%s has EXPIRED on %s. Results may be unreliable. "
+                        "Run 'docker compose --profile control up' on a clean VPS.",
+                        baseline.version, exp.isoformat(),
+                    )
+                else:
+                    logger.info(
+                        "Loaded baseline v%s (runs=%d, valid_until=%s)",
+                        baseline.version, baseline.runs_count, exp.isoformat(),
+                    )
+            else:
+                logger.info(
+                    "Loaded baseline v%s (runs=%d, validity_until=unknown)",
+                    baseline.version, baseline.runs_count,
+                )
         return baseline
     except Exception as e:
         logger.error("Failed to parse baseline: %s", e)

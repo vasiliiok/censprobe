@@ -42,6 +42,7 @@ from censprobe_listener.credentials import (
     load_protocols_yaml,
     save_protocols_yaml,
 )
+from censprobe_listener.echo_server import EchoServer
 from censprobe_listener.openvpn_responder import OpenVPNResponder
 from censprobe_listener.wg_responder import AmneziaWGResponder, WireGuardResponder
 from censprobe_listener.ss_responder import ShadowsocksResponder
@@ -114,11 +115,16 @@ async def _async_main(test_id: str, session_id: str, skip_push: bool) -> None:
         console.print("[dim]Loading existing credentials...[/dim]")
         creds = load_protocols_yaml(protocols_path)
 
-    # ── Step 3: Start all responders ──────────────────────────────────────────
-    responders: dict[str, object] = {}
-    start_errors: dict[str, str] = {}
+    # ── Step 3a: Start local echo server for SS/VLESS/Hy2 data phase ──────────
+    echo_server = EchoServer()
+    try:
+        await echo_server.start()
+    except Exception as e:
+        console.print(f"[yellow]Warning: echo server failed to start: {e}[/yellow]")
+        echo_server = None  # responders fall back to handshake-only signals
 
-    responders, start_errors = await _start_responders(creds)
+    # ── Step 3b: Start all responders ─────────────────────────────────────────
+    responders, start_errors = await _start_responders(creds, echo_server)
 
     if not responders:
         console.print("[red]All responders failed to start. Exiting.[/red]")
@@ -149,14 +155,19 @@ async def _async_main(test_id: str, session_id: str, skip_push: bool) -> None:
     stopped_at = datetime.now(tz=timezone.utc)
     duration = (stopped_at - started_at).total_seconds()
 
-    # ── Step 5: Stop all responders ───────────────────────────────────────────
-    await _stop_responders(responders)
-
-    # ── Step 6: Finalize results ──────────────────────────────────────────────
+    # ── Step 5: Finalize BEFORE teardown (wg/awg lose their interface) ────────
     results: dict[str, ProtocolResult] = {}
     for name, responder in responders.items():
         pr = _finalize_protocol_result(name, responder)
         results[name] = pr
+
+    # ── Step 6: Stop responders + echo server ─────────────────────────────────
+    await _stop_responders(responders)
+    if echo_server is not None:
+        try:
+            await echo_server.stop()
+        except Exception as e:
+            logger.warning("Echo server stop error: %s", e)
 
     # Print final table
     _print_final_results(results, duration)
@@ -199,10 +210,24 @@ async def _async_main(test_id: str, session_id: str, skip_push: bool) -> None:
 # Responder lifecycle
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def _start_responders(creds: ProtocolCredentials) -> tuple[dict, dict]:
+async def _start_responders(
+    creds: ProtocolCredentials,
+    echo_server: EchoServer | None,
+) -> tuple[dict, dict]:
     """Start all protocol responders. Returns (started_dict, errors_dict)."""
     responders: dict = {}
     errors: dict = {}
+
+    ss = ShadowsocksResponder(creds.ss_password_b64, creds.ss_port, creds.ss_method)
+    vless = VlessRealityResponder(
+        creds.vless_uuid, creds.vless_pvk, creds.vless_pbk,
+        creds.vless_short_id, creds.vless_server_name, creds.vless_port,
+    )
+    hy2 = HysteriaResponder(creds.hy2_auth, creds.hy2_obfs_password, creds.hy2_port)
+
+    # Inject echo_server into wrappers that need data-phase signal.
+    for r in (ss, vless, hy2):
+        r.echo_server = echo_server
 
     protocols_to_start = [
         ("openvpn", OpenVPNResponder(creds.openvpn_psk_b64, creds.openvpn_port)),
@@ -215,12 +240,9 @@ async def _start_responders(creds: ProtocolCredentials) -> tuple[dict, dict]:
             creds.awg_s1, creds.awg_s2,
             creds.awg_h1, creds.awg_h2, creds.awg_h3, creds.awg_h4,
         )),
-        ("shadowsocks", ShadowsocksResponder(creds.ss_password_b64, creds.ss_port, creds.ss_method)),
-        ("vless_reality", VlessRealityResponder(
-            creds.vless_uuid, creds.vless_pvk, creds.vless_pbk,
-            creds.vless_short_id, creds.vless_server_name, creds.vless_port,
-        )),
-        ("hysteria2", HysteriaResponder(creds.hy2_auth, creds.hy2_obfs_password, creds.hy2_port)),
+        ("shadowsocks", ss),
+        ("vless_reality", vless),
+        ("hysteria2", hy2),
     ]
 
     for name, responder in protocols_to_start:
@@ -245,11 +267,15 @@ async def _stop_responders(responders: dict) -> None:
 
 
 def _finalize_protocol_result(name: str, responder) -> ProtocolResult:
-    """Build ProtocolResult from responder state."""
+    """Build ProtocolResult from responder state (snapshot BEFORE teardown)."""
     handshake_count = getattr(responder, "connection_count", 0) or \
                       getattr(responder, "handshake_count", 0)
+    data_ok = bool(getattr(responder, "data_transfer_ok", False))
 
-    pr = ProtocolResult(handshake_count=handshake_count)
+    pr = ProtocolResult(
+        handshake_count=handshake_count,
+        data_transfer_ok=data_ok,
+    )
     pr.finalize()
     return pr
 

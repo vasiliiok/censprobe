@@ -21,11 +21,13 @@ class ProtocolCredentials:
     openvpn_port: int = 1194
 
     wg_server_public: str = ""
+    wg_client_private: str = ""
     wg_client_public: str = ""
     wg_preshared_key: str = ""
     wg_port: int = 51820
 
     awg_server_public: str = ""
+    awg_client_private: str = ""
     awg_client_public: str = ""
     awg_preshared_key: str = ""
     awg_port: int = 51821
@@ -65,12 +67,14 @@ def load_protocols_yaml(path: Path) -> ProtocolCredentials:
 
     wg = raw.get("wireguard", {})
     c.wg_server_public = wg.get("server_public_key", "")
+    c.wg_client_private = wg.get("client_private_key", "")
     c.wg_client_public = wg.get("client_public_key", "")
     c.wg_preshared_key = wg.get("preshared_key", "")
     c.wg_port = wg.get("port", 51820)
 
     awg = raw.get("amneziawg", {})
     c.awg_server_public = awg.get("server_public_key", "")
+    c.awg_client_private = awg.get("client_private_key", "")
     c.awg_client_public = awg.get("client_public_key", "")
     c.awg_preshared_key = awg.get("preshared_key", "")
     c.awg_port = awg.get("port", 51821)

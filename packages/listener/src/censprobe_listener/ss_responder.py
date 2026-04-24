@@ -2,7 +2,9 @@
 ss_responder.py — Shadowsocks 2022 test responder via sing-box.
 
 Runs sing-box with a Shadowsocks inbound (2022-blake3-aes-256-gcm).
-Records handshake/connection events by monitoring sing-box output.
+The only allowed outbound is a local echo port (127.0.0.1:ECHO_PORTS['shadowsocks']);
+any other traffic is blocked. Connection/handshake counts come from sing-box
+stdout, data-phase success from the echo server's byte counter.
 """
 from __future__ import annotations
 
@@ -13,30 +15,37 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from censprobe_listener.echo_server import ECHO_PORTS
+
 logger = logging.getLogger(__name__)
 
 
 class ShadowsocksResponder:
-    """
-    Runs sing-box as a Shadowsocks 2022 inbound server.
-    """
-
     def __init__(
         self,
         password_b64: str,
         port: int = 8388,
         method: str = "2022-blake3-aes-256-gcm",
+        echo_port: int | None = None,
     ) -> None:
         self.password_b64 = password_b64
         self.port = port
         self.method = method
+        self.echo_port = echo_port or ECHO_PORTS["shadowsocks"]
         self._proc: subprocess.Popen | None = None
         self._tmpdir: tempfile.TemporaryDirectory | None = None
         self._log_task: asyncio.Task | None = None
         self.connection_count = 0
+        # Injected by listener main so we can observe data phase.
+        self.echo_server = None  # type: ignore[assignment]
+
+    @property
+    def data_transfer_ok(self) -> bool:
+        if self.echo_server is None:
+            return False
+        return self.echo_server.data_ok("shadowsocks")
 
     async def start(self) -> None:
-        """Write sing-box config and launch subprocess."""
         self._tmpdir = tempfile.TemporaryDirectory(prefix="censprobe_ss_")
         tmpdir = Path(self._tmpdir.name)
 
@@ -58,9 +67,14 @@ class ShadowsocksResponder:
                 {"type": "block", "tag": "block"},
             ],
             "route": {
+                "final": "block",
                 "rules": [
-                    {"inbound": ["censprobe-ss"], "outbound": "block"}
-                ]
+                    {
+                        "ip_cidr": ["127.0.0.1/32"],
+                        "port": [self.echo_port],
+                        "outbound": "direct",
+                    }
+                ],
             },
         }
 
@@ -75,15 +89,14 @@ class ShadowsocksResponder:
         )
         await asyncio.sleep(0.5)
         if self._proc.poll() is not None:
-            out = self._proc.stdout.read()
+            out = self._proc.stdout.read() if self._proc.stdout else ""
             raise RuntimeError(f"sing-box failed to start: {out}")
 
-        # Monitor output for connection events
         self._log_task = asyncio.create_task(self._monitor_output())
-        logger.info("Shadowsocks responder started on TCP/%d", self.port)
+        logger.info("Shadowsocks responder started on TCP/%d (echo: 127.0.0.1:%d)",
+                    self.port, self.echo_port)
 
     async def _monitor_output(self) -> None:
-        """Read sing-box stdout and count connections."""
         if not self._proc or not self._proc.stdout:
             return
         loop = asyncio.get_running_loop()
@@ -95,13 +108,12 @@ class ShadowsocksResponder:
                 line = line.strip()
                 if line:
                     logger.debug("[sing-box] %s", line)
-                    if "accepted" in line.lower() or "connected" in line.lower():
+                    if "inbound connection" in line.lower() or "accepted" in line.lower():
                         self.connection_count += 1
         except Exception as e:
             logger.debug("sing-box monitor ended: %s", e)
 
     async def stop(self) -> None:
-        """Terminate sing-box and cleanup."""
         if self._log_task:
             self._log_task.cancel()
             try:

@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import subprocess
 import time
 from typing import Optional
 
@@ -138,18 +137,24 @@ async def _measure_bandwidth_cloudflare() -> float:
 
 async def _measure_bandwidth_googlevideo() -> tuple[float, list[float]]:
     """
-    Measure bandwidth to googlevideo.com.
-    Uses a known-stable URL pattern for a small public video.
-    Falls back to a simple GET if the real CDN URL fails.
+    Measure bandwidth towards a Google/YouTube CDN edge.
+
+    There is no public stable-name streaming URL we can rely on, so we hit
+    two anchors that share the throttled SNI / infrastructure and return
+    a real response body:
+      1. https://www.youtube.com/  — front page HTML (~kB-MB range).
+      2. Fallback: https://www.google.com/  — large HTML, same AS15169.
+    A 404/0-byte path would otherwise mask real throttling as "bandwidth=0".
     """
-    # Try a neutral YouTube-related URL
-    url = "https://rr1---sn-q4flrn76.googlevideo.com/generate_204"
-    # More reliable: use a public test endpoint if available
-    # For now use a generic large HTTP file approach
-    return await _measure_bandwidth_with_profile(
-        "https://www.youtube.com/yts/img/avatar_720-vflYJnzBm.jpg",
-        5,
+    bw, profile = await _measure_bandwidth_with_profile(
+        "https://www.youtube.com/", 10,
     )
+    if bw <= 0.01:  # effectively no bytes — try neutral fallback so we don't
+                    # mis-report "throttled" when the host just returned 0 B.
+        bw, profile = await _measure_bandwidth_with_profile(
+            "https://www.google.com/", 10,
+        )
+    return bw, profile
 
 
 async def _measure_bandwidth_with_profile(

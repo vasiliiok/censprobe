@@ -17,15 +17,16 @@ from __future__ import annotations
 
 import logging
 import os
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, AsyncIterator, Optional
 
 import git
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sync_api.db import (
@@ -49,10 +50,20 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 
 WORKSPACE = Path(os.environ.get("WORKSPACE", "/workspace"))
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Initialize database tables on startup."""
+    await init_db()
+    logger.info("DB tables initialized")
+    yield
+
+
 app = FastAPI(
     title="censprobe-sync-api",
     version="0.3.0",
     description="Sync censprobe git reports into Postgres for Grafana",
+    lifespan=lifespan,
 )
 app.add_middleware(
     CORSMiddleware,
@@ -60,16 +71,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Startup
-# ─────────────────────────────────────────────────────────────────────────────
-
-@app.on_event("startup")
-async def on_startup() -> None:
-    await init_db()
-    logger.info("DB tables initialized")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -94,7 +95,7 @@ class RefreshResponse(BaseModel):
 
 
 @app.post("/refresh", response_model=RefreshResponse)
-async def refresh(background_tasks: BackgroundTasks) -> RefreshResponse:
+async def refresh() -> RefreshResponse:
     """Pull latest from git and sync new reports into Postgres."""
     errors: list[str] = []
 

@@ -117,8 +117,22 @@ def _parse_as_field(raw: str) -> tuple[Optional[str], Optional[str]]:
 
 
 def _mask_ip(ip: str) -> str:
-    """Mask IP to /24 for privacy: 1.2.3.4 → XXX.XXX.XXX.0/24"""
-    return "XXX.XXX.XXX.0/24"
+    """
+    Mask IPv4 to /24 for privacy: 1.2.3.4 → 1.2.3.0/24.
+    For IPv6: mask to /48 (first 3 hextets).
+    Returns "unknown" if the input isn't a valid IP.
+    """
+    import ipaddress
+    try:
+        addr = ipaddress.ip_address(ip.strip())
+    except Exception:
+        return "unknown"
+    if isinstance(addr, ipaddress.IPv4Address):
+        net = ipaddress.ip_network(f"{addr}/24", strict=False)
+        return str(net)
+    # IPv6
+    net = ipaddress.ip_network(f"{addr}/48", strict=False)
+    return str(net)
 
 
 async def _check_ipv6() -> bool:

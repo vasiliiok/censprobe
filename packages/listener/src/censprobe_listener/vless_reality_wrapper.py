@@ -1,9 +1,10 @@
 """
 vless_reality_wrapper.py — VLESS+Reality test responder via xray-core.
 
-Runs xray with VLESS inbound + Reality TLS.
-In test mode: VLESS is set to block/reject outbound traffic after accepting
-the TLS handshake — this is sufficient to record client reachability.
+Runs xray with VLESS inbound + Reality TLS. The only permitted outbound
+destination is the local echo port (127.0.0.1:ECHO_PORTS['vless_reality']);
+anything else is blackholed. This lets us measure both handshake success
+(xray log) and data-phase success (echo server counter).
 """
 from __future__ import annotations
 
@@ -14,14 +15,12 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from censprobe_listener.echo_server import ECHO_PORTS
+
 logger = logging.getLogger(__name__)
 
 
 class VlessRealityResponder:
-    """
-    Runs xray-core as a VLESS+Reality inbound.
-    """
-
     def __init__(
         self,
         uuid: str,
@@ -30,6 +29,7 @@ class VlessRealityResponder:
         short_id: str,
         server_name: str = "apimaps.yandex.ru",
         port: int = 443,
+        echo_port: int | None = None,
     ) -> None:
         self.uuid = uuid
         self.private_key = private_key
@@ -37,13 +37,20 @@ class VlessRealityResponder:
         self.short_id = short_id
         self.server_name = server_name
         self.port = port
+        self.echo_port = echo_port or ECHO_PORTS["vless_reality"]
         self._proc: subprocess.Popen | None = None
         self._tmpdir: tempfile.TemporaryDirectory | None = None
         self._log_task: asyncio.Task | None = None
         self.connection_count = 0
+        self.echo_server = None  # type: ignore[assignment]
+
+    @property
+    def data_transfer_ok(self) -> bool:
+        if self.echo_server is None:
+            return False
+        return self.echo_server.data_ok("vless_reality")
 
     async def start(self) -> None:
-        """Write xray config and launch."""
         self._tmpdir = tempfile.TemporaryDirectory(prefix="censprobe_xray_")
         tmpdir = Path(self._tmpdir.name)
 
@@ -79,11 +86,22 @@ class VlessRealityResponder:
                 }
             ],
             "outbounds": [
+                {"tag": "direct", "protocol": "freedom"},
                 {"tag": "block", "protocol": "blackhole"},
             ],
             "routing": {
                 "rules": [
-                    {"inboundTag": ["censprobe-vless"], "outboundTag": "block", "type": "field"}
+                    {
+                        "type": "field",
+                        "ip": ["127.0.0.1/32"],
+                        "port": str(self.echo_port),
+                        "outboundTag": "direct",
+                    },
+                    {
+                        "type": "field",
+                        "inboundTag": ["censprobe-vless"],
+                        "outboundTag": "block",
+                    },
                 ]
             },
         }
@@ -99,11 +117,12 @@ class VlessRealityResponder:
         )
         await asyncio.sleep(1.0)
         if self._proc.poll() is not None:
-            out = self._proc.stdout.read()
+            out = self._proc.stdout.read() if self._proc.stdout else ""
             raise RuntimeError(f"xray failed to start: {out}")
 
         self._log_task = asyncio.create_task(self._monitor_output())
-        logger.info("VLESS+Reality responder started on TCP/%d", self.port)
+        logger.info("VLESS+Reality responder started on TCP/%d (echo: 127.0.0.1:%d)",
+                    self.port, self.echo_port)
 
     async def _monitor_output(self) -> None:
         if not self._proc or not self._proc.stdout:
@@ -129,6 +148,7 @@ class VlessRealityResponder:
                 await self._log_task
             except asyncio.CancelledError:
                 pass
+            self._log_task = None
 
         if self._proc:
             try:
@@ -145,5 +165,6 @@ class VlessRealityResponder:
                 self._tmpdir.cleanup()
             except Exception:
                 pass
+            self._tmpdir = None
 
         logger.info("VLESS+Reality responder stopped (connections: %d)", self.connection_count)

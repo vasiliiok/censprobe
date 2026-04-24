@@ -60,35 +60,60 @@ def git_add_commit_push(message: str, paths: list[str] | None = None) -> None:
     """
     Stage, commit, and push changes.
 
+    Flow:
+        1. Stage the requested paths (or everything if paths=None).
+        2. Stash staged changes + unstaged changes.
+        3. git pull --rebase to align with remote (avoids non-fast-forward).
+        4. Pop stash back.
+        5. Re-stage, check if anything changed, commit, push.
+
     Args:
         message: Commit message.
         paths: List of paths to stage. If None, stages everything (git add -A).
     """
-    # Stage
+    # 1. Stash any local changes (tracked + untracked) so pull --rebase is clean.
+    _run(["git", "add", "-N", "."], check=False)   # include untracked in stash
+    stash = _run(["git", "stash", "push", "-u", "-m", "censprobe-autosync"], check=False)
+    stashed = "No local changes to save" not in (stash.stdout + stash.stderr)
+
+    # 2. Sync with remote before committing to avoid non-fast-forward.
+    try:
+        _run(["git", "pull", "--rebase", "--autostash"])
+    except RuntimeError as e:
+        logger.warning("Pre-push pull failed: %s (continuing)", e)
+
+    # 3. Restore stashed work.
+    if stashed:
+        try:
+            _run(["git", "stash", "pop"])
+        except RuntimeError as e:
+            logger.error("Stash pop failed — resolve conflicts manually: %s", e)
+            raise
+
+    # 4. Stage the paths for this commit.
     if paths:
         for p in paths:
             _run(["git", "add", p])
     else:
         _run(["git", "add", "-A"])
 
-    # Check if there's anything to commit
+    # 5. Check if there's anything to commit.
     status = _run(["git", "status", "--porcelain"], check=False)
     if not status.stdout.strip():
         logger.info("Nothing to commit, skipping push.")
         return
 
-    # Commit
     logger.info("git commit: %s", message)
     _run(["git", "commit", "-m", message])
 
-    # Push with retry
     _push_with_retry()
 
 
-def _push_with_retry(max_attempts: int = 3, backoff_sec: float = 10.0) -> None:
-    """Push with linear backoff retry."""
+def _push_with_retry(max_attempts: int = 4, backoff_sec: float = 2.0) -> None:
+    """Push with exponential backoff retry and automatic rebase on rejection."""
     import time
 
+    delay = backoff_sec
     for attempt in range(1, max_attempts + 1):
         try:
             logger.info("git push (attempt %d/%d) ...", attempt, max_attempts)
@@ -96,18 +121,20 @@ def _push_with_retry(max_attempts: int = 3, backoff_sec: float = 10.0) -> None:
             logger.info("git push succeeded.")
             return
         except RuntimeError as e:
-            if attempt < max_attempts:
-                # Try rebase first in case of diverged history
-                try:
-                    _run(["git", "pull", "--rebase"])
-                except RuntimeError:
-                    pass
-                logger.warning("Push failed (attempt %d): %s. Retrying in %ss...", attempt, e, backoff_sec)
-                time.sleep(backoff_sec)
-            else:
-                logger.error("Push failed after %d attempts. Report saved locally.", max_attempts)
+            if attempt >= max_attempts:
+                logger.error("Push failed after %d attempts. Report saved in local commit.", max_attempts)
                 logger.error("Run 'git push' manually from %s when network is available.", WORKSPACE)
-                # Don't raise — the report is safe in the local commit
+                return
+
+            # Rebase on top of latest remote before next attempt
+            try:
+                _run(["git", "pull", "--rebase"])
+            except RuntimeError as rebase_err:
+                logger.warning("Rebase also failed: %s", rebase_err)
+
+            logger.warning("Push failed (attempt %d): %s. Retrying in %.1fs...", attempt, e, delay)
+            time.sleep(delay)
+            delay *= 2  # exponential backoff
 
 
 async def git_pull_async() -> str:
