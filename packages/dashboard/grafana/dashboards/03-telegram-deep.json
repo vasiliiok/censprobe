@@ -1,0 +1,89 @@
+{
+  "__inputs": [{"name": "DS_CENSPROBE_PG", "label": "Censprobe Postgres", "type": "datasource", "pluginId": "postgres"}],
+  "title": "03 — Telegram Deep Dive",
+  "uid": "censprobe-03",
+  "tags": ["censprobe"],
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "30s",
+  "templating": {
+    "list": [
+      {
+        "name": "test_id",
+        "label": "Test ID",
+        "type": "query",
+        "datasource": {"type": "postgres", "uid": "${DS_CENSPROBE_PG}"},
+        "query": "SELECT test_id FROM test_runs ORDER BY created_at DESC",
+        "refresh": 2
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Telegram Health Score",
+      "type": "gauge",
+      "gridPos": {"x": 0, "y": 0, "w": 6, "h": 8},
+      "datasource": {"type": "postgres", "uid": "${DS_CENSPROBE_PG}"},
+      "targets": [
+        {
+          "rawSql": "SELECT telegram_health AS \"Telegram Health\" FROM test_runs WHERE test_id = '$test_id' LIMIT 1",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0, "max": 100, "unit": "short",
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": 0}, {"color": "yellow", "value": 40}, {"color": "green", "value": 70}]}
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Telegram Endpoint Reachability",
+      "type": "table",
+      "gridPos": {"x": 6, "y": 0, "w": 18, "h": 8},
+      "datasource": {"type": "postgres", "uid": "${DS_CENSPROBE_PG}"},
+      "targets": [
+        {
+          "rawSql": "SELECT test, target, verdict, rtt_ms, method FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = '$test_id' AND category = 'telegram' ORDER BY test",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "verdict"},
+            "properties": [{"id": "custom.displayMode", "value": "color-background"}]
+          }
+        ]
+      }
+    },
+    {
+      "id": 3,
+      "title": "Telegram Tests — Verdict Distribution",
+      "type": "piechart",
+      "gridPos": {"x": 0, "y": 8, "w": 12, "h": 8},
+      "datasource": {"type": "postgres", "uid": "${DS_CENSPROBE_PG}"},
+      "targets": [
+        {
+          "rawSql": "SELECT verdict, COUNT(*) AS count FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = '$test_id' AND category = 'telegram' GROUP BY verdict",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Telegram RTT Distribution",
+      "type": "histogram",
+      "gridPos": {"x": 12, "y": 8, "w": 12, "h": 8},
+      "datasource": {"type": "postgres", "uid": "${DS_CENSPROBE_PG}"},
+      "targets": [
+        {
+          "rawSql": "SELECT rtt_ms FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = '$test_id' AND category = 'telegram' AND rtt_ms IS NOT NULL AND verdict = 'OK'",
+          "format": "table"
+        }
+      ]
+    }
+  ]
+}

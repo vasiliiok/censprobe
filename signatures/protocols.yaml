@@ -1,0 +1,58 @@
+# VPN protocol signatures for attribution
+# Used to identify censorship method: "protocol_signature_blocked" vs "ip_dropped"
+
+protocols:
+  openvpn:
+    transport: udp
+    description: "OpenVPN P_CONTROL_HARD_RESET_CLIENT_V2 handshake"
+    # First byte of OpenVPN packet: opcode in upper 5 bits
+    # P_CONTROL_HARD_RESET_CLIENT_V2 = 0x38 (opcode=7 << 3 | key_id=0)
+    signature_bytes: "38"  # hex, first byte
+    ports_common: [1194, 443, 80]
+    detection_method: "opcode_in_first_byte"
+
+  wireguard:
+    transport: udp
+    description: "WireGuard handshake initiation"
+    # Message type 0x01 = handshake initiation (little-endian uint32)
+    signature_bytes: "01000000"  # hex, first 4 bytes
+    packet_size: 148  # exact handshake initiation size
+    ports_common: [51820, 443]
+    detection_method: "type_field_and_size"
+
+  amneziawg:
+    transport: udp
+    description: "AmneziaWG with junk packets before handshake"
+    notes: "Junk packets randomize first bytes; H1-H4 replace type 1/2/3/4"
+    detection_method: "behavioral_randomized_header"
+
+  ikev2:
+    transport: udp
+    description: "IKEv2/IPsec"
+    signature_bytes: "000000000000000000000000002120"  # IKE header pattern
+    ports_common: [500, 4500]
+    detection_method: "ike_header"
+
+  l2tp:
+    transport: udp
+    description: "L2TP"
+    ports_common: [1701]
+    detection_method: "l2tp_header"
+
+  shadowsocks_classic:
+    transport: tcp
+    description: "Classic Shadowsocks — high entropy stream"
+    notes: "No fixed signature; detection is entropy-based + active probing"
+    detection_method: "entropy_analysis_and_active_probing"
+
+  shadowsocks_2022:
+    transport: tcp
+    description: "Shadowsocks 2022-blake3-aes-256-gcm"
+    notes: "Fixed-length header, timestamp in first bytes; harder to detect"
+    detection_method: "active_probing"
+
+  vmess:
+    transport: tcp
+    description: "VMess (V2Ray protocol)"
+    notes: "UUID-based auth header in first 16 bytes region"
+    detection_method: "v2ray_signatures"

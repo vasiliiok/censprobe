@@ -1,0 +1,56 @@
+# Block page fingerprints — patterns identifying censorship block pages
+# Used to distinguish "censored" from "service down"
+
+block_pages:
+  # Роскомнадзор / ТСПУ standard block page
+  rkn_standard:
+    description: "Стандартная страница блокировки РКН"
+    title_patterns:
+      - "Доступ ограничен"
+      - "Сайт заблокирован"
+      - "rkn.gov.ru"
+    body_patterns:
+      - "Роскомнадзор"
+      - "rkn.gov.ru"
+      - "Доступ к информационному ресурсу ограничен"
+    http_status: [200, 403]
+
+  # Common ISP-level block pages
+  isp_generic:
+    description: "Типичные страницы блокировки ISP"
+    title_patterns:
+      - "Ресурс заблокирован"
+      - "Доступ запрещён"
+      - "Страница недоступна"
+    body_patterns:
+      - "заблокирован по решению"
+      - "zapret.gov.ru"
+
+  # MTS specific
+  mts_block:
+    description: "МТС block page"
+    body_patterns:
+      - "mts.ru"
+      - "МТС"
+    redirect_domains:
+      - blocked.mts.ru
+
+  # Rostelekom / RT
+  rt_block:
+    description: "Ростелеком block page"
+    body_patterns:
+      - "rt.ru"
+    redirect_domains:
+      - blocked.rt.ru
+
+  # ТСПУ-style TCP RST (no body — pure connection reset)
+  tcp_rst_tspu:
+    description: "ТСПУ TCP RST injection — no HTML, just connection reset"
+    detection: "tcp_rst_after_client_hello"
+    notes: "Most common ТСПУ method — no block page, just RST"
+
+# HTTP status codes that indicate geo-blocking (not censorship)
+geoblock_indicators:
+  status_codes: [403, 451]
+  # 451 = Unavailable For Legal Reasons (RFC 7725)
+  notes: "If TLS handshake succeeds and cert is valid, 403/451 = geoblock, not ТСПУ"

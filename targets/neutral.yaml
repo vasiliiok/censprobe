@@ -1,0 +1,86 @@
+# Neutral targets — not blocked in Russia (VK, Yandex, Wikipedia)
+# Used for baseline mixing, MTU tests, and negative controls
+
+targets:
+  - domain: vk.com
+    urls:
+      - https://vk.com/
+    expected_status: 200
+    category: neutral
+    notes: "Russian social network — should be fully accessible"
+
+  - domain: yandex.ru
+    urls:
+      - https://yandex.ru/
+    expected_status: 200
+    category: neutral
+    notes: "Russian search engine — fully accessible"
+
+  - domain: wikipedia.org
+    urls:
+      - https://ru.wikipedia.org/wiki/%D0%97%D0%B0%D0%B3%D0%BB%D0%B0%D0%B2%D0%BD%D0%B0%D1%8F_%D1%81%D1%82%D1%80%D0%B0%D0%BD%D0%B8%D1%86%D0%B0
+      - https://en.wikipedia.org/
+    expected_status: 200
+    category: neutral
+    notes: "Wikipedia — previously blocked in RU 2017, now accessible"
+
+  - domain: google.com
+    urls:
+      - https://www.google.com/
+    expected_status: 200
+    category: neutral
+    notes: "Google — accessible from RU (unlike YouTube CDN)"
+
+  - domain: cloudflare.com
+    urls:
+      - https://www.cloudflare.com/cdn-cgi/trace
+    expected_status: 200
+    category: neutral
+    notes: "Used for exit-IP and ASN detection"
+
+# Speed test endpoints for bandwidth baseline
+speed_test_endpoints:
+  - host: speedtest.selectel.ru
+    url: "https://speedtest.selectel.ru/"
+    notes: "Russian datacenter — no throttling expected, used in Method B SNI probe"
+
+  - host: speed.cloudflare.com
+    url: "https://speed.cloudflare.com/__down?bytes=10000000"
+    notes: "Cloudflare speed test — 10MB download"
+
+# DoH/DoT resolvers to test
+doh_resolvers:
+  - name: cloudflare
+    url: "https://cloudflare-dns.com/dns-query"
+    ip: 1.1.1.1
+
+  - name: google
+    url: "https://dns.google/dns-query"
+    ip: 8.8.8.8
+
+  - name: mozilla_cloudflare
+    url: "https://mozilla.cloudflare-dns.com/dns-query"
+
+dot_resolvers:
+  - name: cloudflare
+    host: "1.1.1.1"
+    port: 853
+
+  - name: google
+    host: "8.8.8.8"
+    port: 853
+
+# Alternative public DNS resolvers to compare
+public_dns:
+  - name: google_1
+    ip: 8.8.8.8
+  - name: google_2
+    ip: 8.8.4.4
+  - name: cloudflare_1
+    ip: 1.1.1.1
+  - name: cloudflare_2
+    ip: 1.0.0.1
+  - name: yandex
+    ip: 77.88.8.8
+  - name: quad9
+    ip: 9.9.9.9

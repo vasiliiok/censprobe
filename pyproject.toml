@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = []
+
+[project]
+name = "censprobe"
+version = "0.1.0"
+description = "Censorship Probe — distributed VPN censorship measurement system"
+requires-python = ">=3.11"
+
+[tool.uv.workspace]
+members = [
+    "packages/probe-core",
+    "packages/solo",
+    "packages/listener",
+    "packages/client",
+    "packages/control",
+    "packages/dashboard/sync-api",
+    "packages/reporter",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+strict = false
+ignore_missing_imports = true
