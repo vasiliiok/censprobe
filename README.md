@@ -242,7 +242,7 @@ censprobe/
 │   └── <test_id>/
 │       ├── meta.yaml
 │       ├── protocols.yaml
-│       └── *.json.gz
+│       └── *.json
 └── docs/
     └── passport.md             # архитектурная спецификация
 ```

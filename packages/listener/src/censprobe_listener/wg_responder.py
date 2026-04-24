@@ -104,6 +104,13 @@ AllowedIPs = 10.200.0.2/32
         loop = asyncio.get_running_loop()
 
         def _bring_up() -> None:
+            # If a previous run crashed (OOM, SIGKILL, docker stop) the
+            # interface may still exist in host netns (we run with
+            # network_mode: host). Remove any stale iface before adding ours.
+            subprocess.run(
+                ["ip", "link", "del", self.interface],
+                stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, check=False,
+            )
             try:
                 subprocess.run(
                     ["ip", "link", "add", self.interface, "type", "wireguard"],
@@ -238,6 +245,12 @@ AllowedIPs = 10.201.0.2/32
         loop = asyncio.get_running_loop()
 
         def _start() -> None:
+            # Clean up a stale interface from a previously-crashed run.
+            # awg-quick down needs the conf file; ip link del works regardless.
+            subprocess.run(
+                ["ip", "link", "del", self.interface],
+                stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, check=False,
+            )
             try:
                 subprocess.run(
                     ["awg-quick", "up", str(self._conf_path)],

@@ -13,8 +13,8 @@ Usage:
 
 Reads:
   - reports/<test_id>/meta.yaml
-  - reports/<test_id>/server-solo-*.json.gz  (latest)
-  - reports/<test_id>/server-listener-*.json.gz (all)
+  - reports/<test_id>/server-solo-*.json  (latest; legacy .json.gz also supported)
+  - reports/<test_id>/server-listener-*.json (all; legacy .json.gz also supported)
 
 Writes:
   - reports/<test_id>/report.html   (default)
@@ -109,11 +109,16 @@ def _build_context(test_id: str, reports_dir: Path) -> dict[str, Any]:
     server: dict = meta.get("server", {})
     scores_raw: dict = meta.get("scores", {})
 
-    # Find latest solo report
-    solo_files = sorted(reports_dir.glob("server-solo-*.json.gz"), reverse=True)
+    # Find latest solo report. We accept both plain .json (current format)
+    # and .json.gz (legacy format) so historical data keeps rendering.
+    solo_files = sorted(
+        list(reports_dir.glob("server-solo-*.json"))
+        + list(reports_dir.glob("server-solo-*.json.gz")),
+        reverse=True,
+    )
     results_all: list[dict] = []
     if solo_files:
-        solo_data = _load_gz(solo_files[0])
+        solo_data = _load_report(solo_files[0])
         results_all = solo_data.get("results", []) if solo_data else []
         # Use scores from solo if not in meta
         if not scores_raw and solo_data:
@@ -134,11 +139,14 @@ def _build_context(test_id: str, reports_dir: Path) -> dict[str, Any]:
     for cat in by_category:
         by_category[cat].sort(key=lambda r: verdict_order.get(r.get("verdict", ""), 5))
 
-    # Listener sessions
-    listener_files = sorted(reports_dir.glob("server-listener-*.json.gz"))
+    # Listener sessions (plain .json + legacy .json.gz).
+    listener_files = sorted(
+        list(reports_dir.glob("server-listener-*.json"))
+        + list(reports_dir.glob("server-listener-*.json.gz"))
+    )
     listener_sessions = []
     for lf in listener_files:
-        ld = _load_gz(lf)
+        ld = _load_report(lf)
         if not ld:
             continue
         session_id = ld.get("session_id", lf.stem)
@@ -195,11 +203,13 @@ def _build_context(test_id: str, reports_dir: Path) -> dict[str, Any]:
     }
 
 
-def _load_gz(path: Path) -> Optional[dict]:
-    """Load a .json.gz file."""
+def _load_report(path: Path) -> Optional[dict]:
+    """Load a .json or legacy .json.gz report file."""
     try:
-        with gzip.open(path, "rb") as f:
-            return json.loads(f.read())
+        if path.suffix == ".gz":
+            with gzip.open(path, "rb") as f:
+                return json.loads(f.read())
+        return json.loads(path.read_text(encoding="utf-8"))
     except Exception as e:
         logger.warning("Could not load %s: %s", path.name, e)
         return None

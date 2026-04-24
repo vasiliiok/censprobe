@@ -7,7 +7,6 @@ Used by solo, client, and control containers.
 from __future__ import annotations
 
 import asyncio
-import gzip
 import json
 import logging
 from datetime import datetime, timezone
@@ -246,15 +245,18 @@ class ProbeRunner:
         output_path: Optional[Path] = None,
     ) -> Path:
         """
-        Serialize results to gzipped JSON and save.
+        Serialize results as pretty JSON and save.
 
-        Returns the saved file path.
+        We write plain .json (not .json.gz) because git's pack format already
+        deflates textual blobs with zlib and computes delta chains across
+        revisions. Gzipping upstream defeats delta compression — each commit
+        stores a full new copy — and makes the .git directory grow quickly.
         """
         if output_path is None:
             ts = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
             reports_dir = self.workspace / "reports" / self.test_id
             reports_dir.mkdir(parents=True, exist_ok=True)
-            output_path = reports_dir / f"server-solo-{ts}.json.gz"
+            output_path = reports_dir / f"server-solo-{ts}.json"
 
         report_data = {
             "test_id": self.test_id,
@@ -268,11 +270,12 @@ class ProbeRunner:
             "summary": _summarize(results),
         }
 
-        json_bytes = json.dumps(report_data, default=str, ensure_ascii=False, indent=2).encode()
-        with gzip.open(output_path, "wb") as f:
-            f.write(json_bytes)
+        output_path.write_text(
+            json.dumps(report_data, default=str, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
 
-        logger.info("Report saved: %s (%d bytes compressed)", output_path, output_path.stat().st_size)
+        logger.info("Report saved: %s (%d bytes)", output_path, output_path.stat().st_size)
         return output_path
 
 

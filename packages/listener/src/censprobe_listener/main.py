@@ -8,7 +8,7 @@ Lifecycle:
   4. Wait for SIGINT (Ctrl+C) or SIGTERM
   5. Stop all responders
   6. Finalize results: compute verdicts per protocol
-  7. Save report as reports/<TEST_ID>/server-listener-<SESSION_ID>-<ts>.json.gz
+  7. Save report as reports/<TEST_ID>/server-listener-<SESSION_ID>-<ts>.json
   8. git add && git commit && git push
   9. Exit
 
@@ -19,7 +19,6 @@ Security note:
 from __future__ import annotations
 
 import asyncio
-import gzip
 import json
 import logging
 import os
@@ -297,22 +296,27 @@ def _finalize_protocol_result(name: str, responder) -> ProtocolResult:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _save_listener_report(report: ListenerReport, test_id: str, session_id: str) -> Path:
-    """Save ListenerReport as gzipped JSON."""
+    """
+    Save ListenerReport as pretty JSON.
+
+    We intentionally do NOT gzip: git's pack format does its own zlib
+    compression with delta chains across revisions, and gzipping upstream
+    forces every commit to store a full new copy of the report.
+    """
     ts = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
     reports_dir = WORKSPACE / "reports" / test_id
     reports_dir.mkdir(parents=True, exist_ok=True)
-    out_path = reports_dir / f"server-listener-{session_id}-{ts}.json.gz"
+    out_path = reports_dir / f"server-listener-{session_id}-{ts}.json"
 
-    data = json.dumps(
-        report.model_dump(mode="json"),
-        ensure_ascii=False,
-        indent=2,
-        default=str,
-    ).encode()
-
-    with gzip.open(out_path, "wb") as f:
-        f.write(data)
-
+    out_path.write_text(
+        json.dumps(
+            report.model_dump(mode="json"),
+            ensure_ascii=False,
+            indent=2,
+            default=str,
+        ),
+        encoding="utf-8",
+    )
     return out_path
 
 

@@ -3,7 +3,7 @@ db.py — SQLAlchemy async models and DB initialization.
 
 Schema:
   test_runs — one row per test_id, tracks meta
-  test_results — one row per TestResult (from .json.gz)
+  test_results — one row per TestResult (from .json or legacy .json.gz)
   listener_sessions — one row per listener session
   protocol_results — one row per protocol per session
 """
@@ -25,6 +25,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, relationship
 
@@ -69,20 +70,22 @@ class TestRun(Base):
     dns_integrity = Column(Float, nullable=True)
     tls_integrity = Column(Float, nullable=True)
     telegram_health = Column(Float, nullable=True)
-    detected_techniques = Column(Text, nullable=True)   # comma-separated
-    recommended_protocols = Column(Text, nullable=True)  # comma-separated
+    # Native Postgres text[] — lets Grafana use:
+    #   WHERE 'sni_throttling' = ANY(detected_techniques)
+    detected_techniques = Column(ARRAY(String), nullable=True)
+    recommended_protocols = Column(ARRAY(String), nullable=True)
 
     results = relationship("TestResult", back_populates="test_run", cascade="all, delete-orphan")
     sessions = relationship("ListenerSession", back_populates="test_run", cascade="all, delete-orphan")
 
 
 class TestResult(Base):
-    """One row per TestResult entry (from server-solo-*.json.gz or server-listener-*.json.gz)."""
+    """One row per TestResult entry (from server-solo-*.json[.gz] or server-listener-*.json[.gz])."""
     __tablename__ = "test_results"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     test_run_id = Column(Integer, ForeignKey("test_runs.id", ondelete="CASCADE"), nullable=False)
-    report_file = Column(String(256), nullable=False)  # e.g. server-solo-2026-04-21.json.gz
+    report_file = Column(String(256), nullable=False)  # e.g. server-solo-2026-04-21.json
     test = Column(String(128), nullable=False)
     category = Column(String(64), nullable=False)
     target = Column(Text, nullable=False)

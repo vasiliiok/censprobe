@@ -63,7 +63,41 @@ async def run_cmd(cmd: list[str], timeout: float = PROBE_TIMEOUT) -> tuple[int, 
             proc.kill()
         except OSError:
             pass
+        # Reap the process so it doesn't linger as a zombie.
+        try:
+            await proc.wait()
+        except Exception:
+            pass
         return -1, "", "Timeout"
+
+
+async def _graceful_terminate(proc: asyncio.subprocess.Process, timeout: float = 0.5) -> None:
+    """
+    Terminate an asyncio subprocess and reap it.
+
+    asyncio.Process.returncode is only updated once wait() observes exit, so
+    a plain `terminate() + sleep + returncode is None` check would always
+    end up calling kill() and leave the child as a zombie until wait() runs.
+    """
+    if proc.returncode is not None:
+        return
+    try:
+        proc.terminate()
+    except (OSError, ProcessLookupError):
+        return
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=timeout)
+        return
+    except asyncio.TimeoutError:
+        pass
+    try:
+        proc.kill()
+    except (OSError, ProcessLookupError):
+        pass
+    try:
+        await proc.wait()
+    except Exception:
+        pass
 
 
 async def ping_echo(ip: str, timeout: float = 3.0) -> bool:
@@ -172,13 +206,7 @@ verb 1
                     result.data_ok = True
                     result.verdict = Verdict.OK
         finally:
-            try:
-                proc.terminate()
-                await asyncio.sleep(0.5)
-                if proc.returncode is None:
-                    proc.kill()
-            except OSError:
-                pass
+            await _graceful_terminate(proc)
 
     return result
 
@@ -443,13 +471,7 @@ socks5:
             else:
                 result.verdict = Verdict.BLOCKED
         finally:
-            try:
-                proc.terminate()
-                await asyncio.sleep(0.5)
-                if proc.returncode is None:
-                    proc.kill()
-            except OSError:
-                pass
+            await _graceful_terminate(proc)
 
     return result
 
@@ -497,12 +519,6 @@ async def _tunnel_via_singbox_or_xray(
             else:
                 result.verdict = Verdict.BLOCKED
         finally:
-            try:
-                proc.terminate()
-                await asyncio.sleep(0.5)
-                if proc.returncode is None:
-                    proc.kill()
-            except OSError:
-                pass
+            await _graceful_terminate(proc)
 
     return result

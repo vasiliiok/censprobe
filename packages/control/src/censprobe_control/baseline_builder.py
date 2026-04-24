@@ -364,10 +364,13 @@ def save_baseline(baseline: BaselineData, workspace: Path = _WORKSPACE) -> Path:
 
 
 def load_run_from_report(path: Path) -> list[TestResult]:
-    """Load TestResult list from a gzipped JSON report file."""
+    """Load TestResult list from a .json (current) or .json.gz (legacy) report file."""
     try:
-        with gzip.open(path, "rb") as f:
-            raw = json.loads(f.read())
+        if path.suffix == ".gz":
+            with gzip.open(path, "rb") as f:
+                raw = json.loads(f.read())
+        else:
+            raw = json.loads(path.read_text(encoding="utf-8"))
         return [TestResult.model_validate(r) for r in raw.get("results", [])]
     except Exception as e:
         logger.error("Failed to load run from %s: %s", path, e)

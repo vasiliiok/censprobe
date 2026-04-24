@@ -15,14 +15,15 @@ The /refresh endpoint is called via Grafana button or manual curl.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+import subprocess
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncIterator, Optional
 
-import git
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -94,68 +95,103 @@ class RefreshResponse(BaseModel):
     errors: list[str]
 
 
+def _git_pull_sync(workspace: Path) -> None:
+    """Run `git pull --rebase` synchronously in a worker thread."""
+    subprocess.run(
+        ["git", "pull", "--rebase"],
+        cwd=workspace,
+        capture_output=True,
+        check=True,
+    )
+
+
+def _list_report_files(reports_root: Path) -> list[tuple[str, Path, list[Path]]]:
+    """
+    Enumerate report files on disk in a worker thread.
+
+    Returns a list of (test_id, meta_path, report_files) tuples. Doing
+    this in a single blocking pass (then dispatching async DB work) keeps
+    the event loop responsive on large trees.
+    """
+    out: list[tuple[str, Path, list[Path]]] = []
+    if not reports_root.exists():
+        return out
+    for test_dir in sorted(reports_root.iterdir()):
+        if not test_dir.is_dir():
+            continue
+        report_files = sorted(
+            list(test_dir.glob("*.json")) + list(test_dir.glob("*.json.gz"))
+        )
+        out.append((test_dir.name, test_dir / "meta.yaml", report_files))
+    return out
+
+
 @app.post("/refresh", response_model=RefreshResponse)
 async def refresh() -> RefreshResponse:
-    """Pull latest from git and sync new reports into Postgres."""
+    """Pull latest from git and sync new reports into Postgres.
+
+    Git I/O, directory enumeration, and .json(.gz) parsing are all blocking;
+    they are dispatched to the default thread pool so the event loop keeps
+    serving /health and read endpoints during a refresh.
+    """
     errors: list[str] = []
 
-    # 1. Git pull
+    # 1. Git pull (blocking — run off-loop).
     try:
-        repo = git.Repo(WORKSPACE)
-        origin = repo.remotes.origin
-        origin.pull(rebase=True)
+        await asyncio.to_thread(_git_pull_sync, WORKSPACE)
         logger.info("git pull done")
+    except subprocess.CalledProcessError as e:
+        stderr = e.stderr.decode(errors="replace") if e.stderr else ""
+        logger.warning("git pull failed: %s", stderr or e)
+        errors.append(f"git pull: {stderr or e}")
     except Exception as e:
         logger.warning("git pull failed: %s", e)
         errors.append(f"git pull: {e}")
 
-    # 2. Parse all reports
-    new_runs = 0
-    new_results = 0
-    new_sessions = 0
-
+    # 2. Enumerate report files off-loop.
     reports_root = WORKSPACE / "reports"
-    if not reports_root.exists():
+    test_dirs = await asyncio.to_thread(_list_report_files, reports_root)
+    if not test_dirs:
         return RefreshResponse(
             status="ok", new_runs=0, new_results=0, new_sessions=0, errors=errors
         )
 
-    async with async_session_factory() as session:
-        for test_dir in sorted(reports_root.iterdir()):
-            if not test_dir.is_dir():
-                continue
-            test_id = test_dir.name
-            meta_path = test_dir / "meta.yaml"
+    new_runs = 0
+    new_results = 0
+    new_sessions = 0
 
-            # Ensure test run row exists
+    async with async_session_factory() as session:
+        for test_id, meta_path, report_files in test_dirs:
             run = await _get_or_create_test_run(session, test_id, meta_path)
             if run is None:
                 continue
-            if run not in session.new:
-                pass  # existing run
 
-            # Process all report files
-            for report_file in sorted(test_dir.glob("*.json.gz")):
+            # Pull all already-imported filenames for this run in ONE query
+            # each (vs. N+1 point lookups per file). Fits fine in memory —
+            # one short string per report.
+            imported_results = {
+                fn
+                for (fn,) in (
+                    await session.execute(
+                        select(TestResult.report_file).where(TestResult.test_run_id == run.id)
+                    )
+                ).all()
+            }
+            imported_sessions = {
+                fn
+                for (fn,) in (
+                    await session.execute(
+                        select(ListenerSession.report_file).where(
+                            ListenerSession.test_run_id == run.id
+                        )
+                    )
+                ).all()
+            }
+
+            for report_file in report_files:
                 fn = report_file.name
-
-                # Check if already imported
-                existing = await session.execute(
-                    select(TestResult).where(
-                        TestResult.test_run_id == run.id,
-                        TestResult.report_file == fn,
-                    ).limit(1)
-                )
-                if existing.scalar_one_or_none() is not None:
-                    continue  # already imported
-
-                existing_sess = await session.execute(
-                    select(ListenerSession).where(
-                        ListenerSession.test_run_id == run.id,
-                        ListenerSession.report_file == fn,
-                    ).limit(1)
-                )
-                if existing_sess.scalar_one_or_none() is not None:
-                    continue  # already imported
+                if fn in imported_results or fn in imported_sessions:
+                    continue
 
                 try:
                     if is_solo_report(fn):
@@ -287,6 +323,17 @@ async def get_baseline() -> dict:
 # Internal helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _read_meta_yaml(meta_path: Path) -> dict:
+    """Blocking: read meta.yaml. Called via asyncio.to_thread."""
+    if not meta_path.exists():
+        return {}
+    try:
+        import yaml
+        return yaml.safe_load(meta_path.read_text()) or {}
+    except Exception:
+        return {}
+
+
 async def _get_or_create_test_run(
     session: AsyncSession, test_id: str, meta_path: Path
 ) -> Optional[TestRun]:
@@ -297,14 +344,7 @@ async def _get_or_create_test_run(
     if row:
         return row
 
-    # Try to read meta.yaml
-    meta_data: dict = {}
-    if meta_path.exists():
-        try:
-            import yaml
-            meta_data = yaml.safe_load(meta_path.read_text()) or {}
-        except Exception:
-            pass
+    meta_data = await asyncio.to_thread(_read_meta_yaml, meta_path)
 
     server = meta_data.get("server", {})
     run = TestRun(
@@ -330,7 +370,8 @@ async def _import_solo_report(
     session: AsyncSession, run: TestRun, path: Path
 ) -> tuple[int, bool]:
     """Import a solo report. Returns (n_results_added, is_new_run)."""
-    meta, results = parse_solo_report(path)
+    # parse_solo_report does disk I/O + gzip + JSON decoding — block off-loop.
+    meta, results = await asyncio.to_thread(parse_solo_report, path)
     if not results:
         return 0, False
 
@@ -345,10 +386,10 @@ async def _import_solo_report(
         run.dns_integrity = scores.get("dns_integrity")
         run.tls_integrity = scores.get("tls_integrity")
         run.telegram_health = scores.get("telegram_health")
-        techniques = scores.get("detected_techniques", [])
-        run.detected_techniques = ",".join(techniques) if techniques else None
-        protocols = scores.get("recommended_protocols", [])
-        run.recommended_protocols = ",".join(protocols) if protocols else None
+        techniques = scores.get("detected_techniques") or []
+        run.detected_techniques = list(techniques) if techniques else None
+        protocols = scores.get("recommended_protocols") or []
+        run.recommended_protocols = list(protocols) if protocols else None
 
     run.last_synced_at = datetime.now(tz=timezone.utc)
 
@@ -363,7 +404,7 @@ async def _import_listener_report(
     session: AsyncSession, run: TestRun, path: Path
 ) -> int:
     """Import a listener report. Returns number of sessions added."""
-    sess_meta, proto_results = parse_listener_report(path)
+    sess_meta, proto_results = await asyncio.to_thread(parse_listener_report, path)
     if not sess_meta:
         return 0
 
@@ -418,8 +459,8 @@ def _run_to_dict(run: TestRun) -> dict:
         "dns_integrity": run.dns_integrity,
         "tls_integrity": run.tls_integrity,
         "telegram_health": run.telegram_health,
-        "detected_techniques": run.detected_techniques.split(",") if run.detected_techniques else [],
-        "recommended_protocols": run.recommended_protocols.split(",") if run.recommended_protocols else [],
+        "detected_techniques": list(run.detected_techniques or []),
+        "recommended_protocols": list(run.recommended_protocols or []),
     }
 
 

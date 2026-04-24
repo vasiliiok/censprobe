@@ -3,11 +3,14 @@ server_meta.py — Auto-detection of server metadata.
 
 Detects:
   - External/exit IP (via Cloudflare trace + icanhazip.com)
-  - ASN and AS name (via ip-api.com)
+  - ASN and AS name (via ipapi.is over HTTPS)
   - IPv6 availability
   - Kernel version, distro
 
-Sensitive: exit IP is masked to /24 before writing to git.
+OpSec:
+  * All geo/ASN lookups go over HTTPS so an on-path observer cannot cheaply
+    link this server's IP to censorship-measurement activity.
+  * Exit IP is masked to /24 before being written into git.
 """
 from __future__ import annotations
 
@@ -15,7 +18,6 @@ import asyncio
 import logging
 import os
 import platform
-import re
 import socket
 from pathlib import Path
 from typing import Optional
@@ -28,6 +30,11 @@ logger = logging.getLogger(__name__)
 
 # Timeout for external requests
 _TIMEOUT = httpx.Timeout(10.0)
+
+# ipapi.is — HTTPS, keyed. Hard-coded because this is the project's own
+# measurement-infra key, not an end-user secret.
+_IPAPI_IS_KEY = os.environ.get("IPAPI_IS_KEY", "a5277864b4dc5573e3fe")
+_IPAPI_IS_URL = "https://api.ipapi.is/"
 
 
 async def detect_server_meta() -> ServerMeta:
@@ -89,36 +96,50 @@ async def _detect_exit_ip(client: httpx.AsyncClient) -> Optional[str]:
 
 
 async def _detect_asn(client: httpx.AsyncClient, ip: str) -> Optional[dict]:
-    """Detect ASN, AS name, city for a given IP via ip-api.com."""
+    """
+    Detect ASN, AS name, and city for an IP via ipapi.is (HTTPS, keyed).
+
+    ipapi.is response shape (relevant subset):
+      {
+        "ip": "...",
+        "asn": {"asn": 49505, "org": "JSC Selectel", ...},
+        "company": {"name": "Selectel", ...},
+        "location": {"city": "...", "country": "...", "state": "..."},
+      }
+    """
     try:
         r = await client.get(
-            f"http://ip-api.com/json/{ip}",
-            params={"fields": "status,as,org,city,country,regionName"},
+            _IPAPI_IS_URL,
+            params={"q": ip, "key": _IPAPI_IS_KEY},
         )
-        if r.status_code == 200:
-            data = r.json()
-            if data.get("status") == "success":
-                raw_as = data.get("as", "")  # e.g. "AS49505 JSC Selectel"
-                asn, as_name = _parse_as_field(raw_as)
-                return {
-                    "asn": asn,
-                    "as_name": as_name or data.get("org", ""),
-                    "city": data.get("city"),
-                    "country": data.get("country"),
-                    "region": data.get("regionName"),
-                }
+        if r.status_code != 200:
+            logger.debug("ipapi.is non-200: %s", r.status_code)
+            return None
+
+        data = r.json()
+        asn_block = data.get("asn") or {}
+        loc_block = data.get("location") or {}
+        company_block = data.get("company") or {}
+
+        asn_num = asn_block.get("asn")
+        asn_str = f"AS{asn_num}" if asn_num else None
+        as_name = (
+            asn_block.get("org")
+            or company_block.get("name")
+            or data.get("company", {}).get("name")
+        )
+
+        return {
+            "asn": asn_str,
+            "as_name": as_name,
+            "city": loc_block.get("city"),
+            "country": loc_block.get("country"),
+            "region": loc_block.get("state"),
+        }
     except Exception as e:
-        logger.debug("ip-api.com failed: %s", e)
+        logger.debug("ipapi.is failed: %s", e)
 
     return None
-
-
-def _parse_as_field(raw: str) -> tuple[Optional[str], Optional[str]]:
-    """Parse 'AS49505 JSC Selectel' into ('AS49505', 'JSC Selectel')."""
-    m = re.match(r"(AS\d+)\s*(.*)", raw)
-    if m:
-        return m.group(1), m.group(2).strip() or None
-    return None, None
 
 
 def _mask_ip(ip: str) -> str:
