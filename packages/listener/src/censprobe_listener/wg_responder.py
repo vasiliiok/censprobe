@@ -28,19 +28,24 @@ _WG_INTERFACE = "censwg0"
 _MIN_ECHO_BYTES = 250
 
 
-def _read_wg_transfer(interface: str) -> tuple[int, int, int]:
+def _read_wg_transfer(interface: str, tool: str = "wg") -> tuple[int, int, int]:
     """
-    Return (peer_count_with_handshake, rx_bytes, tx_bytes) from `wg show`.
+    Return (peer_count_with_handshake, rx_bytes, tx_bytes) from `<tool> show`.
 
-    `wg show <iface> transfer`   → "<pubkey>\t<rx>\t<tx>"
-    `wg show <iface> latest-handshakes` → "<pubkey>\t<unix_ts>"
+    `<tool> show <iface> transfer`   → "<pubkey>\t<rx>\t<tx>"
+    `<tool> show <iface> latest-handshakes` → "<pubkey>\t<unix_ts>"
+
+    AmneziaWG interfaces live at /var/run/amneziawg/<iface>.sock — the
+    vanilla `wg` utility only looks in /var/run/wireguard/ and will error
+    out for those, silently returning zeros. Pass tool="awg" to query an
+    AmneziaWG interface correctly.
     """
     try:
         out_tr = subprocess.check_output(
-            ["wg", "show", interface, "transfer"], text=True, stderr=subprocess.DEVNULL
+            [tool, "show", interface, "transfer"], text=True, stderr=subprocess.DEVNULL
         )
         out_hs = subprocess.check_output(
-            ["wg", "show", interface, "latest-handshakes"], text=True, stderr=subprocess.DEVNULL
+            [tool, "show", interface, "latest-handshakes"], text=True, stderr=subprocess.DEVNULL
         )
     except Exception:
         return 0, 0, 0
@@ -183,14 +188,14 @@ AllowedIPs = 10.202.0.2/32
     def connection_count(self) -> int:
         if self._final_hs_count:
             return self._final_hs_count
-        hs, _, _ = _read_wg_transfer(self.interface)
+        hs, _, _ = _read_wg_transfer(self.interface, tool="wg")
         return hs
 
     @property
     def data_transfer_ok(self) -> bool:
         if self._final_rx_bytes:
             return self._final_rx_bytes > _MIN_ECHO_BYTES
-        _, rx, _ = _read_wg_transfer(self.interface)
+        _, rx, _ = _read_wg_transfer(self.interface, tool="wg")
         return rx > _MIN_ECHO_BYTES
 
 
@@ -278,7 +283,7 @@ AllowedIPs = 10.201.0.2/32
 
     async def stop(self) -> None:
         # Snapshot stats BEFORE teardown.
-        hs, rx, _ = _read_wg_transfer(self.interface)
+        hs, rx, _ = _read_wg_transfer(self.interface, tool="awg")
         self._final_hs_count = hs
         self._final_rx_bytes = rx
 
@@ -311,12 +316,12 @@ AllowedIPs = 10.201.0.2/32
     def connection_count(self) -> int:
         if self._final_hs_count:
             return self._final_hs_count
-        hs, _, _ = _read_wg_transfer(self.interface)
+        hs, _, _ = _read_wg_transfer(self.interface, tool="awg")
         return hs
 
     @property
     def data_transfer_ok(self) -> bool:
         if self._final_rx_bytes:
             return self._final_rx_bytes > _MIN_ECHO_BYTES
-        _, rx, _ = _read_wg_transfer(self.interface)
+        _, rx, _ = _read_wg_transfer(self.interface, tool="awg")
         return rx > _MIN_ECHO_BYTES

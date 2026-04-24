@@ -82,9 +82,14 @@ RUN git config --global user.email "starvasyaa@gmail.com" && \
     git config --global pull.rebase true && \
     git config --global --add safe.directory '*'
 
-# SSH known hosts for GitHub
+# SSH known hosts for GitHub.
+# Also seed a writable copy at /tmp/censprobe_known_hosts — /root/.ssh is
+# typically bind-mounted read-only from the host, which prevents SSH from
+# appending accept-new entries and can break git over SSH.
 RUN mkdir -p /root/.ssh && \
-    ssh-keyscan github.com >> /root/.ssh/known_hosts 2>/dev/null
+    ssh-keyscan github.com >> /root/.ssh/known_hosts 2>/dev/null && \
+    ssh-keyscan github.com > /tmp/censprobe_known_hosts 2>/dev/null && \
+    chmod 0644 /tmp/censprobe_known_hosts
 
 # Entrypoint
 ENTRYPOINT ["python", "-m", "censprobe_solo.main"]

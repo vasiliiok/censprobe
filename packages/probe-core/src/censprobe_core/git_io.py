@@ -12,18 +12,43 @@ SSH key is mounted at /root/.ssh from the host — no PAT tokens, no .env secret
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import fcntl
 import logging
 import os
 import subprocess
 from pathlib import Path
+from typing import Iterator
 
 logger = logging.getLogger(__name__)
 
 WORKSPACE = Path(os.getenv("WORKSPACE", "/workspace"))
 
+# Path for a process-global advisory lock around any git operation.
+# /workspace is bind-mounted and shared between solo / listener / sync-api
+# containers; concurrent `git pull` + `git commit` race on .git/index.lock
+# and kill one of them. fcntl.flock over a dedicated lock file on the
+# shared volume (so other containers see the same inode) serialises them
+# cleanly without needing a new dependency.
+_GIT_LOCK_PATH = Path(
+    os.getenv("CENSPROBE_GIT_LOCK", str(WORKSPACE / ".git" / "censprobe.lock"))
+)
+
+# Use a writable known_hosts path that survives a read-only ~/.ssh bind
+# mount. StrictHostKeyChecking=accept-new tries to append to the
+# known_hosts file on first connection; if the mount is read-only, SSH
+# aborts the connection ("cannot create file ... read-only"). Pointing
+# UserKnownHostsFile at /tmp keeps the accept-new flow working without
+# weakening StrictHostKeyChecking to "no".
+_SSH_KNOWN_HOSTS = os.getenv("CENSPROBE_KNOWN_HOSTS", "/tmp/censprobe_known_hosts")
+
 GIT_ENV = {
     **os.environ,
-    "GIT_SSH_COMMAND": "ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes",
+    "GIT_SSH_COMMAND": (
+        "ssh -o StrictHostKeyChecking=accept-new "
+        "-o BatchMode=yes "
+        f"-o UserKnownHostsFile={_SSH_KNOWN_HOSTS}"
+    ),
     "GIT_AUTHOR_NAME": "censprobe-bot",
     "GIT_AUTHOR_EMAIL": "starvasyaa@gmail.com",
     "GIT_COMMITTER_NAME": "censprobe-bot",
@@ -31,15 +56,37 @@ GIT_ENV = {
 }
 
 
+@contextlib.contextmanager
+def _git_lock() -> Iterator[None]:
+    """Acquire an exclusive advisory lock covering the whole git operation.
+
+    Prevents concurrent `git pull` / `git commit` from different
+    containers racing on .git/index.lock and killing each other.
+    """
+    _GIT_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    # Open in 'a' (append) so the file is created if missing but never
+    # truncated — important if two processes race the first creation.
+    fd = os.open(str(_GIT_LOCK_PATH), os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
 def _run(cmd: list[str], check: bool = True) -> subprocess.CompletedProcess:
-    """Run a git command synchronously in WORKSPACE."""
-    result = subprocess.run(
-        cmd,
-        cwd=WORKSPACE,
-        capture_output=True,
-        text=True,
-        env=GIT_ENV,
-    )
+    """Run a git command synchronously in WORKSPACE under the git lock."""
+    with _git_lock():
+        result = subprocess.run(
+            cmd,
+            cwd=WORKSPACE,
+            capture_output=True,
+            text=True,
+            env=GIT_ENV,
+        )
     if check and result.returncode != 0:
         raise RuntimeError(
             f"Git command failed: {' '.join(cmd)}\n"

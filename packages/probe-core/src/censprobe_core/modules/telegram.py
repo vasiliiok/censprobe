@@ -134,14 +134,14 @@ async def _test_dc_port(dc_id: int, ip_ver: str, ip: str, port: int) -> TestResu
 
         # Send MTProto auth_key_id=0 (unencrypted) ReqPqMulti
         # constructor for req_pq_multi = 0xbe7e8ef1
-        # MTProto payload: auth_key_id(8) + message_id(8) + message_len(4) + ctor(4) = 20B
-        # Telegram requires a transport framing header on TCP — a bare
-        # MTProto payload is dropped by the DC without reply. We use the
-        # abridged transport: first-byte 0xef (connection header), then
-        # per-message length in 4-byte units (20 / 4 = 5).
+        # MTProto payload: auth_key_id(8) + message_id(8) + message_len(4)
+        # + ctor(4) = 24B. Telegram requires a transport framing header on
+        # TCP — a bare MTProto payload is dropped by the DC without reply.
+        # Abridged transport: first-byte 0xef (connection header), then
+        # per-message length in 4-byte units (24 / 4 = 6).
         msg_id = int(time.time() * 2**32)
         mtproto = struct.pack("<qqi", 0, msg_id, 4) + b"\xf1\x8e\x7e\xbe"
-        assert len(mtproto) == 20 and (len(mtproto) % 4) == 0
+        assert len(mtproto) == 24 and (len(mtproto) % 4) == 0
         writer.write(b"\xef" + bytes([len(mtproto) // 4]) + mtproto)
         await writer.drain()
 

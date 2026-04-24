@@ -9,6 +9,8 @@ COPY packages/dashboard/sync-api /tmp/sync-api
 RUN pip install --no-cache-dir /tmp/probe-core /tmp/sync-api
 RUN git config --global --add safe.directory '*' && \
     mkdir -p /root/.ssh && \
-    ssh-keyscan github.com >> /root/.ssh/known_hosts 2>/dev/null
+    ssh-keyscan github.com >> /root/.ssh/known_hosts 2>/dev/null && \
+    ssh-keyscan github.com > /tmp/censprobe_known_hosts 2>/dev/null && \
+    chmod 0644 /tmp/censprobe_known_hosts
 EXPOSE 8080
 CMD ["uvicorn", "sync_api.main:app", "--host", "0.0.0.0", "--port", "8080"]
