@@ -51,6 +51,14 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 
 WORKSPACE = Path(os.environ.get("WORKSPACE", "/workspace"))
 
+# Serialize /refresh calls: the endpoint runs `git pull --rebase` which
+# takes an exclusive .git/index.lock, and a second concurrent call
+# (Grafana double-click on "Pull & Refresh") collides and aborts with a
+# 500. One global lock is enough — refresh is a single-writer op, and
+# we want later callers to wait for, and share the result of, the in-
+# flight run rather than racing.
+_REFRESH_LOCK = asyncio.Lock()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -134,6 +142,11 @@ async def refresh() -> RefreshResponse:
     they are dispatched to the default thread pool so the event loop keeps
     serving /health and read endpoints during a refresh.
     """
+    async with _REFRESH_LOCK:
+        return await _do_refresh()
+
+
+async def _do_refresh() -> RefreshResponse:
     errors: list[str] = []
 
     # 1. Git pull (blocking — run off-loop).

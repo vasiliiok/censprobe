@@ -7,7 +7,8 @@ WORKDIR /app
 COPY packages/probe-core /tmp/probe-core
 COPY packages/dashboard/sync-api /tmp/sync-api
 RUN pip install --no-cache-dir /tmp/probe-core /tmp/sync-api
-RUN mkdir -p /root/.ssh && \
+RUN git config --global --add safe.directory '*' && \
+    mkdir -p /root/.ssh && \
     ssh-keyscan github.com >> /root/.ssh/known_hosts 2>/dev/null
 EXPOSE 8080
 CMD ["uvicorn", "sync_api.main:app", "--host", "0.0.0.0", "--port", "8080"]

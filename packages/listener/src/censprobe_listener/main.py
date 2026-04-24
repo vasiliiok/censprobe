@@ -241,7 +241,7 @@ async def _start_responders(
         r.echo_server = echo_server
 
     protocols_to_start = [
-        ("openvpn", OpenVPNResponder(creds.openvpn_psk_b64, creds.openvpn_port)),
+        ("openvpn", OpenVPNResponder(creds.openvpn_psk_pem, creds.openvpn_port)),
         ("wireguard", WireGuardResponder(
             creds.wg_server_private, creds.wg_client_public, creds.wg_preshared_key, creds.wg_port
         )),

@@ -56,71 +56,120 @@ async def run_middlebox_tests() -> list[TestResult]:
 
 async def _test_header_manipulation() -> list[TestResult]:
     """
-    Send HTTP request with modified header case.
-    A middlebox will normalize 'hOsT:' to 'Host:' — detectable in reflected response.
+    Send HTTP request with modified header case via raw socket.
+
+    Target is 1.1.1.1:80 — Cloudflare's raw edge returns a 400 status
+    line that echoes the Request / path but does NOT normalize request
+    header casing (unlike Flask/WSGI + ALB behind httpbin.org, which
+    uppercases every header to HTTP_HOST before reflecting). We use
+    httpx NOT at all here: modern HTTP clients case-insensitively store
+    headers and may rewrite them before transmission, so the only
+    reliable way to ask "was this exact byte sequence mutated on the
+    wire" is a raw socket.
+
+    The detection is indirect: we can't read the outbound bytes back,
+    but a middlebox that rewrites `hOsT:` to `Host:` typically also
+    terminates and replays the request, producing either a non-400
+    status, an unexpectedly long response, or the connection dropping.
+    Verdict OK means the request traversed intact (Cloudflare's 400);
+    ANOMALY means behaviour diverged from that baseline.
     """
     results = []
 
     test_cases = [
         {
             "name": "middlebox_header_host_case",
-            "headers": {"hOsT": "httpbin.org", "User-Agent": "censprobe/0.1"},
+            "headers": [("hOsT", "1.1.1.1"), ("User-Agent", "censprobe/0.1")],
             "field": "hOsT",
             "notes": "Modified Host header case",
         },
         {
             "name": "middlebox_header_useragent_case",
-            "headers": {"Host": "httpbin.org", "uSeR-aGeNt": "censprobe/0.1"},
+            "headers": [("Host", "1.1.1.1"), ("uSeR-aGeNt", "censprobe/0.1")],
             "field": "uSeR-aGeNt",
             "notes": "Modified User-Agent case",
         },
     ]
 
-    import httpx
-
     for tc in test_cases:
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(_TIMEOUT)) as client:
-                r = await client.get(_ECHO_URL, headers=tc["headers"])
+            response_head, err = await _raw_http_request(
+                host="1.1.1.1", port=80, path="/",
+                headers=tc["headers"],
+            )
+            if err:
+                results.append(TestResult(
+                    test=tc["name"], category="middlebox", target="1.1.1.1:80",
+                    verdict=Verdict.ERROR, evidence={"error": err},
+                ))
+                continue
 
-                if r.status_code == 200:
-                    reflected = r.json().get("headers", {})
-                    # Check if the modified-case header was normalized by a middlebox
-                    original_key = tc["field"]
-                    normalized_key = original_key.lower().replace("-", " ").title().replace(" ", "-")
+            # Cloudflare edge returns "HTTP/1.1 400 Bad Request" for a Host
+            # header that doesn't match a served domain. A middlebox that
+            # rewrote the request commonly yields a 200, redirect, or TCP
+            # reset — any of those are anomalies.
+            status_line = response_head.split("\r\n", 1)[0] if response_head else ""
+            got_400 = status_line.startswith("HTTP/1.1 400") or status_line.startswith("HTTP/1.0 400")
+            verdict = Verdict.OK if got_400 else Verdict.ANOMALY
+            method = None if got_400 else BlockingMethod.MIDDLEBOX_HTTP_MANIPULATION
 
-                    is_normalized = normalized_key in reflected and original_key not in reflected
-
-                    middlebox_detected = is_normalized
-                    verdict = Verdict.ANOMALY if middlebox_detected else Verdict.OK
-
-                    results.append(TestResult(
-                        test=tc["name"],
-                        category="middlebox",
-                        target=_ECHO_URL,
-                        verdict=verdict,
-                        method=BlockingMethod.MIDDLEBOX_HTTP_MANIPULATION if middlebox_detected else None,
-                        evidence={
-                            "sent_header": original_key,
-                            "reflected_headers": dict(list(reflected.items())[:10]),
-                            "middlebox_normalized": middlebox_detected,
-                        },
-                        notes=tc["notes"],
-                    ))
-                else:
-                    results.append(TestResult(
-                        test=tc["name"], category="middlebox", target=_ECHO_URL,
-                        verdict=Verdict.INCONCLUSIVE,
-                        evidence={"status": r.status_code},
-                    ))
-
+            results.append(TestResult(
+                test=tc["name"],
+                category="middlebox",
+                target="1.1.1.1:80",
+                verdict=verdict,
+                method=method,
+                evidence={
+                    "sent_header": tc["field"],
+                    "status_line": status_line,
+                    "response_head": response_head[:200],
+                    "baseline_expected": "HTTP/1.1 400",
+                },
+                notes=tc["notes"],
+            ))
         except Exception as e:
             results.append(TestResult(
-                test=tc["name"], category="middlebox", target=_ECHO_URL,
+                test=tc["name"], category="middlebox", target="1.1.1.1:80",
                 verdict=Verdict.ERROR, evidence={"error": str(e)},
             ))
 
     return results
+
+
+async def _raw_http_request(
+    host: str,
+    port: int,
+    path: str,
+    headers: list[tuple[str, str]],
+) -> tuple[str, Optional[str]]:
+    """Send an HTTP/1.1 GET over a raw socket and return the response head.
+
+    Returns (head_text, error_or_None). The point is to preserve the
+    exact byte casing of header names — any HTTP client that goes
+    through a CaseInsensitiveDict WILL lose that information.
+    """
+    loop = asyncio.get_running_loop()
+
+    def _send() -> tuple[str, Optional[str]]:
+        try:
+            request = f"GET {path} HTTP/1.1\r\n"
+            for name, value in headers:
+                request += f"{name}: {value}\r\n"
+            request += "Connection: close\r\n\r\n"
+            with socket.create_connection((host, port), timeout=_TIMEOUT) as s:
+                s.sendall(request.encode("ascii"))
+                s.settimeout(_TIMEOUT)
+                buf = b""
+                while b"\r\n\r\n" not in buf and len(buf) < 4096:
+                    chunk = s.recv(4096)
+                    if not chunk:
+                        break
+                    buf += chunk
+                return buf.decode("utf-8", errors="replace"), None
+        except Exception as e:
+            return "", str(e)
+
+    return await loop.run_in_executor(None, _send)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

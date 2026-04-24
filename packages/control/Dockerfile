@@ -10,6 +10,7 @@ RUN pip install --no-cache-dir "/tmp/probe-core[control]" /tmp/control
 RUN git config --global user.email "starvasyaa@gmail.com" && \
     git config --global user.name "censprobe-bot" && \
     git config --global pull.rebase true && \
+    git config --global --add safe.directory '*' && \
     mkdir -p /root/.ssh && \
     ssh-keyscan github.com >> /root/.ssh/known_hosts 2>/dev/null
 ENTRYPOINT ["python", "-m", "censprobe_control.main"]

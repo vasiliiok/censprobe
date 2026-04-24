@@ -31,6 +31,9 @@ services:
       dockerfile: packages/listener/Dockerfile
     network_mode: host
     cap_add: [NET_ADMIN, NET_RAW]
+    # OpenVPN responder needs /dev/net/tun.
+    devices:
+      - "/dev/net/tun:/dev/net/tun"
     environment:
       TEST_ID: ${TEST_ID:-}
       SESSION_ID: ${SESSION_ID:-}
@@ -51,7 +54,11 @@ services:
       context: .
       dockerfile: packages/client/Dockerfile
     network_mode: host
-    cap_add: [NET_RAW]
+    # NET_ADMIN: required for `ip link add wireguard`/awg-quick.
+    # /dev/net/tun: required for OpenVPN client tunnel.
+    cap_add: [NET_RAW, NET_ADMIN]
+    devices:
+      - "/dev/net/tun:/dev/net/tun"
     environment:
       TEST_ID: ${TEST_ID:-}
       SESSION_ID: ${SESSION_ID:-}

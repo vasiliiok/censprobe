@@ -53,11 +53,13 @@ class HysteriaResponder:
         await self._generate_self_signed_cert(cert_path, key_path)
 
         # ACL: allow ONLY echo-port on loopback; reject everything else.
-        # Hysteria 2 ACL syntax: `allow(all)`, `reject(all)`, CIDR/port filters.
+        # Hysteria 2 ACL expects `action(<cidr>, <proto>/<port>)` — a bare
+        # port number is NOT valid grammar and the server will refuse to
+        # start. Echo server is TCP-only, so scope the rule to tcp.
         acl_path = tmpdir / "acl.txt"
         acl_path.write_text(
-            "direct(127.0.0.1/32, {echo})\n"
-            "reject(all)\n".format(echo=self.echo_port)
+            f"direct(127.0.0.1/32, tcp/{self.echo_port})\n"
+            "reject(all)\n"
         )
 
         config = {

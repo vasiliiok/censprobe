@@ -1,9 +1,13 @@
 # Censprobe Client — Dockerfile (M6)
 FROM python:3.12-slim
+# iputils-ping needed for WG/OpenVPN tunnel data-phase verification.
+# build-essential + golang-go required to compile amneziawg-tools and
+# amneziawg-go (see listener Dockerfile for rationale).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git openssh-client curl wget iproute2 net-tools \
+    git openssh-client curl wget iproute2 net-tools iputils-ping \
     wireguard-tools iptables openssl openvpn \
     ca-certificates unzip \
+    build-essential libmnl-dev pkg-config golang-go \
     && rm -rf /var/lib/apt/lists/*
 
 # ── sing-box (Shadowsocks 2022 inbound) ──────────────────────────────────────
@@ -43,16 +47,16 @@ RUN ARCH=$(dpkg --print-architecture) && \
     chmod +x /usr/local/bin/hysteria
 
 # ── AmneziaWG (userspace, amneziawg-go) ──────────────────────────────────────
-RUN curl -fsSL https://raw.githubusercontent.com/amnezia-vpn/amneziawg-go/master/install.sh \
-    -o /tmp/awg-install.sh 2>/dev/null && \
-    if [ -f /tmp/awg-install.sh ]; then \
-        sh /tmp/awg-install.sh 2>/dev/null || true; \
-    fi; \
-    rm -f /tmp/awg-install.sh; \
-    if ! command -v awg-quick >/dev/null 2>&1; then \
-        printf '#!/bin/sh\nwg-quick "$@"\n' > /usr/local/bin/awg-quick && \
-        chmod +x /usr/local/bin/awg-quick; \
-    fi
+# See listener Dockerfile for rationale: wg-quick fallback silently
+# breaks AWG because vanilla wg rejects Jc/Jmin/Jmax/S1/S2/H1-H4.
+RUN git clone --depth 1 https://github.com/amnezia-vpn/amneziawg-tools.git /tmp/awg-tools && \
+    make -C /tmp/awg-tools/src -j"$(nproc)" && \
+    make -C /tmp/awg-tools/src install && \
+    rm -rf /tmp/awg-tools && \
+    git clone --depth 1 https://github.com/amnezia-vpn/amneziawg-go.git /tmp/awg-go && \
+    cd /tmp/awg-go && make && \
+    install -m 0755 amneziawg-go /usr/local/bin/amneziawg-go && \
+    rm -rf /tmp/awg-go /root/.cache/go-build /root/go
 
 WORKDIR /workspace
 COPY packages/probe-core /tmp/probe-core
@@ -61,6 +65,7 @@ RUN pip install --no-cache-dir /tmp/probe-core /tmp/client
 RUN git config --global user.email "starvasyaa@gmail.com" && \
     git config --global user.name "censprobe-bot" && \
     git config --global pull.rebase true && \
+    git config --global --add safe.directory '*' && \
     mkdir -p /root/.ssh && \
     ssh-keyscan github.com >> /root/.ssh/known_hosts 2>/dev/null
 ENTRYPOINT ["python", "-m", "censprobe_client.main"]

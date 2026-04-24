@@ -6,7 +6,6 @@ without depending on censprobe_listener package.
 """
 from __future__ import annotations
 
-import base64
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -17,7 +16,7 @@ import yaml
 @dataclass
 class ProtocolCredentials:
     """Loaded credentials from protocols.yaml."""
-    openvpn_psk_b64: str = ""
+    openvpn_psk_pem: str = ""
     openvpn_port: int = 1194
 
     wg_server_public: str = ""
@@ -62,7 +61,7 @@ def load_protocols_yaml(path: Path) -> ProtocolCredentials:
     c = ProtocolCredentials()
 
     ovpn = raw.get("openvpn", {})
-    c.openvpn_psk_b64 = ovpn.get("psk_b64", "")
+    c.openvpn_psk_pem = ovpn.get("psk_pem", "")
     c.openvpn_port = ovpn.get("port", 1194)
 
     wg = raw.get("wireguard", {})

@@ -284,18 +284,49 @@ async def _validate_cert(domain: str, ip: str) -> Optional[bool]:
         return None
 
 
+_ASN_CACHE: dict[str, Optional[str]] = {}
+_ASN_BACKOFF_UNTIL: float = 0.0
+
+
 async def _ip_to_asn(ip: str) -> Optional[str]:
-    """Look up ASN for an IP via ip-api.com (lightweight)."""
+    """Look up ASN for an IP via ip-api.com, with process-local caching.
+
+    The free ip-api.com tier is 45 requests/min — a single control run
+    can issue well over that (5 runs × 30+ domains). A 429 burns the
+    rest of the test and leaves every baseline ASN at None. We cache
+    per-IP in-process and enter a global 90-second backoff the moment
+    the server asks us to slow down.
+    """
+    import time as _time
+    if ip in _ASN_CACHE:
+        return _ASN_CACHE[ip]
+
+    global _ASN_BACKOFF_UNTIL
+    now = _time.monotonic()
+    if now < _ASN_BACKOFF_UNTIL:
+        _ASN_CACHE[ip] = None
+        return None
+
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as client:
             r = await client.get(f"http://ip-api.com/json/{ip}?fields=as")
+            if r.status_code == 429:
+                # ip-api returns plaintext 429 with a Retry-After-ish hint;
+                # be conservative and pause for 90s so we don't melt the
+                # whole suite.
+                _ASN_BACKOFF_UNTIL = now + 90.0
+                _ASN_CACHE[ip] = None
+                return None
             if r.status_code == 200:
                 data = r.json()
                 raw = data.get("as", "")
                 if raw:
-                    return raw.split(" ")[0]  # "AS13335 Cloudflare" → "AS13335"
+                    asn = raw.split(" ")[0]  # "AS13335 Cloudflare" → "AS13335"
+                    _ASN_CACHE[ip] = asn
+                    return asn
     except Exception:
         pass
+    _ASN_CACHE[ip] = None
     return None
 
 

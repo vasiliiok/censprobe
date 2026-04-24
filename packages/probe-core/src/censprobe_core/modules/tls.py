@@ -205,8 +205,26 @@ def _attribute_tls_failure(verdict: Verdict, evidence: dict) -> Optional[Blockin
 async def _test_ech(domain: str) -> Optional[TestResult]:
     """
     Test ECH (Encrypted Client Hello) via curl --ech.
-    Returns None if curl is not available.
+
+    curl only supports --ech when linked against a TLS backend with ECH
+    (recent wolfSSL / OpenSSL 3.2+ w/ ECH patches). Debian 12's default
+    curl is OpenSSL 3.0 without ECH support and will reject --ech with
+    "option --ech: is unknown" or "ECH feature not supported". We check
+    for that explicitly and return INCONCLUSIVE — a failure from the
+    local OS has nothing to do with ТСПУ.
     """
+    if not await _curl_supports_ech():
+        return TestResult(
+            test=f"tls_{_slug(domain)}_ech",
+            category="tls", target=domain,
+            verdict=Verdict.INCONCLUSIVE, confidence=0.0,
+            evidence={
+                "status": "curl_without_ech",
+                "reason": "local curl has no --ech feature flag in tls-features",
+            },
+            notes="ECH cannot be tested without a curl + TLS backend compiled with ECH.",
+        )
+
     try:
         proc = await asyncio.create_subprocess_exec(
             "curl", "--ech", "hard", "-sv", "--max-time", "10",
@@ -238,6 +256,29 @@ async def _test_ech(domain: str) -> Optional[TestResult]:
     except Exception as e:
         logger.debug("ECH test failed for %s: %s", domain, e)
         return None
+
+
+_CURL_ECH_CACHE: Optional[bool] = None
+
+
+async def _curl_supports_ech() -> bool:
+    """Cached check: does the local curl advertise ECH in `curl -V`?"""
+    global _CURL_ECH_CACHE
+    if _CURL_ECH_CACHE is not None:
+        return _CURL_ECH_CACHE
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "curl", "-V",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=3)
+        text = out.decode(errors="replace").lower()
+        # curl prints "Features: ... ECH ..." (case varies across builds)
+        _CURL_ECH_CACHE = " ech" in text or "ech " in text
+    except Exception:
+        _CURL_ECH_CACHE = False
+    return _CURL_ECH_CACHE
 
 
 async def _resolve_ip(domain: str) -> Optional[str]:

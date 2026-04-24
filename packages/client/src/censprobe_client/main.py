@@ -166,7 +166,7 @@ async def _async_main(
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def _run_openvpn(host: str, creds) -> ProbeResult:
-    return await probe_openvpn(host, creds.openvpn_port, creds.openvpn_psk_b64)
+    return await probe_openvpn(host, creds.openvpn_port, creds.openvpn_psk_pem)
 
 
 async def _run_wireguard(host: str, creds) -> ProbeResult:

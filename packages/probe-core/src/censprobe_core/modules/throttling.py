@@ -138,23 +138,31 @@ async def _measure_bandwidth_cloudflare() -> float:
 
 async def _measure_bandwidth_googlevideo() -> tuple[float, list[float], str]:
     """
-    Measure bandwidth towards a Google/YouTube endpoint.
+    Measure bandwidth towards Google/YouTube infrastructure.
 
-    No public stable-name video URL exists, so we fall through a list:
-      1. https://www.youtube.com/  — front-page HTML, served from Google edge.
-      2. https://www.google.com/   — large HTML, same AS15169.
-    A 404 / zero-byte response would otherwise mis-report as "throttled".
+    HTML front pages (youtube.com, google.com) finish downloading in far
+    less than one second, so the per-second sampling loop in
+    `_measure_bandwidth_with_profile` never records a single sample and
+    returns an empty profile — useless for burst-then-drop analysis.
+    We want a genuinely sustained download from Google's AS15169.
+
+    Candidates:
+      1. `dl.google.com` Chrome installer (~100MB, consistent AS15169,
+         CDN edge — same path ТСПУ would see for googlevideo.com).
+      2. YouTube homepage as degraded fallback.
 
     Returns (overall_mbps, per_second_profile_mbps, source_url_used).
     """
     for url in (
+        "https://dl.google.com/dl/android/studio/ide-zips/2023.1.1.28/"
+        "android-studio-2023.1.1.28-linux.tar.gz",
+        "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb",
         "https://www.youtube.com/",
-        "https://www.google.com/",
     ):
         bw, profile = await _measure_bandwidth_with_profile(url, 10)
         if bw > 0.01:
             return bw, profile, url
-    return 0.0, [], "https://www.youtube.com/"
+    return 0.0, [], "https://dl.google.com/"
 
 
 async def _measure_bandwidth_with_profile(
