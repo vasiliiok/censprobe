@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import ssl
 from pathlib import Path
 from typing import Optional
 
@@ -125,20 +126,24 @@ async def _test_url(
                 confidence=0.9,
             )
 
-        except httpx.SSLError as e:
-            # TLS failures are not retried — same cert error will repeat.
-            return TestResult(
-                test=test_name, category="http", target=url,
-                verdict=Verdict.BLOCKED,
-                method=BlockingMethod.TLS_HANDSHAKE_FAILURE,
-                attempts=attempt,
-                evidence={"ssl_error": str(e)},
-            )
-
         except httpx.ConnectError as e:
-            err = str(e).lower()
-            if "connection reset" in err:
-                # RST is not retried — repeat would be identical.
+            # httpx wraps SSL / TCP-RST / timeout under ConnectError; classify via
+            # the cause and the message. httpx has no SSLError class of its own.
+            err_msg = str(e).lower()
+            is_tls = (
+                isinstance(getattr(e, "__cause__", None), ssl.SSLError)
+                or "ssl" in err_msg
+                or "certificate" in err_msg
+            )
+            if is_tls:
+                return TestResult(
+                    test=test_name, category="http", target=url,
+                    verdict=Verdict.BLOCKED,
+                    method=BlockingMethod.TLS_HANDSHAKE_FAILURE,
+                    attempts=attempt,
+                    evidence={"ssl_error": str(e)},
+                )
+            if "connection reset" in err_msg:
                 return TestResult(
                     test=test_name, category="http", target=url,
                     verdict=Verdict.BLOCKED,

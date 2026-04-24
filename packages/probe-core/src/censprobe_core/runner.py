@@ -49,7 +49,12 @@ class ProbeRunner:
         self.workspace = workspace
         self.test_id = test_id
         self.mode = mode
-        self.baseline: BaselineData = load_baseline(workspace / "baseline" / "latest.json")
+        self.baseline: BaselineData = load_baseline(
+            workspace / "baseline" / "latest.json",
+            # Control *builds* the baseline — a stub on its first ever run is
+            # expected; no need to log a warning every round.
+            quiet_if_stub=(mode == "control"),
+        )
         self.comparator = BaselineComparator(self.baseline)
         self._targets: dict[str, Any] = {}
 

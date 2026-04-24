@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import socket
+import ssl
 import struct
 import time
 from pathlib import Path
@@ -225,11 +226,22 @@ async def _test_https_domains(domains: list[str], prefix: str) -> list[TestResul
                     verdict=Verdict.BLOCKED, method=BlockingMethod.IP_DROPPED,
                     evidence={"error": "connect_timeout"},
                 )
-            except httpx.SSLError as e:
+            except httpx.ConnectError as e:
+                # httpx has no SSLError class — SSL failures arrive wrapped in
+                # ConnectError; classify by cause / message.
+                err_msg = str(e).lower()
+                is_tls = (
+                    isinstance(getattr(e, "__cause__", None), ssl.SSLError)
+                    or "ssl" in err_msg or "certificate" in err_msg
+                )
+                method = (
+                    BlockingMethod.TLS_HANDSHAKE_FAILURE if is_tls
+                    else BlockingMethod.IP_DROPPED
+                )
                 return TestResult(
                     test=test_name, category="telegram", target=url,
-                    verdict=Verdict.BLOCKED, method=BlockingMethod.TLS_HANDSHAKE_FAILURE,
-                    evidence={"ssl_error": str(e)},
+                    verdict=Verdict.BLOCKED, method=method,
+                    evidence={"error": str(e)},
                 )
             except Exception as e:
                 return TestResult(

@@ -107,16 +107,17 @@ async def _run_method_a_baseline(comparator: BaselineComparator) -> list[TestRes
         evidence={"bandwidth_mbps": round(sel_bw, 2), "profile_mbps": sel_profile},
     ))
 
-    # YouTube CDN
-    yt_bw, yt_profile = await _measure_bandwidth_googlevideo()
-    yt_verdict, yt_method = comparator.compare_bandwidth("googlevideo.com", yt_bw)
+    # YouTube (front page — googlevideo.com is also tagged so ТСПУ sees it as YT).
+    yt_bw, yt_profile, yt_url = await _measure_bandwidth_googlevideo()
+    yt_verdict, yt_method = comparator.compare_bandwidth("youtube.com", yt_bw)
     results.append(TestResult(
         test="throttling_youtube_method_a",
         category="throttling",
-        target="googlevideo.com",
+        target="youtube.com",
         verdict=yt_verdict,
         method=yt_method,
         evidence={
+            "source_url": yt_url,
             "bandwidth_mbps": round(yt_bw, 2),
             "profile_mbps": yt_profile,
             "burst_then_drop": _detect_burst_drop(yt_profile),
@@ -135,26 +136,25 @@ async def _measure_bandwidth_cloudflare() -> float:
     return bw
 
 
-async def _measure_bandwidth_googlevideo() -> tuple[float, list[float]]:
+async def _measure_bandwidth_googlevideo() -> tuple[float, list[float], str]:
     """
-    Measure bandwidth towards a Google/YouTube CDN edge.
+    Measure bandwidth towards a Google/YouTube endpoint.
 
-    There is no public stable-name streaming URL we can rely on, so we hit
-    two anchors that share the throttled SNI / infrastructure and return
-    a real response body:
-      1. https://www.youtube.com/  — front page HTML (~kB-MB range).
-      2. Fallback: https://www.google.com/  — large HTML, same AS15169.
-    A 404/0-byte path would otherwise mask real throttling as "bandwidth=0".
+    No public stable-name video URL exists, so we fall through a list:
+      1. https://www.youtube.com/  — front-page HTML, served from Google edge.
+      2. https://www.google.com/   — large HTML, same AS15169.
+    A 404 / zero-byte response would otherwise mis-report as "throttled".
+
+    Returns (overall_mbps, per_second_profile_mbps, source_url_used).
     """
-    bw, profile = await _measure_bandwidth_with_profile(
-        "https://www.youtube.com/", 10,
-    )
-    if bw <= 0.01:  # effectively no bytes — try neutral fallback so we don't
-                    # mis-report "throttled" when the host just returned 0 B.
-        bw, profile = await _measure_bandwidth_with_profile(
-            "https://www.google.com/", 10,
-        )
-    return bw, profile
+    for url in (
+        "https://www.youtube.com/",
+        "https://www.google.com/",
+    ):
+        bw, profile = await _measure_bandwidth_with_profile(url, 10)
+        if bw > 0.01:
+            return bw, profile, url
+    return 0.0, [], "https://www.youtube.com/"
 
 
 async def _measure_bandwidth_with_profile(

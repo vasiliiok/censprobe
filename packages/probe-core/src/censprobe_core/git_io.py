@@ -62,55 +62,41 @@ def git_add_commit_push(message: str, paths: list[str] | None = None) -> None:
 
     Flow:
         1. Stage the requested paths (or everything if paths=None).
-        2. Stash staged changes + unstaged changes.
-        3. git pull --rebase to align with remote (avoids non-fast-forward).
-        4. Pop stash back.
-        5. Re-stage, check if anything changed, commit, push.
+        2. Check if there's anything to commit; if not, bail out.
+        3. Commit locally — working tree becomes clean re: staged changes.
+        4. Push; on non-fast-forward, rebase our commit on top of remote and retry.
 
-    Args:
-        message: Commit message.
-        paths: List of paths to stage. If None, stages everything (git add -A).
+    Notes:
+        * We do NOT pre-pull. Pulling only when push is rejected saves a network
+          round-trip in the happy path (single pusher) and still handles the rare
+          concurrent-push case via _push_with_retry.
+        * Unrelated unstaged changes (e.g. other generated files we're not
+          committing this run) are handled by `git pull --rebase --autostash`
+          inside the retry loop.
     """
-    # 1. Stash any local changes (tracked + untracked) so pull --rebase is clean.
-    _run(["git", "add", "-N", "."], check=False)   # include untracked in stash
-    stash = _run(["git", "stash", "push", "-u", "-m", "censprobe-autosync"], check=False)
-    stashed = "No local changes to save" not in (stash.stdout + stash.stderr)
-
-    # 2. Sync with remote before committing to avoid non-fast-forward.
-    try:
-        _run(["git", "pull", "--rebase", "--autostash"])
-    except RuntimeError as e:
-        logger.warning("Pre-push pull failed: %s (continuing)", e)
-
-    # 3. Restore stashed work.
-    if stashed:
-        try:
-            _run(["git", "stash", "pop"])
-        except RuntimeError as e:
-            logger.error("Stash pop failed — resolve conflicts manually: %s", e)
-            raise
-
-    # 4. Stage the paths for this commit.
+    # 1. Stage
     if paths:
         for p in paths:
             _run(["git", "add", p])
     else:
         _run(["git", "add", "-A"])
 
-    # 5. Check if there's anything to commit.
-    status = _run(["git", "status", "--porcelain"], check=False)
+    # 2. Anything to commit?
+    status = _run(["git", "status", "--porcelain", "--untracked-files=no"], check=False)
     if not status.stdout.strip():
         logger.info("Nothing to commit, skipping push.")
         return
 
+    # 3. Commit locally.
     logger.info("git commit: %s", message)
     _run(["git", "commit", "-m", message])
 
+    # 4. Push (with rebase on rejection).
     _push_with_retry()
 
 
 def _push_with_retry(max_attempts: int = 4, backoff_sec: float = 2.0) -> None:
-    """Push with exponential backoff retry and automatic rebase on rejection."""
+    """Push with exponential backoff; on rejection, rebase our commit on remote."""
     import time
 
     delay = backoff_sec
@@ -122,19 +108,24 @@ def _push_with_retry(max_attempts: int = 4, backoff_sec: float = 2.0) -> None:
             return
         except RuntimeError as e:
             if attempt >= max_attempts:
-                logger.error("Push failed after %d attempts. Report saved in local commit.", max_attempts)
-                logger.error("Run 'git push' manually from %s when network is available.", WORKSPACE)
+                logger.error(
+                    "Push failed after %d attempts. Commit is saved locally in %s; "
+                    "run 'git push' manually when network is available.",
+                    max_attempts, WORKSPACE,
+                )
                 return
 
-            # Rebase on top of latest remote before next attempt
+            # Non-fast-forward or transient — put our commit on top of remote.
             try:
-                _run(["git", "pull", "--rebase"])
+                _run(["git", "pull", "--rebase", "--autostash"])
             except RuntimeError as rebase_err:
-                logger.warning("Rebase also failed: %s", rebase_err)
+                logger.warning("pull --rebase failed: %s", rebase_err)
+                # Clean up any half-applied rebase so the next attempt isn't blocked.
+                _run(["git", "rebase", "--abort"], check=False)
 
-            logger.warning("Push failed (attempt %d): %s. Retrying in %.1fs...", attempt, e, delay)
+            logger.warning("Push rejected (attempt %d): %s. Retrying in %.1fs...", attempt, e, delay)
             time.sleep(delay)
-            delay *= 2  # exponential backoff
+            delay *= 2
 
 
 async def git_pull_async() -> str:

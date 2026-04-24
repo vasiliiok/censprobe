@@ -117,8 +117,9 @@ async def _test_domain(
     """Full DNS test suite for one domain."""
     results = []
 
-    # 1. System resolver
-    sys_ips, sys_error = await _resolve_system(domain)
+    # 1. System resolver (with TTL for baseline aggregation)
+    sys_ips, sys_ttl = await _resolve_system_with_ttl(domain)
+    sys_error = None
 
     # 2. Public resolvers
     public_results: dict[str, list[str]] = {}
@@ -185,6 +186,7 @@ async def _test_domain(
         method=method,
         evidence={
             "system_ips": sys_ips,
+            "system_ttl": sys_ttl,
             "isp_ips": isp_ips,
             "doh_ips": doh_ips,
             "resolved_asn": resolved_asn,
@@ -208,6 +210,17 @@ async def _resolve_system(domain: str) -> tuple[list[str], Optional[str]]:
         return [], None  # NXDOMAIN — not an error, just empty
     except Exception as e:
         return [], str(e)
+
+
+async def _resolve_system_with_ttl(domain: str) -> tuple[list[str], Optional[int]]:
+    """Resolve via system resolver and also return the answer TTL."""
+    try:
+        resolver = dns.asyncresolver.Resolver()
+        answers = await resolver.resolve(domain, "A")
+        ttl = int(getattr(answers.rrset, "ttl", 0)) if answers.rrset else None
+        return [str(r) for r in answers], ttl
+    except Exception:
+        return [], None
 
 
 async def _resolve_via(domain: str, nameserver_ip: str) -> tuple[list[str], bool]:

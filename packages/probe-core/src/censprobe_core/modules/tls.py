@@ -18,10 +18,10 @@ Attribution logic:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import socket
 import ssl
-import subprocess
 import time
 from typing import Optional
 
@@ -139,13 +139,20 @@ async def _tls_connect(
                     rtt_connect = (time.monotonic() - t0) * 1000
                     with ctx.wrap_socket(raw, server_hostname=sni) as tls:
                         cert = tls.getpeercert()
+                        cert_der = tls.getpeercert(binary_form=True)
                         alpn = tls.selected_alpn_protocol()
+                        leaf_sha256 = (
+                            hashlib.sha256(cert_der).hexdigest() if cert_der else None
+                        )
                         return {
                             "ok": True,
                             "rtt_connect_ms": rtt_connect,
                             "rtt_total_ms": (time.monotonic() - t0) * 1000,
                             "alpn": alpn,
-                            "cert_subject": cert.get("subject") if cert else None,
+                            "cert_subject_cn": _extract_cn(cert.get("subject")) if cert else None,
+                            "cert_issuer_cn": _extract_cn(cert.get("issuer")) if cert else None,
+                            # Only the leaf cert — ssl stdlib doesn't expose the full chain.
+                            "cert_chain_sha256": [leaf_sha256] if leaf_sha256 else [],
                         }
             except ssl.SSLCertVerificationError as e:
                 return {"ok": False, "error": "cert_verification_failed", "detail": str(e)}
@@ -241,6 +248,25 @@ async def _resolve_ip(domain: str) -> Optional[str]:
         return infos[0][4][0]
     except Exception:
         return None
+
+
+def _extract_cn(rdn_seq) -> Optional[str]:
+    """
+    Pull out commonName from ssl.getpeercert()'s 'subject' / 'issuer' field.
+
+    Format from stdlib is a nested tuple:
+      ((('commonName', 'meduza.io'),), (('organizationName', '...'),), ...)
+    """
+    if not rdn_seq:
+        return None
+    try:
+        for rdn in rdn_seq:
+            for attr in rdn:
+                if len(attr) == 2 and attr[0] == "commonName":
+                    return attr[1]
+    except Exception:
+        pass
+    return None
 
 
 def _slug(domain: str) -> str:

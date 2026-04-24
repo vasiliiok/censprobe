@@ -27,28 +27,35 @@ _WORKSPACE = Path("/workspace")
 _BASELINE_PATH = _WORKSPACE / "baseline" / "latest.json"
 
 
-def load_baseline(path: Path | None = None) -> BaselineData:
+def load_baseline(path: Path | None = None, *, quiet_if_stub: bool = False) -> BaselineData:
     """
     Load baseline from disk.
 
     If the file is missing or is a stub (runs_count == 0), returns an
     empty stub and logs a warning. The probe will proceed with
     INCONCLUSIVE verdicts where comparison is impossible.
+
+    Args:
+        quiet_if_stub: Suppress the "stub" warning. Used by control container
+            which loads baseline just to bootstrap its own runs — complaining
+            about the stub it's about to overwrite is noise.
     """
     p = path or _BASELINE_PATH
     if not p.exists():
-        logger.warning("Baseline not found at %s — using empty stub", p)
+        if not quiet_if_stub:
+            logger.warning("Baseline not found at %s — using empty stub", p)
         return BaselineData()
 
     try:
         raw = json.loads(p.read_text())
         baseline = BaselineData.model_validate(raw)
         if baseline.is_stub():
-            logger.warning(
-                "Baseline is a stub (runs_count=%d). "
-                "Run 'docker compose --profile control up' to generate a real baseline.",
-                baseline.runs_count,
-            )
+            if not quiet_if_stub:
+                logger.warning(
+                    "Baseline is a stub (runs_count=%d). "
+                    "Run 'docker compose --profile control up' to generate a real baseline.",
+                    baseline.runs_count,
+                )
         else:
             # Warn if validity_until has passed — stale baseline produces
             # false positives (DNS/TLS results compared against outdated ASNs/certs).
@@ -153,6 +160,11 @@ class BaselineComparator:
         """
         Interpret Method B (SNI throttling probe) results.
 
+        Uses baseline's per-SNI p50 as the reference: "throttled" means the
+        measured bandwidth is < 40 % of the baseline p50 for that same SNI
+        (a cross-border link to speedtest.selectel.ru can give sub-Mbit speeds
+        from a clean jurisdiction, so an absolute threshold doesn't work).
+
         Args:
             correct_bw: Bandwidth with correct SNI (speedtest.selectel.ru)
             trigger_bw: Bandwidth with trigger SNI (googlevideo.com)
@@ -160,23 +172,37 @@ class BaselineComparator:
 
         Returns verdict per spec table (Часть 2.5.5).
         """
-        if self._stub:
-            # Without baseline we still can reason about relative values
-            pass
+        snit = self.baseline.sni_throttling
+        baseline_runs = snit.runs if snit is not None else {}
 
-        # Threshold for "low" bandwidth: < 1 Mbit/s is burst-then-drop pattern
-        _LOW = 1.0
+        def _ref(label: str, fallback_floor: float) -> float:
+            """Baseline p50 for this label, with a small floor so x<ref*0.4
+            still makes sense when we have no baseline at all."""
+            entry = baseline_runs.get(label)
+            if entry and entry.bandwidth_mbps_p50 > 0:
+                return entry.bandwidth_mbps_p50
+            return fallback_floor
 
-        all_low = correct_bw < _LOW and trigger_bw < _LOW and typo_bw < _LOW
-        if all_low:
-            return Verdict.INCONCLUSIVE  # channel problem overall
+        ref_correct = _ref("correct_sni", 0.2)
+        ref_trigger = _ref("googlevideo_sni", 0.2)
+        ref_typo = _ref("typo_sni", 0.2)
 
-        # Trigger is throttled, others are fine → SNI throttling
-        if trigger_bw < _LOW and correct_bw >= _LOW and typo_bw >= _LOW:
+        def throttled(measured: float, ref: float) -> bool:
+            return measured < ref * 0.4
+
+        correct_throttled = throttled(correct_bw, ref_correct)
+        trigger_throttled = throttled(trigger_bw, ref_trigger)
+        typo_throttled = throttled(typo_bw, ref_typo)
+
+        if correct_throttled and trigger_throttled and typo_throttled:
+            # Everything is slower than baseline — channel-wide issue, not SNI.
+            return Verdict.INCONCLUSIVE
+
+        if trigger_throttled and not correct_throttled and not typo_throttled:
             return Verdict.YOUTUBE_SNI_THROTTLED
 
-        # Both trigger and typo are throttled → anomaly
-        if trigger_bw < _LOW and typo_bw < _LOW and correct_bw >= _LOW:
+        if trigger_throttled and typo_throttled and not correct_throttled:
+            # Typo also throttled — suspicious, not the classic SNI signature.
             return Verdict.ANOMALY
 
         return Verdict.OK

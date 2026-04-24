@@ -103,66 +103,76 @@ def build_baseline(
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _aggregate_dns(results: list[TestResult]) -> dict[str, BaselineDnsEntry]:
-    """Union of ASNs and observed IPs per domain across all runs."""
+    """Union of ASNs / observed IPs and min-max TTL per domain across all runs."""
     by_domain: dict[str, dict[str, Any]] = {}
 
     for r in results:
         if r.category != "dns" or not r.evidence:
             continue
-        # Parse domain from test name: dns_meduza_io_system → meduza.io
         domain = _domain_from_dns_test(r.test, r.target)
         if not domain:
             continue
 
-        if domain not in by_domain:
-            by_domain[domain] = {"a_records_asn": set(), "observed_ips": set()}
+        bucket = by_domain.setdefault(
+            domain, {"a_records_asn": set(), "observed_ips": set(), "ttls": []}
+        )
 
         ev = r.evidence
         if asn := ev.get("resolved_asn"):
-            by_domain[domain]["a_records_asn"].add(asn)
+            bucket["a_records_asn"].add(asn)
         for ip in ev.get("system_ips", []):
-            by_domain[domain]["observed_ips"].add(ip)
+            bucket["observed_ips"].add(ip)
         for ip in ev.get("doh_ips", []):
-            by_domain[domain]["observed_ips"].add(ip)
+            bucket["observed_ips"].add(ip)
+        if (ttl := ev.get("system_ttl")) and isinstance(ttl, (int, float)) and ttl > 0:
+            bucket["ttls"].append(int(ttl))
 
-    return {
-        domain: BaselineDnsEntry(
+    out: dict[str, BaselineDnsEntry] = {}
+    for domain, data in by_domain.items():
+        if not data["a_records_asn"]:
+            continue
+        ttls = data["ttls"]
+        # Default range if we never captured a TTL.
+        ttl_range = [min(ttls), max(ttls)] if ttls else [60, 300]
+        out[domain] = BaselineDnsEntry(
             a_records_asn=sorted(data["a_records_asn"]),
             observed_ips_v4=sorted(data["observed_ips"]),
+            ttl_range=ttl_range,
         )
-        for domain, data in by_domain.items()
-        if data["a_records_asn"]  # only include if we got at least one ASN
-    }
+    return out
 
 
 def _aggregate_tls(results: list[TestResult]) -> dict[str, BaselineTlsEntry]:
-    """Take TLS cert chain from first successful run per domain."""
+    """Take TLS cert chain + CN from first successful run per domain.
+
+    Entries without any concrete evidence (cert hash / CN) are skipped so the
+    baseline doesn't bloat with empty placeholders.
+    """
     seen: dict[str, BaselineTlsEntry] = {}
 
     for r in results:
         if r.category != "tls" or r.verdict != Verdict.OK or not r.evidence:
             continue
 
-        # Extract domain from target like "1.2.3.4:meduza.io"
         domain = _domain_from_tls_target(r.target)
         if not domain or domain in seen:
             continue
 
-        cert_chain = r.evidence.get("cert_chain_sha256", [])
-        alpn = [r.evidence.get("alpn")] if r.evidence.get("alpn") else []
-        cert_subject = None
-        if subj := r.evidence.get("cert_subject"):
-            # cert_subject is list of tuples like [("commonName", "meduza.io")]
-            for item in subj:
-                if isinstance(item, (list, tuple)) and len(item) == 2:
-                    if item[0] == "commonName":
-                        cert_subject = item[1]
-                        break
+        cert_chain = r.evidence.get("cert_chain_sha256") or []
+        subject_cn = r.evidence.get("cert_subject_cn")
+        issuer_cn = r.evidence.get("cert_issuer_cn")
+        alpn_raw = r.evidence.get("alpn")
+        alpn = [alpn_raw] if alpn_raw else []
+
+        if not (cert_chain or subject_cn or issuer_cn):
+            # Nothing useful for later comparison — don't waste baseline space.
+            continue
 
         seen[domain] = BaselineTlsEntry(
             cert_chain_sha256=cert_chain,
-            cert_subject_cn=cert_subject,
-            alpn=[a for a in alpn if a],
+            cert_subject_cn=subject_cn,
+            cert_issuer_cn=issuer_cn,
+            alpn=alpn,
         )
 
     return seen
