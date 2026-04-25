@@ -16,10 +16,9 @@ side, which means the listener's own echo endpoint.
 from __future__ import annotations
 
 import asyncio
-import base64
 import json
 import logging
-import random
+import socket
 import tempfile
 import time
 from dataclasses import dataclass
@@ -37,6 +36,18 @@ ECHO_PORTS: dict[str, int] = {
     "vless_reality": 9992,
     "hysteria2": 9993,
 }
+
+# Deterministic interface names so a crashed run leaves something we can
+# proactively clean up (otherwise a stale tun/wg device keeps holding the
+# tunnel-IP route and silently blackholes the next probe).
+_OVPN_CLI_IFACE = "censovpn1"
+_WG_CLI_IFACE = "censwg1"
+_AWG_CLI_IFACE = "censawg1"
+
+# amneziawg-go writes a control socket here; `ip link del` removes the TUN
+# but leaves the socket behind, after which the next `awg-quick up` is
+# unhappy. We rm both pre- and post-run.
+_AWG_RUNDIR = Path("/var/run/amneziawg")
 
 
 @dataclass
@@ -159,16 +170,19 @@ def _classify_proxy_outcome(
 ) -> tuple[bool, bool]:
     """Return (handshake_ok, is_real_handshake_only).
 
-    Given proxy_echo's status and tunnel log, decide whether a "handshake_only"
-    verdict from proxy_echo actually reflects a completed upstream handshake.
-    If no success marker appeared in the logs, downgrade to BLOCKED.
+    Given proxy_echo's status and tunnel log, decide whether the outcome
+    actually reflects a completed upstream handshake. If no success marker
+    appeared in the logs, downgrade to BLOCKED.
+
+    Accepts statuses: "ok", "blocked", "inconclusive" (legacy alias
+    "handshake_only" from older callers also tolerated).
     """
     if status == "ok":
         return True, False
     if status == "blocked":
         return False, False
 
-    # status == "handshake_only" — inspect logs.
+    # status == "inconclusive" (or legacy "handshake_only") — inspect logs.
     low = log_text.lower()
     saw_success = any(tok in low for tok in _HS_SUCCESS_TOKENS)
     saw_failure = any(tok in low for tok in _HS_FAILURE_TOKENS)
@@ -218,18 +232,91 @@ async def ping_echo(ip: str, timeout: float = 3.0) -> bool:
     return code == 0
 
 
+async def _wait_port_listening(
+    port: int,
+    host: str = "127.0.0.1",
+    timeout: float = 5.0,
+    interval: float = 0.05,
+) -> bool:
+    """Poll TCP <host>:<port> until something accepts a connection.
+
+    Closes the race where the tunnel binary (sing-box/xray/hysteria) has
+    spawned but hasn't yet bound its local SOCKS port — without this poll,
+    an early curl gets ECONNREFUSED (exit 7) and the probe wrongly reports
+    BLOCKED even though the tunnel will come up a moment later.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(host, port), timeout=0.5
+            )
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+            return True
+        except (ConnectionRefusedError, OSError, asyncio.TimeoutError):
+            await asyncio.sleep(interval)
+    return False
+
+
+def _pick_free_local_port() -> int:
+    """Reserve a free TCP port from the OS and return its number.
+
+    `random.randint` could collide with an in-use port and make the tunnel
+    binary refuse to start; binding on port 0 gets us an OS-assigned free
+    one. Closing immediately leaves a small race window before the binary
+    rebinds, but it is overwhelmingly less likely than a 50 000-port
+    random collision, especially in --network host containers.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+async def _cleanup_iface(iface: str) -> None:
+    """Best-effort removal of a tun/wg/awg interface (no error if absent)."""
+    await run_cmd(["ip", "link", "del", iface], timeout=3.0)
+
+
+async def _cleanup_awg_socket(iface: str) -> None:
+    """Remove leftover amneziawg-go control socket for <iface>.
+
+    `ip link del` only removes the TUN device; the unix socket persists
+    and would conflict with the next `awg-quick up`.
+    """
+    sock = _AWG_RUNDIR / f"{iface}.sock"
+    try:
+        sock.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Proxy-based echo: distinguishes handshake from data-phase.
-# Returns: ("ok", rtt_ms)          — data phase OK (curl exit 0, HTTP 200)
-#          ("handshake_only", None) — SOCKS connect succeeded but data didn't
-#          ("blocked", None)        — handshake failed (SOCKS error / refused)
+# Returns: ("ok", rtt_ms)             — data phase OK (curl exit 0, HTTP 200)
+#          ("handshake_only", None)   — SOCKS connect succeeded but data didn't
+#          ("blocked", None)          — local SOCKS port not listening at all
+#          ("inconclusive", None)     — SOCKS reachable, outcome ambiguous
+#                                        (caller should consult tunnel logs)
 # ─────────────────────────────────────────────────────────────────────────────
 async def proxy_echo(
     proxy_port: int,
     echo_port: int,
     proxy_type: str = "socks5h",
     timeout: float = 5.0,
+    socks_ready: bool = True,
 ) -> tuple[str, Optional[float]]:
+    """Run a single curl through the local SOCKS proxy.
+
+    `socks_ready` should be True when the caller has already confirmed the
+    SOCKS port is listening (via _wait_port_listening). If False, exit
+    code 7 is treated as "tunnel never came up" rather than "remote side
+    blocked us".
+    """
     t0 = time.monotonic()
     cmd = [
         "curl", "-s", "-o", "/dev/null",
@@ -238,21 +325,36 @@ async def proxy_echo(
         "-x", f"{proxy_type}://127.0.0.1:{proxy_port}",
         f"http://127.0.0.1:{echo_port}/ping",
     ]
-    code, out, err = await run_cmd(cmd, timeout=timeout + 1)
+    code, out, _err = await run_cmd(cmd, timeout=timeout + 1)
     rtt = (time.monotonic() - t0) * 1000
 
-    # Success: echo server reached, HTTP 200 returned.
+    # Success: echo server reached, HTTP 2xx returned.
     if code == 0 and out.strip().startswith("2"):
         return "ok", rtt
 
-    # SOCKS/proxy connect failed → handshake did not complete.
-    # curl exit codes: 5=resolve, 7=refused, 97=SOCKS general failure.
-    if code in (5, 7, 97):
+    # Local SOCKS port unreachable. This means the tunnel binary itself is
+    # not listening — neither a "blocked" remote nor "handshake only", just
+    # a startup problem. We still report "blocked" upstream so the verdict
+    # reflects "no working tunnel from this client".
+    # Exit 7  = couldn't connect (TCP refused) — only meaningful when the
+    #           caller hasn't already polled the SOCKS port.
+    # Exit 5  = couldn't resolve proxy host — impossible with literal
+    #           127.0.0.1, but kept for completeness.
+    if code in (5, 7) and not socks_ready:
         return "blocked", None
 
-    # Anything else (timeout=28, got_nothing=52, recv_error=56, partial=18, ...):
-    # SOCKS handshake plausibly succeeded but tunnel data phase failed.
-    return "handshake_only", None
+    # Curl exit 97 (CURLE_PROXY): "error during SOCKS proxy negotiation"
+    # — the local SOCKS server *did* accept our TCP connect but rejected
+    # the handshake. That can mean either:
+    #   (a) the upstream VPN tunnel has not actually established a session
+    #       (so the proxy can't satisfy CONNECT), or
+    #   (b) the tunnel is up but the server-side rejected the destination.
+    # We can't tell from curl alone — return "inconclusive" and let the
+    # caller decide via tunnel-log inspection (_classify_proxy_outcome).
+    # Same for any other non-zero curl exit (28=timeout, 52=got_nothing,
+    # 56=recv_error, 18=partial, …): SOCKS connect plausibly succeeded but
+    # the remote data phase did not.
+    return "inconclusive", None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -260,22 +362,31 @@ async def proxy_echo(
 # ─────────────────────────────────────────────────────────────────────────────
 async def probe_openvpn(host: str, port: int, psk_pem: str) -> ProbeResult:
     result = ProbeResult()
+    if not psk_pem or "BEGIN OpenVPN Static key" not in psk_pem:
+        result.error = "bad PSK: missing OpenVPN Static key V1 envelope"
+        return result
+
+    # Pre-clean any stale tun from a previously-crashed run. With a fixed
+    # interface name we can reliably scrub the leftover /32 peer route to
+    # 10.200.0.1, which would otherwise blackhole this probe.
+    await _cleanup_iface(_OVPN_CLI_IFACE)
+
     with tempfile.TemporaryDirectory(prefix="censprobe_client_ovpn_") as tmpdir:
         tmp_path = Path(tmpdir)
         psk_path = tmp_path / "static.key"
-        if not psk_pem or "BEGIN OpenVPN Static key" not in psk_pem:
-            result.error = "bad PSK: missing OpenVPN Static key V1 envelope"
-            return result
         psk_path.write_text(psk_pem, encoding="utf-8")
         psk_path.chmod(0o600)
 
         # Server side uses ifconfig 10.200.0.1 10.200.0.2 → client mirrors.
         # Cipher must match the server (AES-256-CBC; AEAD ciphers are not
         # allowed with `secret` / static-key mode).
+        # `dev <name>` + `dev-type tun` forces a deterministic interface
+        # name so we can reliably clean it up after a SIGKILL.
         config = f"""
 proto udp
 remote {host} {port}
-dev tun
+dev {_OVPN_CLI_IFACE}
+dev-type tun
 secret {psk_path}
 ifconfig 10.200.0.2 10.200.0.1
 keepalive 10 60
@@ -298,6 +409,7 @@ verb 1
             hs_ok = False
             while time.monotonic() - t0 < PROBE_TIMEOUT:
                 try:
+                    assert proc.stdout is not None
                     line_bytes = await asyncio.wait_for(proc.stdout.readline(), timeout=1.0)
                     if not line_bytes:
                         break
@@ -325,6 +437,9 @@ verb 1
                     await _stop_log_drain(drain_task)
         finally:
             await _graceful_terminate(proc)
+            # Belt-and-braces: openvpn normally tears down its own tun on
+            # exit, but if it was SIGKILLed the device leaks.
+            await _cleanup_iface(_OVPN_CLI_IFACE)
 
     return result
 
@@ -360,16 +475,18 @@ Endpoint = {host}:{port}
 AllowedIPs = 10.202.0.1/32
 PersistentKeepalive = 25
 """
-        conf_path = tmp_path / "censwg1.conf"
+        conf_path = tmp_path / f"{_WG_CLI_IFACE}.conf"
         conf_path.write_text(config)
 
-        # Remove any stale censwg1 from a previously killed run. wg-quick
+        # Remove any stale interface from a previously killed run. wg-quick
         # up would otherwise fail with "File exists" in host netns.
-        await run_cmd(["ip", "link", "del", "censwg1"], timeout=3.0)
+        await _cleanup_iface(_WG_CLI_IFACE)
 
         code, _, err = await run_cmd(["wg-quick", "up", str(conf_path)])
         if code != 0:
             result.error = f"wg-quick up failed: {err}"
+            # Even on failure, scrub anything wg-quick may have half-set-up.
+            await _cleanup_iface(_WG_CLI_IFACE)
             return result
 
         try:
@@ -377,7 +494,7 @@ PersistentKeepalive = 25
             hs_ok = False
             while time.monotonic() - t0 < PROBE_TIMEOUT:
                 _, wg_out, _ = await run_cmd(
-                    ["wg", "show", "censwg1", "latest-handshakes"],
+                    ["wg", "show", _WG_CLI_IFACE, "latest-handshakes"],
                     timeout=1.0,
                 )
                 for line in wg_out.splitlines():
@@ -397,7 +514,11 @@ PersistentKeepalive = 25
                     result.data_ok = True
                     result.verdict = Verdict.OK
         finally:
+            # Try `wg-quick down` first (also drops routes/rules); fall
+            # back to a hard `ip link del` so a leftover interface never
+            # survives this probe.
             await run_cmd(["wg-quick", "down", str(conf_path)])
+            await _cleanup_iface(_WG_CLI_IFACE)
 
     return result
 
@@ -442,15 +563,21 @@ Endpoint = {host}:{port}
 AllowedIPs = 10.201.0.1/32
 PersistentKeepalive = 25
 """
-        conf_path = tmp_path / "censawg1.conf"
+        conf_path = tmp_path / f"{_AWG_CLI_IFACE}.conf"
         conf_path.write_text(config)
 
-        # Remove any stale censawg1 from a previously killed run.
-        await run_cmd(["ip", "link", "del", "censawg1"], timeout=3.0)
+        # Remove any stale interface AND its userspace control socket from
+        # a previously killed run. amneziawg-go writes a unix socket under
+        # /var/run/amneziawg/<iface>.sock; `ip link del` only drops the
+        # TUN, leaving the socket behind to confuse the next bring-up.
+        await _cleanup_iface(_AWG_CLI_IFACE)
+        await _cleanup_awg_socket(_AWG_CLI_IFACE)
 
         code, _, err = await run_cmd(["awg-quick", "up", str(conf_path)])
         if code != 0:
             result.error = f"awg-quick up failed: {err}"
+            await _cleanup_iface(_AWG_CLI_IFACE)
+            await _cleanup_awg_socket(_AWG_CLI_IFACE)
             return result
 
         try:
@@ -465,7 +592,7 @@ PersistentKeepalive = 25
                 # while the listener side reports HANDSHAKE_ONLY (because
                 # awg-quick already pushed an initiation on bring-up).
                 _, wg_out, _ = await run_cmd(
-                    ["awg", "show", "censawg1", "latest-handshakes"],
+                    ["awg", "show", _AWG_CLI_IFACE, "latest-handshakes"],
                     timeout=1.0,
                 )
                 for line in wg_out.splitlines():
@@ -485,7 +612,11 @@ PersistentKeepalive = 25
                     result.data_ok = True
                     result.verdict = Verdict.OK
         finally:
+            # awg-quick down handles routing/socket cleanup when the conf
+            # is still readable; the hard fallbacks ensure no leftovers.
             await run_cmd(["awg-quick", "down", str(conf_path)])
+            await _cleanup_iface(_AWG_CLI_IFACE)
+            await _cleanup_awg_socket(_AWG_CLI_IFACE)
 
     return result
 
@@ -558,7 +689,7 @@ async def probe_vless_reality(
 # ─────────────────────────────────────────────────────────────────────────────
 async def probe_hysteria2(host: str, port: int, auth: str, obfs_password: str) -> ProbeResult:
     result = ProbeResult()
-    local_port = random.randint(10000, 60000)
+    local_port = _pick_free_local_port()
     with tempfile.TemporaryDirectory(prefix="censprobe_client_hy2_") as tmpdir:
         tmp_path = Path(tmpdir)
         config = f"""
@@ -589,9 +720,11 @@ socks5:
         log_buf = bytearray()
         drain_task = await _start_log_drain(proc, log_buf)
         try:
-            await asyncio.sleep(1.0)
+            # Wait until hysteria actually binds its local SOCKS port
+            # (or until it gives up). Replaces a fixed `sleep(1.0)` that
+            # raced the probe on slow boxes.
+            socks_ready = await _wait_port_listening(local_port, timeout=PROBE_TIMEOUT)
             if proc.returncode is not None:
-                # Wait for drain to finish capturing early startup output.
                 await _stop_log_drain(drain_task)
                 result.error = (
                     f"hysteria failed to start: "
@@ -599,7 +732,10 @@ socks5:
                 )
                 return result
 
-            status, rtt = await proxy_echo(local_port, ECHO_PORTS["hysteria2"], "socks5h")
+            status, rtt = await proxy_echo(
+                local_port, ECHO_PORTS["hysteria2"], "socks5h",
+                socks_ready=socks_ready,
+            )
             log_text = bytes(log_buf).decode("utf-8", errors="replace")
             hs_ok, is_hs_only = _classify_proxy_outcome(status, log_text)
             if status == "ok":
@@ -629,7 +765,7 @@ async def _tunnel_via_singbox_or_xray(
     config_builder,
 ) -> ProbeResult:
     result = ProbeResult()
-    local_port = random.randint(10000, 60000)
+    local_port = _pick_free_local_port()
     with tempfile.TemporaryDirectory(prefix=f"censprobe_client_{proto_label}_") as tmpdir:
         tmp_path = Path(tmpdir)
         conf_path = tmp_path / "config.json"
@@ -647,7 +783,11 @@ async def _tunnel_via_singbox_or_xray(
         log_buf = bytearray()
         drain_task = await _start_log_drain(proc, log_buf)
         try:
-            await asyncio.sleep(1.0)
+            # Poll for the local SOCKS port instead of a fixed sleep — on
+            # slow VPS hardware sing-box/xray can take >1 s to bind, and
+            # an early curl returns ECONNREFUSED, which we'd previously
+            # mis-classify as BLOCKED.
+            socks_ready = await _wait_port_listening(local_port, timeout=PROBE_TIMEOUT)
             if proc.returncode is not None:
                 await _stop_log_drain(drain_task)
                 result.error = (
@@ -656,7 +796,10 @@ async def _tunnel_via_singbox_or_xray(
                 )
                 return result
 
-            status, rtt = await proxy_echo(local_port, ECHO_PORTS[proto_label], "socks5h")
+            status, rtt = await proxy_echo(
+                local_port, ECHO_PORTS[proto_label], "socks5h",
+                socks_ready=socks_ready,
+            )
             log_text = bytes(log_buf).decode("utf-8", errors="replace")
             hs_ok, is_hs_only = _classify_proxy_outcome(status, log_text)
             if status == "ok":

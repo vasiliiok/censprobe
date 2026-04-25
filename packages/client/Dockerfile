@@ -58,6 +58,16 @@ RUN git clone --depth 1 https://github.com/amnezia-vpn/amneziawg-tools.git /tmp/
     install -m 0755 amneziawg-go /usr/local/bin/amneziawg-go && \
     rm -rf /tmp/awg-go /root/.cache/go-build /root/go
 
+# awg-quick first attempts kernel mode and only on failure falls back to
+# ${WG_QUICK_USERSPACE_IMPLEMENTATION:-amneziawg-go}. We pin it explicitly
+# so the fallback is deterministic and resilient to a future rename of
+# the upstream default. Containers run without the kernel module loaded,
+# so the userspace path is mandatory.
+# Note: vanilla wg-quick (used by probe_wireguard) reads the same env var,
+# but our WG path goes through the kernel module on the host (network_mode:
+# host), so this override never affects vanilla WireGuard probes.
+ENV WG_QUICK_USERSPACE_IMPLEMENTATION=amneziawg-go
+
 WORKDIR /workspace
 COPY packages/probe-core /tmp/probe-core
 COPY packages/client /tmp/client
