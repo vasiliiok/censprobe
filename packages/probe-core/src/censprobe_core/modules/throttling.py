@@ -29,22 +29,6 @@ from censprobe_core.baseline import BaselineComparator
 
 logger = logging.getLogger(__name__)
 
-# Method A: test files
-_METHOD_A_TARGETS = [
-    {
-        "domain": "googlevideo.com",
-        "url": "https://rr1---sn-gvbxgn-tt1e.googlevideo.com/videoplayback?expire=99999999999&id=deadbeef&itag=18&source=youtube&requiressl=yes&mh=AA&mm=31&mn=sn-gvbxgn-tt1e&ms=au&mv=m&mvi=1&pl=24&ei=test&susc=yes&dur=180&lmt=1234567890",
-        "size_mb": 10,
-        "notes": "YouTube CDN — primary throttling target",
-    },
-    {
-        "domain": "cdn-telegram.org",
-        "url": "https://cdn1.cdn-telegram.org/",
-        "size_mb": 5,
-        "notes": "Telegram CDN",
-    },
-]
-
 # Method B: SNI throttling probe config
 _METHOD_B_CONFIG = {
     "control_ip_host": "speedtest.selectel.ru",
@@ -321,6 +305,7 @@ async def _curl_connect_to_run(
         url,
     ]
 
+    proc = None
     try:
         t0 = time.monotonic()
         proc = await asyncio.create_subprocess_exec(
@@ -328,10 +313,25 @@ async def _curl_connect_to_run(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=35)
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=35)
+        except asyncio.TimeoutError:
+            # Critical: kill + reap so we don't accumulate zombie curl
+            # children across runs (Method B fires three of these in
+            # parallel, each baseline run, on every probe — leaks add up).
+            try:
+                proc.kill()
+            except (ProcessLookupError, OSError):
+                pass
+            try:
+                await proc.wait()
+            except Exception:
+                pass
+            return {"label": label, "sni": sni, "bandwidth_mbps": 0.0, "error": "timeout"}
+
         elapsed = time.monotonic() - t0
 
-        out = stdout.decode().strip()
+        out = stdout.decode(errors="replace").strip()
         parts = out.split()
         speed_bytes_sec = float(parts[0]) if parts else 0.0
         time_total = float(parts[1]) if len(parts) > 1 else elapsed
@@ -351,7 +351,12 @@ async def _curl_connect_to_run(
 
     except FileNotFoundError:
         return {"label": label, "sni": sni, "bandwidth_mbps": 0.0, "error": "curl_not_found"}
-    except asyncio.TimeoutError:
-        return {"label": label, "sni": sni, "bandwidth_mbps": 0.0, "error": "timeout"}
     except Exception as e:
+        # Best-effort cleanup of a half-spawned process.
+        if proc is not None and proc.returncode is None:
+            try:
+                proc.kill()
+                await proc.wait()
+            except Exception:
+                pass
         return {"label": label, "sni": sni, "bandwidth_mbps": 0.0, "error": str(e)}

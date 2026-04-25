@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import re
 import socket
 import ssl
 from pathlib import Path
@@ -115,12 +116,33 @@ async def _test_url(
                 final_url = str(r.url)
                 content_type = r.headers.get("content-type", "")
 
-            tls_ok = url.startswith("https://") and status < 600
+            # If we got here over https://, ConnectError/SSLError did NOT
+            # fire, so TLS *did* succeed. Reusing that boolean below for the
+            # "geoblock vs censorship" attribution.
+            tls_ok = url.startswith("https://")
             is_blockpage = _is_blockpage(body, status)
             cert_sha256_list = await _extract_cert_sha256(final_url, url)
             stable_frags = _extract_stable_fragments(body, target.get("stable_selectors", []))
 
             verdict, method = comparator.compare_http(url, status, body_length, tls_ok, is_blockpage)
+
+            # Feed the leaf cert SHA into the TLS baseline comparator —
+            # previously this list was placed in evidence but never compared,
+            # silently disabling MITM detection. Only override the HTTP
+            # verdict when the comparator actually flags a mismatch.
+            cert_baseline_mismatch = False
+            if cert_sha256_list and tls_ok:
+                domain = target.get("domain") or _domain_of(url)
+                if domain:
+                    tls_v, tls_m = comparator.compare_tls(domain, cert_sha256_list)
+                    if tls_v == Verdict.ANOMALY:
+                        cert_baseline_mismatch = True
+                        # Don't downgrade an existing OK to ANOMALY if the
+                        # mismatch is just a cert rotation; promote to
+                        # ANOMALY only if the HTTP verdict was already OK.
+                        if verdict == Verdict.OK:
+                            verdict = Verdict.ANOMALY
+                            method = tls_m
 
             return TestResult(
                 test=test_name,
@@ -135,6 +157,7 @@ async def _test_url(
                     "tls_ok": tls_ok,
                     "is_blockpage": is_blockpage,
                     "cert_chain_sha256": cert_sha256_list,
+                    "cert_baseline_mismatch": cert_baseline_mismatch,
                     "stable_frags_sha256": stable_frags,
                     "final_url": final_url,
                     "content_type": content_type,
@@ -191,14 +214,42 @@ async def _test_url(
     return last_error or _timeout_result(test_name, url, attempts=repeats)
 
 
+_TITLE_RE = re.compile(rb"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+
+
 def _is_blockpage(body: bytes, status: int) -> bool:
-    """Detect block page by body fingerprints."""
+    """Detect block page by body and title fingerprints.
+
+    Previously this only matched body_patterns, so a page whose evidence
+    of being an РКН stub lived solely in the <title> (a common shape
+    for МТС / Ростелеком redirects) slipped through. We now also match
+    title_patterns, and respect the per-signature http_status filter so
+    that a 404 page from a normal site that happens to contain the word
+    "Роскомнадзор" doesn't get tagged.
+    """
     sigs = _get_blockpage_sigs()
     text = body.decode("utf-8", errors="ignore").lower()
+
+    title_match = _TITLE_RE.search(body)
+    title_text = (
+        title_match.group(1).decode("utf-8", errors="ignore").lower()
+        if title_match
+        else ""
+    )
+
     for sig_name, sig in sigs.get("block_pages", {}).items():
-        for pattern in sig.get("body_patterns", []):
-            if pattern.lower() in text:
+        # If the signature constrains the HTTP status, enforce it.
+        allowed_statuses = sig.get("http_status")
+        if allowed_statuses and status not in allowed_statuses:
+            continue
+
+        for pattern in sig.get("body_patterns", []) or []:
+            if pattern and pattern.lower() in text:
                 return True
+        if title_text:
+            for pattern in sig.get("title_patterns", []) or []:
+                if pattern and pattern.lower() in title_text:
+                    return True
     return False
 
 
@@ -288,3 +339,10 @@ def _ua_chrome() -> str:
 
 def _slug(s: str) -> str:
     return s.replace(".", "_").replace("-", "_").replace("/", "_").lower()
+
+
+def _domain_of(url: str) -> Optional[str]:
+    try:
+        return urlparse(url).hostname
+    except Exception:
+        return None

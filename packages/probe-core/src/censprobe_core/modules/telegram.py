@@ -73,13 +73,22 @@ async def run_telegram_tests(
         voice_results = await _test_voice(cfg.get("api_datacenters", []))
         results.extend(voice_results)
 
-    # Compute health score
+    # Compute health score. THROTTLED specifically means bandwidth was
+    # measured low, NOT "partial reachability" — using it here would
+    # mis-attribute the technique. Use ANOMALY for the partially-reachable
+    # band.
     health = _compute_health_score(results, cfg.get("health_weights", {}))
+    if health >= 0.7:
+        health_verdict = Verdict.OK
+    elif health >= 0.3:
+        health_verdict = Verdict.ANOMALY
+    else:
+        health_verdict = Verdict.BLOCKED
     results.append(TestResult(
         test="telegram_health_score",
         category="telegram",
         target="telegram",
-        verdict=Verdict.OK if health >= 0.7 else (Verdict.THROTTLED if health >= 0.3 else Verdict.BLOCKED),
+        verdict=health_verdict,
         evidence={
             "health_score": round(health, 3),
             "health_pct": round(health * 100, 1),
@@ -125,6 +134,7 @@ async def _test_dc_port(dc_id: int, ip_ver: str, ip: str, port: int) -> TestResu
     target = f"{ip}:{port}"
 
     t0 = time.monotonic()
+    writer = None
     try:
         reader, writer = await asyncio.wait_for(
             asyncio.open_connection(ip, port),
@@ -139,13 +149,21 @@ async def _test_dc_port(dc_id: int, ip_ver: str, ip: str, port: int) -> TestResu
         # TCP — a bare MTProto payload is dropped by the DC without reply.
         # Abridged transport: first-byte 0xef (connection header), then
         # per-message length in 4-byte units (24 / 4 = 6).
+        # struct format: q = signed 64-bit; auth_key_id and message_id are
+        # nominally unsigned but fit in signed range for the foreseeable
+        # future, and Telegram doesn't care about sign on the wire.
         msg_id = int(time.time() * 2**32)
+        # Clamp to signed 64-bit range so struct.pack doesn't blow up if
+        # the system clock skews into the post-2038-ish range while still
+        # using 'q' (signed) for compatibility with existing servers.
+        msg_id &= (1 << 63) - 1
         mtproto = struct.pack("<qqi", 0, msg_id, 4) + b"\xf1\x8e\x7e\xbe"
         assert len(mtproto) == 24 and (len(mtproto) % 4) == 0
         writer.write(b"\xef" + bytes([len(mtproto) // 4]) + mtproto)
         await writer.drain()
 
         # Expect response within timeout
+        response: bytes = b""
         try:
             response = await asyncio.wait_for(reader.read(64), timeout=5.0)
             rtt_total = (time.monotonic() - t0) * 1000
@@ -153,12 +171,6 @@ async def _test_dc_port(dc_id: int, ip_ver: str, ip: str, port: int) -> TestResu
         except asyncio.TimeoutError:
             has_response = False
             rtt_total = (time.monotonic() - t0) * 1000
-
-        writer.close()
-        try:
-            await writer.wait_closed()
-        except Exception:
-            pass
 
         verdict = Verdict.OK if has_response else Verdict.ANOMALY
         return TestResult(
@@ -170,7 +182,7 @@ async def _test_dc_port(dc_id: int, ip_ver: str, ip: str, port: int) -> TestResu
             evidence={
                 "tcp_connect_ms": round(rtt_connect, 1),
                 "mtproto_response": has_response,
-                "response_bytes": len(response) if has_response else 0,
+                "response_bytes": len(response),
             },
         )
 
@@ -194,6 +206,17 @@ async def _test_dc_port(dc_id: int, ip_ver: str, ip: str, port: int) -> TestResu
             verdict=Verdict.BLOCKED, method=method,
             evidence={"error": str(e)},
         )
+    finally:
+        # Always close the writer if we opened one, including the path
+        # where drain()/read() raised after open_connection succeeded —
+        # without this the FD lingers until GC and a hung DC port can
+        # exhaust the descriptor table over a long run.
+        if writer is not None:
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except Exception:
+                pass
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -268,16 +291,30 @@ async def _test_voice(dcs: list[dict]) -> list[TestResult]:
     """
     Test UDP connectivity for Telegram voice calls.
     Sends STUN Binding Request to DC IPs on voice ports.
+
+    Runs probes in parallel — they all use independent UDP sockets and
+    each blocks for at most ~3 s on receive, so serializing them just
+    multiplies the total wall-clock time without any benefit.
     """
-    results = []
+    tasks: list = []
     for dc in dcs[:2]:  # Test first 2 DCs only to avoid too many UDP probes
         dc_id = dc["id"]
         ip = dc.get("ipv4")
         if not ip:
             continue
         for port in _VOICE_PORTS[:2]:  # 2 ports per DC
-            result = await _stun_probe(dc_id, ip, port)
-            results.append(result)
+            tasks.append(_stun_probe(dc_id, ip, port))
+
+    if not tasks:
+        return []
+
+    completed = await asyncio.gather(*tasks, return_exceptions=True)
+    results: list[TestResult] = []
+    for r in completed:
+        if isinstance(r, TestResult):
+            results.append(r)
+        elif isinstance(r, Exception):
+            logger.debug("Voice probe failed: %s", r)
     return results
 
 

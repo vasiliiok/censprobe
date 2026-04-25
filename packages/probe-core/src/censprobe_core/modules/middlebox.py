@@ -93,23 +93,38 @@ async def _test_header_manipulation() -> list[TestResult]:
 
     for tc in test_cases:
         try:
-            response_head, err = await _raw_http_request(
-                host="1.1.1.1", port=80, path="/",
-                headers=tc["headers"],
+            response_head, err = await asyncio.wait_for(
+                _raw_http_request(
+                    host="1.1.1.1", port=80, path="/",
+                    headers=tc["headers"],
+                ),
+                timeout=_TIMEOUT + 2,
             )
             if err:
+                # A network failure to the reference endpoint is not
+                # evidence of middlebox manipulation — surface as
+                # INCONCLUSIVE so the dashboard doesn't treat it as ANOMALY.
                 results.append(TestResult(
                     test=tc["name"], category="middlebox", target="1.1.1.1:80",
-                    verdict=Verdict.ERROR, evidence={"error": err},
+                    verdict=Verdict.INCONCLUSIVE, evidence={"error": err},
                 ))
                 continue
 
             # Cloudflare edge returns "HTTP/1.1 400 Bad Request" for a Host
             # header that doesn't match a served domain. A middlebox that
             # rewrote the request commonly yields a 200, redirect, or TCP
-            # reset — any of those are anomalies.
+            # reset — any of those are anomalies. Parse the status code
+            # rather than string-matching the line, so HTTP/2-only
+            # frontends or future Cloudflare changes don't silently break.
             status_line = response_head.split("\r\n", 1)[0] if response_head else ""
-            got_400 = status_line.startswith("HTTP/1.1 400") or status_line.startswith("HTTP/1.0 400")
+            status_code: Optional[int] = None
+            parts = status_line.split(maxsplit=2)
+            if len(parts) >= 2 and parts[0].startswith("HTTP/"):
+                try:
+                    status_code = int(parts[1])
+                except ValueError:
+                    pass
+            got_400 = status_code == 400
             verdict = Verdict.OK if got_400 else Verdict.ANOMALY
             method = None if got_400 else BlockingMethod.MIDDLEBOX_HTTP_MANIPULATION
 
@@ -122,10 +137,17 @@ async def _test_header_manipulation() -> list[TestResult]:
                 evidence={
                     "sent_header": tc["field"],
                     "status_line": status_line,
+                    "status_code": status_code,
                     "response_head": response_head[:200],
                     "baseline_expected": "HTTP/1.1 400",
                 },
                 notes=tc["notes"],
+            ))
+        except asyncio.TimeoutError:
+            results.append(TestResult(
+                test=tc["name"], category="middlebox", target="1.1.1.1:80",
+                verdict=Verdict.INCONCLUSIVE,
+                evidence={"error": "timeout reaching 1.1.1.1:80"},
             ))
         except Exception as e:
             results.append(TestResult(
@@ -179,21 +201,24 @@ async def _raw_http_request(
 async def _test_invalid_request_line() -> Optional[TestResult]:
     """
     Send an HTTP request with a non-standard method.
-    A middlebox may transform or forward it; a direct server would 400.
+    A direct origin returns 400 Bad Request or 501 Not Implemented (per RFC).
+    A middlebox may transform it to GET, drop the connection, or return
+    something else entirely.
     """
     # Random 7-letter method to avoid pattern matching
     random_method = "".join(random.choices(string.ascii_uppercase, k=7))
-    request_line = f"{random_method} / HTTP/1.1\r\nHost: httpbin.org\r\n\r\n"
+    target_host = "httpbin.org"
+    request_line = f"{random_method} / HTTP/1.1\r\nHost: {target_host}\r\n\r\n"
 
     test_name = "middlebox_invalid_request_line"
 
     try:
         loop = asyncio.get_running_loop()
 
-        def _send_raw():
+        def _send_raw() -> tuple[str, Optional[str]]:
             try:
                 # Use plain HTTP to avoid TLS complexity
-                with socket.create_connection(("httpbin.org", 80), timeout=_TIMEOUT) as s:
+                with socket.create_connection((target_host, 80), timeout=_TIMEOUT) as s:
                     s.sendall(request_line.encode())
                     s.settimeout(5.0)
                     response = b""
@@ -204,35 +229,68 @@ async def _test_invalid_request_line() -> Optional[TestResult]:
                         response += chunk
                         if b"\r\n\r\n" in response:
                             break
-                    return response.decode("utf-8", errors="replace")
+                    return response.decode("utf-8", errors="replace"), None
             except Exception as e:
-                return str(e)
+                return "", str(e)
 
-        response_text = await asyncio.wait_for(
+        response_text, err = await asyncio.wait_for(
             loop.run_in_executor(None, _send_raw),
             timeout=_TIMEOUT + 2,
         )
 
-        # A proper server returns 400 Bad Request or 405 Method Not Allowed
-        # A middlebox might transform to GET or return something else
-        is_400 = "400" in response_text[:100] or "405" in response_text[:100]
+        if err:
+            # Network failure to a 3rd-party endpoint — can't conclude
+            # anything about middleboxes from this alone.
+            return TestResult(
+                test=test_name, category="middlebox", target=f"{target_host}:80",
+                verdict=Verdict.INCONCLUSIVE,
+                evidence={
+                    "sent_method": random_method,
+                    "error": err,
+                    "reason": "Could not reach reference endpoint; test depends on it.",
+                },
+            )
+
+        status_line = response_text.split("\r\n", 1)[0] if response_text else ""
+        # Parse the actual HTTP status code instead of substring-matching
+        # "400" anywhere in the head — the previous heuristic also matched
+        # bytes inside Date/timestamp headers and produced false positives.
+        status_code: Optional[int] = None
+        parts = status_line.split(maxsplit=2)
+        if len(parts) >= 2 and parts[0].startswith("HTTP/"):
+            try:
+                status_code = int(parts[1])
+            except ValueError:
+                pass
+
+        # RFC says 400 (Bad Request) or 501 (Not Implemented) is the
+        # honest server response; 405 (Method Not Allowed) is also fine.
+        ok_statuses = {400, 405, 501}
+        is_ok = status_code in ok_statuses
 
         return TestResult(
             test=test_name,
             category="middlebox",
-            target="httpbin.org:80",
-            verdict=Verdict.OK if is_400 else Verdict.ANOMALY,
-            method=BlockingMethod.MIDDLEBOX_HTTP_MANIPULATION if not is_400 else None,
+            target=f"{target_host}:80",
+            verdict=Verdict.OK if is_ok else Verdict.ANOMALY,
+            method=None if is_ok else BlockingMethod.MIDDLEBOX_HTTP_MANIPULATION,
             evidence={
                 "sent_method": random_method,
+                "status_line": status_line,
+                "status_code": status_code,
                 "response_head": response_text[:200],
-                "expected_400_or_405": is_400,
+                "expected_one_of": sorted(ok_statuses),
             },
         )
 
+    except asyncio.TimeoutError:
+        return TestResult(
+            test=test_name, category="middlebox", target=f"{target_host}:80",
+            verdict=Verdict.INCONCLUSIVE, evidence={"error": "timeout"},
+        )
     except Exception as e:
         return TestResult(
-            test=test_name, category="middlebox", target="httpbin.org:80",
+            test=test_name, category="middlebox", target=f"{target_host}:80",
             verdict=Verdict.ERROR, evidence={"error": str(e)},
         )
 
