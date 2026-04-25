@@ -177,6 +177,7 @@ class ServerMeta(BaseModel):
     """Auto-detected metadata about the probe server."""
     provider: Optional[str] = None
     location: Optional[str] = None
+    country: Optional[str] = None       # ISO-3166 alpha-2, e.g. "DE"
     asn: Optional[str] = None
     as_name: Optional[str] = None
     ipv4_masked: Optional[str] = None   # masked to /24

@@ -55,6 +55,10 @@ async def detect_server_meta() -> ServerMeta:
                 meta.asn = asn_info.get("asn")
                 meta.as_name = asn_info.get("as_name")
                 meta.location = asn_info.get("city")
+                # `country` is recorded too — control orchestrator now
+                # threads it into BaselineControlPoint instead of falling
+                # back to a hardcoded "DE".
+                meta.country = asn_info.get("country")
                 meta.provider = _guess_provider(asn_info.get("as_name", ""))
         else:
             logger.warning(
