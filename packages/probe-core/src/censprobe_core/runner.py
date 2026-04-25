@@ -256,7 +256,11 @@ class ProbeRunner:
             ts = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
             reports_dir = self.workspace / "reports" / self.test_id
             reports_dir.mkdir(parents=True, exist_ok=True)
-            output_path = reports_dir / f"server-solo-{ts}.json"
+            # Filename embeds the runner mode so a future caller using the
+            # same helper from control/listener-side doesn't end up with a
+            # misleading "server-solo-*" report on disk.
+            mode_label = self.mode if self.mode in ("solo", "control") else "report"
+            output_path = reports_dir / f"server-{mode_label}-{ts}.json"
 
         report_data = {
             "test_id": self.test_id,

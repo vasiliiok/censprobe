@@ -33,7 +33,7 @@ from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
-from censprobe_core.git_io import git_add_commit_push, git_pull
+from censprobe_core.git_io import git_add_commit_push, git_pull_async
 from censprobe_core.models import ListenerReport, ReportMeta, ServerMeta
 from censprobe_core.runner import ProbeRunner
 from censprobe_core.scoring import compute_scores
@@ -79,9 +79,12 @@ def main(test_id: str, repeats: int, skip_push: bool, verbose: bool) -> None:
 
 async def _async_main(test_id: str, repeats: int, skip_push: bool) -> None:
     # ── Step 1: git pull ──────────────────────────────────────────────────────
+    # Use the async wrapper so the synchronous subprocess.run inside git_pull
+    # (and the cross-container fcntl flock wait) doesn't freeze the asyncio
+    # loop while httpx clients in detect_server_meta etc. are pending.
     console.print("[dim]Pulling latest from GitHub...[/dim]")
     try:
-        git_pull()
+        await git_pull_async()
     except Exception as e:
         console.print(f"[yellow]Warning: git pull failed: {e}. Continuing with local state.[/yellow]")
 
@@ -109,8 +112,21 @@ async def _async_main(test_id: str, repeats: int, skip_push: bool) -> None:
         console.print(f"[green]Created meta.yaml for {test_id}[/green]")
     else:
         console.print(f"[dim]Using existing meta.yaml for {test_id}[/dim]")
-        raw = yaml.safe_load(meta_path.read_text())
-        server_meta = ServerMeta.model_validate(raw.get("server", {}))
+        # An older / partially-written meta.yaml shouldn't crash the whole
+        # solo run before any tests fire. Fall back to a fresh detection
+        # rather than aborting.
+        try:
+            raw = yaml.safe_load(meta_path.read_text()) or {}
+            if not isinstance(raw, dict):
+                raise ValueError(f"meta.yaml top level must be a mapping, got {type(raw).__name__}")
+            server_meta = ServerMeta.model_validate(raw.get("server", {}))
+        except Exception as e:
+            logger.warning("Could not load existing meta.yaml (%s) — re-detecting", e)
+            try:
+                server_meta = await detect_server_meta()
+            except Exception as detect_err:
+                logger.warning("Re-detection also failed: %s", detect_err)
+                server_meta = ServerMeta()
 
     # ── Step 3: Run all tests ─────────────────────────────────────────────────
     runner = ProbeRunner(workspace=WORKSPACE, test_id=test_id, mode="solo")
@@ -140,14 +156,19 @@ async def _async_main(test_id: str, repeats: int, skip_push: bool) -> None:
     console.print(f"[green]Report saved:[/green] {report_path.name}")
 
     # ── Step 8: git push ──────────────────────────────────────────────────────
+    # Push runs in a thread pool so its retry-with-backoff loop doesn't park
+    # the event loop. Runs sequentially in main flow so we still surface a
+    # success/failure message before exiting.
     if not skip_push:
         console.print("[dim]Pushing to GitHub...[/dim]")
         try:
-            git_add_commit_push(
-                message=f"solo: {test_id} report at {datetime.now(tz=timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}",
-                paths=[
-                    str(WORKSPACE / "reports" / test_id),
-                ],
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(
+                None,
+                lambda: git_add_commit_push(
+                    message=f"solo: {test_id} report at {datetime.now(tz=timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}",
+                    paths=[str(WORKSPACE / "reports" / test_id)],
+                ),
             )
             console.print("[green bold]Pushed to GitHub successfully.[/green bold]")
         except Exception as e:
