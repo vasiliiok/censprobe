@@ -457,8 +457,15 @@ PersistentKeepalive = 25
             t0 = time.monotonic()
             hs_ok = False
             while time.monotonic() - t0 < PROBE_TIMEOUT:
+                # Must use `awg` (not `wg`) — amneziawg-go is a userspace
+                # implementation whose socket lives in /var/run/amneziawg/,
+                # which vanilla `wg` does not look at and silently fails on.
+                # Without this, hs_ok would always stay False, the data-phase
+                # ping never fires, and the probe wrongly reports BLOCKED
+                # while the listener side reports HANDSHAKE_ONLY (because
+                # awg-quick already pushed an initiation on bring-up).
                 _, wg_out, _ = await run_cmd(
-                    ["wg", "show", "censawg1", "latest-handshakes"],
+                    ["awg", "show", "censawg1", "latest-handshakes"],
                     timeout=1.0,
                 )
                 for line in wg_out.splitlines():

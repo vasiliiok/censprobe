@@ -1,9 +1,10 @@
 {
-  "__inputs": [{"name": "DS_CENSPROBE_PG", "label": "Censprobe Postgres", "type": "datasource", "pluginId": "postgres"}],
   "title": "06 — Compare Tests",
   "uid": "censprobe-06",
-  "tags": ["censprobe"],
-  "schemaVersion": 38,
+  "tags": [
+    "censprobe"
+  ],
+  "schemaVersion": 39,
   "version": 1,
   "refresh": "30s",
   "templating": {
@@ -12,7 +13,10 @@
         "name": "test_id_a",
         "label": "Server A",
         "type": "query",
-        "datasource": {"type": "postgres", "uid": "${DS_CENSPROBE_PG}"},
+        "datasource": {
+          "type": "postgres",
+          "uid": "DS_CENSPROBE_PG"
+        },
         "query": "SELECT test_id FROM test_runs ORDER BY created_at DESC",
         "refresh": 2
       },
@@ -20,7 +24,10 @@
         "name": "test_id_b",
         "label": "Server B",
         "type": "query",
-        "datasource": {"type": "postgres", "uid": "${DS_CENSPROBE_PG}"},
+        "datasource": {
+          "type": "postgres",
+          "uid": "DS_CENSPROBE_PG"
+        },
         "query": "SELECT test_id FROM test_runs ORDER BY created_at DESC",
         "refresh": 2
       }
@@ -31,26 +38,58 @@
       "id": 1,
       "title": "Score Comparison",
       "type": "barchart",
-      "gridPos": {"x": 0, "y": 0, "w": 12, "h": 9},
-      "datasource": {"type": "postgres", "uid": "${DS_CENSPROBE_PG}"},
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 9
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "DS_CENSPROBE_PG"
+      },
       "targets": [
         {
           "rawSql": "SELECT 'Entry' AS metric, entry_score AS a_score, NULL AS b_score FROM test_runs WHERE test_id = '$test_id_a' UNION ALL SELECT 'Entry', NULL, entry_score FROM test_runs WHERE test_id = '$test_id_b' UNION ALL SELECT 'Exit', exit_score, NULL FROM test_runs WHERE test_id = '$test_id_a' UNION ALL SELECT 'Exit', NULL, exit_score FROM test_runs WHERE test_id = '$test_id_b' UNION ALL SELECT 'Relay', relay_score, NULL FROM test_runs WHERE test_id = '$test_id_a' UNION ALL SELECT 'Relay', NULL, relay_score FROM test_runs WHERE test_id = '$test_id_b' UNION ALL SELECT 'Overall', overall_score, NULL FROM test_runs WHERE test_id = '$test_id_a' UNION ALL SELECT 'Overall', NULL, overall_score FROM test_runs WHERE test_id = '$test_id_b'",
-          "format": "table"
+          "format": "table",
+          "refId": "A",
+          "editorMode": "code",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "DS_CENSPROBE_PG"
+          }
         }
       ],
-      "options": {"xField": "metric"}
+      "options": {
+        "xField": "metric"
+      }
     },
     {
       "id": 2,
       "title": "Server A Info",
       "type": "table",
-      "gridPos": {"x": 0, "y": 9, "w": 12, "h": 6},
-      "datasource": {"type": "postgres", "uid": "${DS_CENSPROBE_PG}"},
+      "gridPos": {
+        "x": 0,
+        "y": 9,
+        "w": 12,
+        "h": 6
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "DS_CENSPROBE_PG"
+      },
       "targets": [
         {
           "rawSql": "SELECT test_id, asn, as_name, location, provider, distro, ipv4_masked, overall_score, detected_techniques FROM test_runs WHERE test_id = '$test_id_a' LIMIT 1",
-          "format": "table"
+          "format": "table",
+          "refId": "A",
+          "editorMode": "code",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "DS_CENSPROBE_PG"
+          }
         }
       ]
     },
@@ -58,12 +97,27 @@
       "id": 3,
       "title": "Server B Info",
       "type": "table",
-      "gridPos": {"x": 12, "y": 9, "w": 12, "h": 6},
-      "datasource": {"type": "postgres", "uid": "${DS_CENSPROBE_PG}"},
+      "gridPos": {
+        "x": 12,
+        "y": 9,
+        "w": 12,
+        "h": 6
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "DS_CENSPROBE_PG"
+      },
       "targets": [
         {
           "rawSql": "SELECT test_id, asn, as_name, location, provider, distro, ipv4_masked, overall_score, detected_techniques FROM test_runs WHERE test_id = '$test_id_b' LIMIT 1",
-          "format": "table"
+          "format": "table",
+          "refId": "A",
+          "editorMode": "code",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "DS_CENSPROBE_PG"
+          }
         }
       ]
     },
@@ -71,12 +125,27 @@
       "id": 4,
       "title": "Technique Comparison",
       "type": "table",
-      "gridPos": {"x": 0, "y": 15, "w": 24, "h": 8},
-      "datasource": {"type": "postgres", "uid": "${DS_CENSPROBE_PG}"},
+      "gridPos": {
+        "x": 0,
+        "y": 15,
+        "w": 24,
+        "h": 8
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "DS_CENSPROBE_PG"
+      },
       "targets": [
         {
           "rawSql": "SELECT '$test_id_a' AS server, category, method, COUNT(*) AS detections FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = '$test_id_a' AND method IS NOT NULL GROUP BY category, method UNION ALL SELECT '$test_id_b', category, method, COUNT(*) FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = '$test_id_b' AND method IS NOT NULL GROUP BY category, method ORDER BY method, category",
-          "format": "table"
+          "format": "table",
+          "refId": "A",
+          "editorMode": "code",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "DS_CENSPROBE_PG"
+          }
         }
       ]
     }

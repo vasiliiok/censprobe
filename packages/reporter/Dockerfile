@@ -1,5 +1,9 @@
 # Censprobe Reporter — Dockerfile (M7)
-FROM python:3.12-slim
+# Pin to bookworm: trixie renamed libgdk-pixbuf2.0-0 → libgdk-pixbuf-2.0-0,
+# so the unpinned `python:3.12-slim` tag (which now points at trixie) breaks
+# this apt-get with "Package 'libgdk-pixbuf2.0-0' has no installation
+# candidate". Pinning keeps the WeasyPrint dep set stable across releases.
+FROM python:3.12-slim-bookworm
 
 # WeasyPrint deps (fonts + Pango + Cairo for PDF rendering)
 RUN apt-get update && apt-get install -y --no-install-recommends \
