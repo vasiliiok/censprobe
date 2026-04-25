@@ -136,7 +136,11 @@ services:
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
       GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s:%(http_port)s/"
-      GF_INSTALL_PLUGINS: ""
+      # volkovlabs-form-panel powers the "Pull & Refresh" button in the
+      # main overview dashboard — it POSTs to sync-api /refresh from the
+      # browser, so Grafana itself doesn't need network reachability to
+      # sync-api. Plugin is community-signed, no unsigned-allow needed.
+      GF_INSTALL_PLUGINS: "volkovlabs-form-panel"
       DB_PASSWORD: ${DB_PASSWORD:-censprobe}
     volumes:
       - grafana_data:/var/lib/grafana

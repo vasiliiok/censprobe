@@ -57,7 +57,11 @@ class ProtocolCredentials:
 
 def load_protocols_yaml(path: Path) -> ProtocolCredentials:
     """Load credentials from a protocols.yaml file."""
-    raw: dict[str, Any] = yaml.safe_load(path.read_text()) or {}
+    parsed = yaml.safe_load(path.read_text())
+    # An empty file → None, a YAML scalar → str/int/list. Either way calling
+    # .get() on it would explode at the first access — coerce to {} so the
+    # caller transparently gets all-default credentials instead of a crash.
+    raw: dict[str, Any] = parsed if isinstance(parsed, dict) else {}
     c = ProtocolCredentials()
 
     ovpn = raw.get("openvpn", {})

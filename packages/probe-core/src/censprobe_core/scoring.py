@@ -106,10 +106,15 @@ def compute_scores(
         censorship_low = max(0.0, uplink_quality - 0.2)
     else:
         censorship_low = uplink_quality
+    # We don't actually measure inbound geoblocking yet — but giving a flat
+    # +20 means a server with completely dead uplink still scores 20/100 as
+    # a VPN exit, which is misleading. Scale the optimistic "no_geoblock"
+    # assumption by uplink_quality so a dead server bottoms out at 0.
+    no_geoblock_term = uplink_quality * 20.0
     scores.exit_score = round(
         uplink_quality * 40.0 +
         censorship_low * 40.0 +
-        20.0,  # no_geoblock_inbound — assume OK (no GeoIP blocking of VPN clients)
+        no_geoblock_term,
         1,
     )
 
@@ -240,10 +245,12 @@ def _recommend_protocols(
             if proto in confirmed_hs and proto not in recommended:
                 recommended.append(f"{proto} (handshake only)")
     else:
-        # No listener data — recommend based on known RU survivability
-        recommended.append("vless_reality")
-        if "amneziawg" not in blocked:
-            recommended.append("amneziawg")
-        recommended.extend(["hysteria2", "shadowsocks"])
+        # No listener data — recommend based on known RU survivability,
+        # but skip anything that solo's signature probes already saw blocked.
+        # Previously only `amneziawg` was guarded; the others got recommended
+        # even if confirmed signature-blocked.
+        for proto in ("vless_reality", "amneziawg", "hysteria2", "shadowsocks"):
+            if proto not in blocked:
+                recommended.append(proto)
 
     return recommended

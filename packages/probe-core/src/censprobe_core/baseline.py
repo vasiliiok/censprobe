@@ -120,7 +120,14 @@ class BaselineComparator:
             logger.debug("Domain %s not in baseline DNS entries", domain)
             return Verdict.ANOMALY, None
 
-        if resolved_asn and resolved_asn not in b.a_records_asn:
+        # Without a resolved ASN we can't decide between OK and poisoning —
+        # ip-api 429-throttling, transient network errors, and IPs that don't
+        # resolve to any ASN all land here. Returning OK would silently mask
+        # real DNS poisoning whenever ASN lookup is the thing that's broken.
+        if not resolved_asn:
+            return Verdict.INCONCLUSIVE, None
+
+        if resolved_asn not in b.a_records_asn:
             if cert_valid is False:
                 return Verdict.DNS_POISONING, BlockingMethod.DNS_POISONING
             return Verdict.ANOMALY, None
