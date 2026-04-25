@@ -26,8 +26,9 @@ import ssl
 from typing import Optional
 
 import dns.asyncresolver
-import dns.resolver
+import dns.exception
 import dns.rdatatype
+import dns.resolver
 import httpx
 
 from censprobe_core.models import TestResult, Verdict, BlockingMethod
@@ -117,15 +118,20 @@ async def _test_domain(
     """Full DNS test suite for one domain."""
     results = []
 
-    # 1. System resolver (with TTL for baseline aggregation)
-    sys_ips, sys_ttl = await _resolve_system_with_ttl(domain)
-    sys_error = None
+    # 1. System resolver — distinguish NXDOMAIN from network/SERVFAIL errors,
+    #    otherwise every transient failure looks like censorship and produces
+    #    a false DNS_BLOCKED verdict.
+    sys_ips, sys_ttl, sys_status = await _resolve_system_with_ttl(domain)
+    sys_nxdomain = sys_status == "nxdomain"
+    sys_error = sys_status if sys_status not in ("ok", "nxdomain") else None
 
-    # 2. Public resolvers
+    # 2. Public resolvers (NXDOMAIN flag preserved for cross-checking)
     public_results: dict[str, list[str]] = {}
+    public_nxdomain: dict[str, bool] = {}
     for rname, rip in PUBLIC_RESOLVERS:
-        ips, _ = await _resolve_via(domain, rip)
+        ips, nx = await _resolve_via(domain, rip)
         public_results[rname] = ips
+        public_nxdomain[rname] = nx
 
     # 3. DoH resolvers
     doh_results: dict[str, list[str]] = {}
@@ -141,11 +147,25 @@ async def _test_domain(
 
     # 5. Detect ISP resolver (first nameserver in /etc/resolv.conf)
     isp_resolver = _get_isp_resolver()
-    isp_ips, isp_nxdomain = await _resolve_via(domain, isp_resolver) if isp_resolver else ([], False)
+    if isp_resolver:
+        isp_ips, isp_nxdomain = await _resolve_via(domain, isp_resolver)
+    else:
+        isp_ips, isp_nxdomain = [], False
 
-    # 6. NXDOMAIN detection
-    if not sys_ips and not sys_error:
-        # NXDOMAIN from system resolver
+    # 6. NXDOMAIN detection — only if the system resolver actually returned
+    #    NXDOMAIN. A bare network/timeout error is reported as INCONCLUSIVE,
+    #    not DNS_BLOCKED, otherwise we get false positives from any DNS
+    #    hiccup. We also corroborate with DoH: if DoH has the answer but the
+    #    system resolver returned NXDOMAIN, that's strong DNS-blocking signal.
+    if sys_nxdomain:
+        # If DoH (or any public resolver) has answers but ISP/system NXDOMAIN
+        # → ISP-level NXDOMAIN injection.
+        public_has_answer = any(public_results[name] for name in public_results)
+        if doh_ips or public_has_answer:
+            confidence = 0.9
+        else:
+            # Domain may legitimately not exist
+            confidence = 0.5
         results.append(TestResult(
             test=f"dns_{_slug(domain)}_system",
             category="dns",
@@ -155,9 +175,31 @@ async def _test_domain(
             evidence={
                 "system_nxdomain": True,
                 "doh_ips": doh_ips,
+                "public_resolver_ips": public_results,
+                "public_resolver_nxdomain": public_nxdomain,
+                "isp_resolver": isp_resolver,
+                "isp_ips": isp_ips,
+                "isp_nxdomain": isp_nxdomain,
+            },
+            confidence=confidence,
+        ))
+        return results
+
+    if sys_error and not sys_ips:
+        # Pure system-resolver error (not NXDOMAIN) — can't conclude blocking
+        # from this alone. Surface as INCONCLUSIVE with the error in evidence.
+        results.append(TestResult(
+            test=f"dns_{_slug(domain)}_system",
+            category="dns",
+            target=domain,
+            verdict=Verdict.INCONCLUSIVE,
+            evidence={
+                "system_error": sys_error,
+                "doh_ips": doh_ips,
+                "public_resolver_ips": public_results,
                 "isp_resolver": isp_resolver,
             },
-            confidence=0.85,
+            confidence=0.2,
         ))
         return results
 
@@ -200,27 +242,40 @@ async def _test_domain(
     return results
 
 
-async def _resolve_system(domain: str) -> tuple[list[str], Optional[str]]:
-    """Resolve via system resolver."""
+async def _resolve_system_with_ttl(
+    domain: str,
+) -> tuple[list[str], Optional[int], str]:
+    """Resolve via system resolver, returning (ips, ttl, status).
+
+    status is one of:
+      "ok"        — resolved
+      "nxdomain"  — authoritative NXDOMAIN
+      "noanswer"  — no A records (NoAnswer / empty rrset)
+      "timeout"   — DNS timeout / lifetime exceeded
+      "servfail"  — SERVFAIL or other resolver-side failure
+      "error:<m>" — unexpected exception (m = type name)
+
+    Distinguishing NXDOMAIN from generic errors is required so callers
+    don't tag every transient DNS failure as DNS_BLOCKED_NXDOMAIN.
+    """
     try:
         resolver = dns.asyncresolver.Resolver()
-        answers = await resolver.resolve(domain, "A")
-        return [str(r) for r in answers], None
-    except dns.resolver.NXDOMAIN:
-        return [], None  # NXDOMAIN — not an error, just empty
-    except Exception as e:
-        return [], str(e)
-
-
-async def _resolve_system_with_ttl(domain: str) -> tuple[list[str], Optional[int]]:
-    """Resolve via system resolver and also return the answer TTL."""
-    try:
-        resolver = dns.asyncresolver.Resolver()
+        # Bound the lifetime so a hung resolver doesn't stall the suite.
+        resolver.timeout = 5.0
+        resolver.lifetime = 5.0
         answers = await resolver.resolve(domain, "A")
         ttl = int(getattr(answers.rrset, "ttl", 0)) if answers.rrset else None
-        return [str(r) for r in answers], ttl
-    except Exception:
-        return [], None
+        return [str(r) for r in answers], ttl, "ok"
+    except dns.resolver.NXDOMAIN:
+        return [], None, "nxdomain"
+    except dns.resolver.NoAnswer:
+        return [], None, "noanswer"
+    except (dns.resolver.LifetimeTimeout, dns.exception.Timeout):
+        return [], None, "timeout"
+    except dns.resolver.NoNameservers:
+        return [], None, "servfail"
+    except Exception as e:
+        return [], None, f"error:{type(e).__name__}"
 
 
 async def _resolve_via(domain: str, nameserver_ip: str) -> tuple[list[str], bool]:
@@ -264,23 +319,27 @@ async def _validate_cert(domain: str, ip: str) -> Optional[bool]:
     Connect to IP:443 with SNI=domain and check if cert is valid for domain.
     Returns True/False/None (None = connection failed, inconclusive).
     """
+    ctx = ssl.create_default_context()
+
+    def _check() -> Optional[bool]:
+        try:
+            with socket.create_connection((ip, 443), timeout=5) as raw:
+                with ctx.wrap_socket(raw, server_hostname=domain) as s:
+                    s.getpeercert()  # raises if cert invalid
+                    return True
+        except ssl.SSLCertVerificationError:
+            return False
+        except Exception:
+            # Connection or non-cert TLS failure — caller treats None as
+            # "inconclusive", NOT as "cert invalid", which prevents flagging
+            # a TCP/RST as DNS_POISONING.
+            return None
+
     try:
-        ctx = ssl.create_default_context()
-        loop = asyncio.get_running_loop()
-
-        def _check() -> bool:
-            try:
-                with socket.create_connection((ip, 443), timeout=5) as raw:
-                    with ctx.wrap_socket(raw, server_hostname=domain) as s:
-                        s.getpeercert()  # raises if cert invalid
-                        return True
-            except ssl.SSLCertVerificationError:
-                return False
-            except Exception:
-                return None  # type: ignore[return-value]
-
-        return await loop.run_in_executor(None, _check)
-    except Exception:
+        # Bound total time even if the underlying socket ignores its
+        # own timeout (e.g. blocked SYN with no RST → SYN backoff).
+        return await asyncio.wait_for(asyncio.to_thread(_check), timeout=8.0)
+    except (asyncio.TimeoutError, Exception):
         return None
 
 

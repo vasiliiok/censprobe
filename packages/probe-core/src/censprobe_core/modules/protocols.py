@@ -66,8 +66,17 @@ async def run_protocol_tests(
 
         test_name = f"protocol_{protocol}_{ip}_{port}"
         target = f"{ip}:{port}"
-        r = TestResult(test=test_name, category="protocols", target=target)
-        
+        # TestResult.verdict has no default — we MUST pick one up-front,
+        # otherwise pydantic raises ValidationError before any probe runs.
+        # Default to ERROR; the success / blocked / inconclusive branches
+        # below override it explicitly.
+        r = TestResult(
+            test=test_name,
+            category="protocols",
+            target=target,
+            verdict=Verdict.ERROR,
+        )
+
         try:
             if protocol == "openvpn":
                 pr = await probe_openvpn(ip, port, ep.get("psk_pem", ""))

@@ -98,7 +98,7 @@ class ProbeRunner:
         logger.info("[%s] Running TLS/SNI tests...", self.test_id)
         tls_targets = self._collect_tls_targets()
         try:
-            tls_results = await tls.run_tls_tests(tls_targets, repeats)
+            tls_results = await tls.run_tls_tests(tls_targets, repeats, self.comparator)
             results.extend(tls_results)
             logger.info("[%s] TLS: %d results", self.test_id, len(tls_results))
         except Exception:
