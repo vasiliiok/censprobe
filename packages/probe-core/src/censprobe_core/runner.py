@@ -81,8 +81,8 @@ class ProbeRunner:
             dns_results = await dns.run_dns_tests(dns_domains, self.comparator, repeats)
             results.extend(dns_results)
             logger.info("[%s] DNS: %d results", self.test_id, len(dns_results))
-        except Exception as e:
-            logger.error("[%s] DNS module failed: %s", self.test_id, e)
+        except Exception:
+            logger.exception("[%s] DNS module failed", self.test_id)
 
         # ── 2. TCP ────────────────────────────────────────────────────────────
         logger.info("[%s] Running TCP reachability tests...", self.test_id)
@@ -91,8 +91,8 @@ class ProbeRunner:
             tcp_results = await tcp.run_tcp_tests(tcp_targets, repeats)
             results.extend(tcp_results)
             logger.info("[%s] TCP: %d results", self.test_id, len(tcp_results))
-        except Exception as e:
-            logger.error("[%s] TCP module failed: %s", self.test_id, e)
+        except Exception:
+            logger.exception("[%s] TCP module failed", self.test_id)
 
         # ── 3. TLS/SNI ───────────────────────────────────────────────────────
         logger.info("[%s] Running TLS/SNI tests...", self.test_id)
@@ -101,8 +101,8 @@ class ProbeRunner:
             tls_results = await tls.run_tls_tests(tls_targets, repeats)
             results.extend(tls_results)
             logger.info("[%s] TLS: %d results", self.test_id, len(tls_results))
-        except Exception as e:
-            logger.error("[%s] TLS module failed: %s", self.test_id, e)
+        except Exception:
+            logger.exception("[%s] TLS module failed", self.test_id)
 
         # ── 4. HTTP/HTTPS ─────────────────────────────────────────────────────
         logger.info("[%s] Running HTTP tests...", self.test_id)
@@ -111,8 +111,8 @@ class ProbeRunner:
             http_results = await http.run_http_tests(http_targets, self.comparator, repeats)
             results.extend(http_results)
             logger.info("[%s] HTTP: %d results", self.test_id, len(http_results))
-        except Exception as e:
-            logger.error("[%s] HTTP module failed: %s", self.test_id, e)
+        except Exception:
+            logger.exception("[%s] HTTP module failed", self.test_id)
 
         # ── 5. Telegram ───────────────────────────────────────────────────────
         logger.info("[%s] Running Telegram tests...", self.test_id)
@@ -120,8 +120,8 @@ class ProbeRunner:
             tg_results = await telegram.run_telegram_tests(self.comparator)
             results.extend(tg_results)
             logger.info("[%s] Telegram: %d results", self.test_id, len(tg_results))
-        except Exception as e:
-            logger.error("[%s] Telegram module failed: %s", self.test_id, e)
+        except Exception:
+            logger.exception("[%s] Telegram module failed", self.test_id)
 
         # ── 6. Throttling (Method A + B) ──────────────────────────────────────
         logger.info("[%s] Running throttling tests...", self.test_id)
@@ -129,8 +129,8 @@ class ProbeRunner:
             thr_results = await throttling.run_throttling_tests(self.comparator)
             results.extend(thr_results)
             logger.info("[%s] Throttling: %d results", self.test_id, len(thr_results))
-        except Exception as e:
-            logger.error("[%s] Throttling module failed: %s", self.test_id, e)
+        except Exception:
+            logger.exception("[%s] Throttling module failed", self.test_id)
 
         # ── 7. Middlebox ──────────────────────────────────────────────────────
         logger.info("[%s] Running middlebox tests...", self.test_id)
@@ -138,16 +138,16 @@ class ProbeRunner:
             mb_results = await middlebox.run_middlebox_tests()
             results.extend(mb_results)
             logger.info("[%s] Middlebox: %d results", self.test_id, len(mb_results))
-        except Exception as e:
-            logger.error("[%s] Middlebox module failed: %s", self.test_id, e)
+        except Exception:
+            logger.exception("[%s] Middlebox module failed", self.test_id)
 
         # ── 8. Protocol signatures (solo-only, no listener needed) ────────────
         logger.info("[%s] Protocol signature tests...", self.test_id)
         try:
             proto_results = await protocols.run_protocol_tests(control_endpoints=None)
             results.extend(proto_results)
-        except Exception as e:
-            logger.error("[%s] Protocol module failed: %s", self.test_id, e)
+        except Exception:
+            logger.exception("[%s] Protocol module failed", self.test_id)
 
         logger.info("[%s] Probe complete. Total results: %d", self.test_id, len(results))
         return results
@@ -281,10 +281,27 @@ class ProbeRunner:
 
 def _summarize(results: list[TestResult]) -> dict:
     """Quick summary statistics for the report."""
+    # Verdicts that mean "this target was actually censored / unreachable",
+    # not just "we didn't get a clean OK". Keep this in sync with the
+    # dashboard's "blocked" filter (packages/dashboard/grafana/dashboards).
+    BLOCKED_VERDICTS = {
+        "BLOCKED",
+        "DNS_BLOCKED",
+        "DOH_BLOCKED",
+        "DNS_POISONING",
+        "IP_DROPPED",
+        "RST_INJECTED",
+        "REFUSED",
+        "THROTTLED",
+        "YOUTUBE_SNI_THROTTLED",
+    }
+
     total = len(results)
     by_verdict: dict[str, int] = {}
     by_category: dict[str, dict[str, int]] = {}
     techniques = set()
+    blocked_count = 0
+    ok_count = 0
 
     for r in results:
         v = str(r.verdict)
@@ -295,12 +312,16 @@ def _summarize(results: list[TestResult]) -> dict:
         by_category[cat][v] = by_category[cat].get(v, 0) + 1
         if r.method:
             techniques.add(str(r.method))
+        if v in BLOCKED_VERDICTS:
+            blocked_count += 1
+        elif v == "OK":
+            ok_count += 1
 
     return {
         "total": total,
         "by_verdict": by_verdict,
         "by_category": by_category,
         "detected_techniques": sorted(techniques),
-        "blocked_count": by_verdict.get("BLOCKED", 0),
-        "ok_count": by_verdict.get("OK", 0),
+        "blocked_count": blocked_count,
+        "ok_count": ok_count,
     }

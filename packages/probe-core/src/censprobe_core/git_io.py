@@ -17,6 +17,7 @@ import fcntl
 import logging
 import os
 import subprocess
+import time
 from pathlib import Path
 from typing import Iterator
 
@@ -77,22 +78,38 @@ def _git_lock() -> Iterator[None]:
         os.close(fd)
 
 
-def _run(cmd: list[str], check: bool = True) -> subprocess.CompletedProcess:
-    """Run a git command synchronously in WORKSPACE under the git lock."""
-    with _git_lock():
-        result = subprocess.run(
-            cmd,
-            cwd=WORKSPACE,
-            capture_output=True,
-            text=True,
-            env=GIT_ENV,
-        )
+def _run_unlocked(cmd: list[str], check: bool = True) -> subprocess.CompletedProcess:
+    """Run a git command synchronously in WORKSPACE WITHOUT acquiring the lock.
+
+    Use this when the caller already holds `_git_lock()` and wants to issue a
+    multi-step git flow atomically. For one-shot calls outside an existing
+    lock context, use `_run` instead.
+    """
+    result = subprocess.run(
+        cmd,
+        cwd=WORKSPACE,
+        capture_output=True,
+        text=True,
+        env=GIT_ENV,
+    )
     if check and result.returncode != 0:
         raise RuntimeError(
             f"Git command failed: {' '.join(cmd)}\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
     return result
+
+
+def _run(cmd: list[str], check: bool = True) -> subprocess.CompletedProcess:
+    """Run a git command under the cross-container lock.
+
+    For multi-step flows (stage → status → commit → push) prefer holding the
+    lock once across all calls via `_git_lock()` + `_run_unlocked`; otherwise
+    a peer container can interleave its own staged changes between our
+    individual commands and we'd commit (or skip!) the wrong tree.
+    """
+    with _git_lock():
+        return _run_unlocked(cmd, check)
 
 
 def git_pull() -> str:
@@ -103,9 +120,19 @@ def git_pull() -> str:
     return r.stdout
 
 
-def git_add_commit_push(message: str, paths: list[str] | None = None) -> None:
+def git_add_commit_push(
+    message: str,
+    paths: list[str] | None = None,
+    max_attempts: int = 4,
+    backoff_sec: float = 2.0,
+) -> None:
     """
     Stage, commit, and push changes.
+
+    Atomicity: stage+status+commit run inside a single fcntl-flock window so
+    a peer container running in parallel can't slip its own `git add -A` in
+    between our `add` and `commit`. The push retry loop releases the lock
+    during its backoff sleep so peers can make progress while we wait.
 
     Flow:
         1. Stage the requested paths (or everything if paths=None).
@@ -116,67 +143,68 @@ def git_add_commit_push(message: str, paths: list[str] | None = None) -> None:
     Notes:
         * We do NOT pre-pull. Pulling only when push is rejected saves a network
           round-trip in the happy path (single pusher) and still handles the rare
-          concurrent-push case via _push_with_retry.
+          concurrent-push case via the rebase-on-reject loop below.
         * Unrelated unstaged changes (e.g. other generated files we're not
           committing this run) are handled by `git pull --rebase --autostash`
           inside the retry loop.
     """
-    # 1. Stage
-    if paths:
-        for p in paths:
-            _run(["git", "add", p])
-    else:
-        _run(["git", "add", "-A"])
+    # ── Stage + commit (atomic under the lock) ───────────────────────────────
+    with _git_lock():
+        if paths:
+            for p in paths:
+                _run_unlocked(["git", "add", p])
+        else:
+            _run_unlocked(["git", "add", "-A"])
 
-    # 2. Anything to commit?
-    status = _run(["git", "status", "--porcelain", "--untracked-files=no"], check=False)
-    if not status.stdout.strip():
-        logger.info("Nothing to commit, skipping push.")
-        return
+        status = _run_unlocked(
+            ["git", "status", "--porcelain", "--untracked-files=no"],
+            check=False,
+        )
+        if not status.stdout.strip():
+            logger.info("Nothing to commit, skipping push.")
+            return
 
-    # 3. Commit locally.
-    logger.info("git commit: %s", message)
-    _run(["git", "commit", "-m", message])
+        logger.info("git commit: %s", message)
+        _run_unlocked(["git", "commit", "-m", message])
 
-    # 4. Push (with rebase on rejection).
-    _push_with_retry()
-
-
-def _push_with_retry(max_attempts: int = 4, backoff_sec: float = 2.0) -> None:
-    """Push with exponential backoff; on rejection, rebase our commit on remote."""
-    import time
-
+    # ── Push with rebase-on-reject (lock released between attempts) ──────────
     delay = backoff_sec
     for attempt in range(1, max_attempts + 1):
-        try:
-            logger.info("git push (attempt %d/%d) ...", attempt, max_attempts)
-            _run(["git", "push"])
-            logger.info("git push succeeded.")
-            return
-        except RuntimeError as e:
-            if attempt >= max_attempts:
-                logger.error(
-                    "Push failed after %d attempts. Commit is saved locally in %s. "
-                    "Run 'git push' manually when network is available.",
-                    max_attempts, WORKSPACE,
-                )
-                raise RuntimeError(
-                    f"git push failed after {max_attempts} attempts. "
-                    f"The commit is saved locally in {WORKSPACE}. "
-                    f"To publish results manually, run: cd {WORKSPACE} && git push"
-                ) from e
-
-            # Non-fast-forward or transient — put our commit on top of remote.
+        with _git_lock():
             try:
-                _run(["git", "pull", "--rebase", "--autostash"])
-            except RuntimeError as rebase_err:
-                logger.warning("pull --rebase failed: %s", rebase_err)
-                # Clean up any half-applied rebase so the next attempt isn't blocked.
-                _run(["git", "rebase", "--abort"], check=False)
+                logger.info("git push (attempt %d/%d) ...", attempt, max_attempts)
+                _run_unlocked(["git", "push"])
+                logger.info("git push succeeded.")
+                return
+            except RuntimeError as e:
+                if attempt >= max_attempts:
+                    logger.error(
+                        "Push failed after %d attempts. Commit is saved locally in %s. "
+                        "Run 'git push' manually when network is available.",
+                        max_attempts, WORKSPACE,
+                    )
+                    raise RuntimeError(
+                        f"git push failed after {max_attempts} attempts. "
+                        f"The commit is saved locally in {WORKSPACE}. "
+                        f"To publish results manually, run: cd {WORKSPACE} && git push"
+                    ) from e
 
-            logger.warning("Push rejected (attempt %d): %s. Retrying in %.1fs...", attempt, e, delay)
-            time.sleep(delay)
-            delay *= 2
+                # Non-fast-forward or transient — put our commit on top of remote.
+                try:
+                    _run_unlocked(["git", "pull", "--rebase", "--autostash"])
+                except RuntimeError as rebase_err:
+                    logger.warning("pull --rebase failed: %s", rebase_err)
+                    # Clean up any half-applied rebase so the next attempt isn't blocked.
+                    _run_unlocked(["git", "rebase", "--abort"], check=False)
+
+                logger.warning(
+                    "Push rejected (attempt %d): %s. Retrying in %.1fs...",
+                    attempt, e, delay,
+                )
+
+        # Sleep outside the lock so peers can make progress during backoff.
+        time.sleep(delay)
+        delay *= 2
 
 
 async def git_pull_async() -> str:

@@ -162,8 +162,17 @@ def _mask_ip(ip: str) -> str:
 
 
 async def _check_ipv6() -> bool:
-    """Check if IPv6 connectivity is available."""
-    sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+    """Check if IPv6 connectivity is available.
+
+    On hosts where the kernel has IPv6 disabled (some hardened/minimal Linux
+    images), `socket.socket(AF_INET6, ...)` itself raises OSError(EAFNOSUPPORT)
+    — we treat that as "no IPv6" rather than letting it tear down the whole
+    `detect_server_meta` flow.
+    """
+    try:
+        sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+    except OSError:
+        return False
     try:
         loop = asyncio.get_running_loop()
         sock.settimeout(3.0)
