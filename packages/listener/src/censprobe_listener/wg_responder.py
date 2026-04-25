@@ -21,6 +21,18 @@ logger = logging.getLogger(__name__)
 
 _WG_INTERFACE = "censwg0"
 
+# amneziawg-go's userspace control socket lives here. `ip link del` only
+# removes the TUN; the socket file persists and trips up the next bring-up.
+_AWG_RUNDIR = Path("/var/run/amneziawg")
+
+
+def _rm_awg_socket(iface: str) -> None:
+    """Best-effort cleanup of leftover amneziawg-go control socket."""
+    try:
+        (_AWG_RUNDIR / f"{iface}.sock").unlink(missing_ok=True)
+    except OSError:
+        pass
+
 # A pure WireGuard handshake (initiation 148 + response 92 bytes) already
 # pushes rx well above any small constant. To distinguish "handshake only"
 # from "handshake + real data", require rx to exceed the worst-case
@@ -262,12 +274,16 @@ AllowedIPs = 10.201.0.2/32
         loop = asyncio.get_running_loop()
 
         def _start() -> None:
-            # Clean up a stale interface from a previously-crashed run.
-            # awg-quick down needs the conf file; ip link del works regardless.
+            # Clean up a stale interface AND its userspace control socket
+            # from a previously-crashed run. awg-quick down needs the conf
+            # file; ip link del works regardless. Removing the .sock file
+            # is mandatory — amneziawg-go refuses to bind a fresh socket
+            # when a leftover from a SIGKILLed daemon is still on disk.
             subprocess.run(
                 ["ip", "link", "del", self.interface],
                 stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, check=False,
             )
+            _rm_awg_socket(self.interface)
             try:
                 subprocess.run(
                     ["awg-quick", "up", str(self._conf_path)],
@@ -298,6 +314,13 @@ AllowedIPs = 10.201.0.2/32
                     )
                 except Exception as e:
                     logger.warning("AmneziaWG stop error: %s", e)
+                # Hard fallback in case awg-quick down failed (e.g. conf
+                # file was never written or socket was already orphaned).
+                subprocess.run(
+                    ["ip", "link", "del", self.interface],
+                    stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, check=False,
+                )
+                _rm_awg_socket(self.interface)
 
             await loop.run_in_executor(None, _stop)
 

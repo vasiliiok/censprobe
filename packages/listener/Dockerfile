@@ -64,6 +64,13 @@ RUN git clone --depth 1 https://github.com/amnezia-vpn/amneziawg-tools.git /tmp/
     install -m 0755 amneziawg-go /usr/local/bin/amneziawg-go && \
     rm -rf /tmp/awg-go /root/.cache/go-build /root/go
 
+# awg-quick first attempts kernel mode (`ip link add type amneziawg`); on
+# failure it falls back to ${WG_QUICK_USERSPACE_IMPLEMENTATION:-amneziawg-go}.
+# We pin the value explicitly so the fallback is deterministic and immune
+# to a future upstream rename of the default. Containers run without the
+# kernel module loaded, so the userspace path is mandatory.
+ENV WG_QUICK_USERSPACE_IMPLEMENTATION=amneziawg-go
+
 # ── Python packages ───────────────────────────────────────────────────────────
 WORKDIR /workspace
 

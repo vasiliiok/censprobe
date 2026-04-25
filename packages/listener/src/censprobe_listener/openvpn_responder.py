@@ -15,6 +15,11 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# Deterministic tun name so we can scrub a stale interface left behind by
+# a SIGKILL — without this, a leftover tun keeps the 10.200.0.x peer route
+# alive in host netns and silently blackholes the next session.
+_OVPN_SRV_IFACE = "censovpn0"
+
 
 class OpenVPNResponder:
     """
@@ -48,6 +53,11 @@ class OpenVPNResponder:
         self._status_path = tmpdir / "status.log"
         log_path = tmpdir / "openvpn.log"
 
+        # Pre-clean any leftover tun device from a crashed previous run —
+        # `dev <name>` makes OpenVPN refuse to start if the interface is
+        # already present, so we must drop it first.
+        await asyncio.get_running_loop().run_in_executor(None, _delete_iface, _OVPN_SRV_IFACE)
+
         # AEAD ciphers (GCM / ChaCha20-Poly1305) require TLS mode; in
         # static-key / `secret` mode OpenVPN 2.4+ refuses them with
         # "AEAD cipher options --cipher is not allowed in --secret mode".
@@ -55,7 +65,8 @@ class OpenVPNResponder:
         config = f"""
 proto udp
 port {self.port}
-dev tun
+dev {_OVPN_SRV_IFACE}
+dev-type tun
 secret {psk_path}
 ifconfig 10.200.0.1 10.200.0.2
 keepalive 10 60
@@ -83,7 +94,7 @@ verb 1
         if self._proc.poll() is not None:
             tail = log_path.read_text(errors="replace") if log_path.exists() else "<no log>"
             raise RuntimeError(f"OpenVPN failed to start:\n{tail[-2000:]}")
-        logger.info("OpenVPN responder started on UDP/%d", self.port)
+        logger.info("OpenVPN responder started on UDP/%d (iface: %s)", self.port, _OVPN_SRV_IFACE)
 
     def _read_status(self) -> tuple[int, int]:
         """Parse status file → (handshake_count_approx, bytes_received)."""
@@ -116,9 +127,24 @@ verb 1
                 await asyncio.sleep(0.5)
                 if self._proc.poll() is None:
                     self._proc.kill()
+                # Wait so the process is reaped — otherwise it lingers as a
+                # zombie until our own exit.
+                try:
+                    await asyncio.get_running_loop().run_in_executor(
+                        None, self._proc.wait
+                    )
+                except Exception:
+                    pass
             except Exception as e:
                 logger.warning("OpenVPN stop error: %s", e)
             self._proc = None
+
+        # Belt-and-braces tun removal: openvpn normally cleans up its own
+        # tun on graceful exit, but if we had to SIGKILL it the device
+        # leaks and would block the next start().
+        await asyncio.get_running_loop().run_in_executor(
+            None, _delete_iface, _OVPN_SRV_IFACE
+        )
 
         if self._config_dir:
             try:
@@ -148,3 +174,11 @@ verb 1
             return self._final_bytes_received > 64  # above handshake noise
         _, b = self._read_status()
         return b > 64
+
+
+def _delete_iface(name: str) -> None:
+    """Best-effort `ip link del`; never raises."""
+    subprocess.run(
+        ["ip", "link", "del", name],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+    )
