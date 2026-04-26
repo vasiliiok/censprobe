@@ -3,16 +3,22 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 [project]
 name = "censprobe-sync-api"
-version = "0.1.0"
+# Keep in sync with sync_api.main.SERVICE_VERSION (surfaced via /health and
+# the FastAPI app metadata).
+version = "0.3.0"
 requires-python = ">=3.11"
+# Minimal runtime deps. We deliberately do NOT pull in:
+#   * gitpython — git operations go through `subprocess` via probe-core's
+#     git_io module so sync-api shares the same lock + SSH env as solo /
+#     listener.
+#   * alembic — the live schema is created by SQLAlchemy `create_all` and
+#     evolved by the idempotent ALTER TABLE statements in db._run_migrations().
 dependencies = [
     "censprobe-core",
     "fastapi>=0.111",
     "uvicorn[standard]>=0.29",
     "sqlalchemy[asyncio]>=2.0",
     "asyncpg>=0.29",
-    "alembic>=1.13",
-    "gitpython>=3.1",
     "pyyaml>=6.0",
 ]
 [tool.hatch.build.targets.wheel]
