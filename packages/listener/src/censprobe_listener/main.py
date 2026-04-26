@@ -39,7 +39,10 @@ from censprobe_listener.credentials import (
     ProtocolCredentials,
     generate_credentials,
     load_protocols_yaml,
+    load_server_secrets,
     save_protocols_yaml,
+    save_server_secrets,
+    server_secrets_path,
 )
 from censprobe_listener.echo_server import EchoServer
 from censprobe_listener.openvpn_responder import OpenVPNResponder
@@ -58,6 +61,13 @@ logger = logging.getLogger("censprobe.listener")
 console = Console()
 
 WORKSPACE = Path(os.getenv("WORKSPACE", "/workspace"))
+
+# Hard ceiling on graceful-shutdown time. Any responder still inside its
+# stop() coroutine after this many seconds gets cancelled so the listener
+# can finish writing its report and exit. docker-compose gives us
+# `stop_grace_period: 60s` before sending SIGKILL, so we leave a small
+# margin for the report-writing/git-push that follows shutdown.
+_STOP_TIMEOUT_SEC = 30.0
 
 
 @click.command()
@@ -95,12 +105,22 @@ async def _async_main(test_id: str, session_id: str, skip_push: bool) -> None:
         console.print(f"[yellow]Warning: git pull failed: {e}[/yellow]")
 
     # ── Step 2: Load or generate credentials ─────────────────────────────────
+    # Two files now:
+    #   protocols.yaml             — committed, client-facing material only
+    #   protocols-server.secret.yaml — gitignored 0o600 sidecar with WG/AWG
+    #                                  server private keys + Reality private key
     protocols_path = WORKSPACE / "reports" / test_id / "protocols.yaml"
+    secrets_path = server_secrets_path(protocols_path)
+
     if not protocols_path.exists():
+        # First run for this TEST_ID — generate a fresh credential set.
         console.print("[dim]Generating credentials for first session...[/dim]")
         creds = generate_credentials()
+        # Server private keys go to the local-only sidecar FIRST so a
+        # crash between the two writes can't leave us with a committed
+        # protocols.yaml whose matching server keys are nowhere on disk.
+        save_server_secrets(creds, secrets_path)
         save_protocols_yaml(creds, protocols_path)
-        # Push credentials so client can read them
         if not skip_push:
             try:
                 git_add_commit_push(
@@ -117,8 +137,62 @@ async def _async_main(test_id: str, session_id: str, skip_push: bool) -> None:
                     "[yellow]to the client machine at the same relative path in the repository.[/yellow]"
                 )
     else:
+        # protocols.yaml already on disk. Three sub-cases:
+        #   (a) sidecar exists                        → ordinary resume
+        #   (b) legacy file has embedded server keys  → migrate them out
+        #   (c) sidecar gone AND no legacy keys       → can't keep using
+        #       this TEST_ID with empty server keys → regenerate it all
         console.print("[dim]Loading existing credentials...[/dim]")
         creds = load_protocols_yaml(protocols_path)
+
+        legacy_present = bool(
+            creds.wg_server_private
+            or creds.awg_server_private
+            or creds.vless_pvk
+        )
+        sidecar_loaded = load_server_secrets(secrets_path, creds)
+
+        if legacy_present and not sidecar_loaded:
+            # (b) Lift the embedded server-private fields into the
+            # gitignored sidecar and rewrite the public yaml without
+            # them. This does NOT erase the previously-committed git
+            # history; the user should rotate keys after this commit if
+            # the repo was ever accessible to anyone untrusted.
+            console.print(
+                "[yellow]Detected legacy protocols.yaml with embedded server "
+                "private keys; migrating to sidecar...[/yellow]"
+            )
+            save_server_secrets(creds, secrets_path)
+            save_protocols_yaml(creds, protocols_path)
+            if not skip_push:
+                try:
+                    git_add_commit_push(
+                        message=(
+                            f"listener: strip server-private keys from "
+                            f"protocols.yaml ({test_id})"
+                        ),
+                        paths=[str(protocols_path)],
+                    )
+                except Exception as e:
+                    console.print(
+                        f"[red]Migration push failed: {e}[/red]\n"
+                        "[yellow]The local file is fixed; please push "
+                        "manually so other clones see the redacted version.[/yellow]"
+                    )
+        elif not sidecar_loaded:
+            # (c) No way to obtain the server private keys for the
+            # already-published protocols.yaml. Fail loudly rather than
+            # silently bringing the WG/AWG/Reality responders up with
+            # empty keys (which would either break startup or — worse —
+            # make the listener accept anyone matching the always-zero
+            # configured keys).
+            console.print(
+                f"[red]Server-secrets sidecar at {secrets_path} is missing or invalid, "
+                "and protocols.yaml has no embedded fallback keys.[/red]\n"
+                f"[yellow]Delete {protocols_path} (and {secrets_path} if present) "
+                "to force a fresh credential set, then re-run this command.[/yellow]"
+            )
+            sys.exit(1)
 
     # ── Step 3a: Start local echo server for SS/VLESS/Hy2 data phase ──────────
     echo_server = EchoServer()
@@ -146,33 +220,59 @@ async def _async_main(test_id: str, session_id: str, skip_push: bool) -> None:
 
     # ── Step 4: Wait for SIGINT ───────────────────────────────────────────────
     stop_event = asyncio.Event()
+    loop = asyncio.get_running_loop()
 
     def _handle_signal():
-        console.print("\n[yellow]Stopping listener...[/yellow]")
-        stop_event.set()
+        if not stop_event.is_set():
+            # First signal: ask responders to stop gracefully. Use logger
+            # rather than `console.print` so the message is not interleaved
+            # with the live Rich table renderer (which is itself doing
+            # writes from a background thread).
+            logger.info("signal received, stopping listener…")
+            stop_event.set()
+            return
+        # Second signal while we're already shutting down — bypass the
+        # graceful path and exit immediately. Without this, a stuck
+        # responder.stop() leaves the user no way to abort short of
+        # SIGKILL of the container.
+        logger.warning("second signal received, exiting hard")
+        os._exit(130)
 
-    loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, _handle_signal)
 
-    await stop_event.wait()
+    try:
+        await stop_event.wait()
+    finally:
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            try:
+                loop.remove_signal_handler(sig)
+            except (NotImplementedError, RuntimeError):
+                pass
 
     stopped_at = datetime.now(tz=timezone.utc)
     duration = (stopped_at - started_at).total_seconds()
 
-    # ── Step 5: Finalize BEFORE teardown (wg/awg lose their interface) ────────
+    # ── Step 5: Stop responders (snapshot stats inside stop) + echo server ───
+    # Each responder's stop() captures its final connection_count /
+    # data_transfer_ok state BEFORE tearing down its underlying
+    # interface/process; the snapshot is then surfaced via the same
+    # property names. Doing this before _finalize_protocol_result means
+    # the report reflects the absolute last bytes that crossed the wire.
+    await _stop_responders(responders, timeout=_STOP_TIMEOUT_SEC)
+    if echo_server is not None:
+        try:
+            await asyncio.wait_for(echo_server.stop(), timeout=5.0)
+        except asyncio.TimeoutError:
+            logger.warning("Echo server stop timed out after 5s; continuing")
+        except Exception as e:
+            logger.warning("Echo server stop error: %s", e)
+
+    # ── Step 6: Finalize verdicts from snapshotted state ─────────────────────
     results: dict[str, ProtocolResult] = {}
     for name, responder in responders.items():
         pr = _finalize_protocol_result(name, responder)
         results[name] = pr
-
-    # ── Step 6: Stop responders + echo server ─────────────────────────────────
-    await _stop_responders(responders)
-    if echo_server is not None:
-        try:
-            await echo_server.stop()
-        except Exception as e:
-            logger.warning("Echo server stop error: %s", e)
 
     # Print final table
     _print_final_results(results, duration)
@@ -268,19 +368,60 @@ async def _start_responders(
     return responders, errors
 
 
-async def _stop_responders(responders: dict) -> None:
-    """Stop all protocol responders gracefully."""
-    for name, responder in responders.items():
+async def _stop_responders(responders: dict, timeout: float) -> None:
+    """Stop all protocol responders gracefully, in parallel, under a deadline.
+
+    Stopping in parallel matters because each individual responder can
+    spend up to ~1 s waiting for its child process to exit; running them
+    sequentially turned a 6-protocol shutdown into a 6-second wall-clock
+    delay that ate into our docker-compose `stop_grace_period` budget.
+
+    A single overall `timeout` covers the entire fan-out so a misbehaving
+    responder cannot block the report from being written.
+    """
+    async def _stop_one(name: str, responder) -> None:
         try:
             await responder.stop()
         except Exception as e:
             logger.warning("Error stopping %s: %s", name, e)
 
+    tasks = {
+        name: asyncio.create_task(_stop_one(name, r))
+        for name, r in responders.items()
+    }
+    if not tasks:
+        return
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(*tasks.values(), return_exceptions=True),
+            timeout=timeout,
+        )
+    except asyncio.TimeoutError:
+        stuck = [name for name, t in tasks.items() if not t.done()]
+        logger.warning(
+            "Responder shutdown exceeded %.1fs; cancelling: %s",
+            timeout, ", ".join(stuck) or "<none>",
+        )
+        for t in tasks.values():
+            if not t.done():
+                t.cancel()
+        # Drain the cancellations so we don't leak task objects.
+        await asyncio.gather(*tasks.values(), return_exceptions=True)
+
 
 def _finalize_protocol_result(name: str, responder) -> ProtocolResult:
-    """Build ProtocolResult from responder state (snapshot BEFORE teardown)."""
-    handshake_count = getattr(responder, "connection_count", 0) or \
-                      getattr(responder, "handshake_count", 0)
+    """Build ProtocolResult from a responder's post-stop snapshot."""
+    # Different responders expose the field under different historical
+    # names; prefer `connection_count` (the canonical one) and fall back
+    # to `handshake_count` if a future responder uses that. `or` is a
+    # truthy fallback rather than `None` chain because both are int
+    # counters with `0` as a meaningful "nothing observed" value — they
+    # therefore must compare to 0 with `is None` semantics.
+    handshake_count = getattr(responder, "connection_count", None)
+    if handshake_count is None:
+        handshake_count = getattr(responder, "handshake_count", 0)
+    handshake_count = int(handshake_count or 0)
+
     data_ok = bool(getattr(responder, "data_transfer_ok", False))
 
     pr = ProtocolResult(

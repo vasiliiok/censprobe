@@ -36,10 +36,17 @@ class EchoServer:
 
     async def start(self) -> None:
         for proto, port in self.ports.items():
+            # `reuse_address=True` lets us rebind to the same port even
+            # if the previous listener died with sockets still in
+            # TIME_WAIT — without it, a fast restart hits "address
+            # already in use". asyncio enables it by default on POSIX
+            # but we set it explicitly so the behaviour doesn't depend
+            # on platform defaults.
             srv = await asyncio.start_server(
                 lambda r, w, p=proto: self._handle(r, w, p),
                 host="127.0.0.1",
                 port=port,
+                reuse_address=True,
             )
             self._servers.append(srv)
             logger.info("echo server: %s on 127.0.0.1:%d", proto, port)
@@ -101,5 +108,14 @@ class EchoServer:
             for proto in self.ports
         }
 
+    # Smallest expected payload size for a successful round-trip:
+    #   * `curl ... /ping` on the client emits ~70-80 bytes (request line
+    #     + Host + UA + Accept), so an HTTP probe gives us ≥70 bytes;
+    #   * a raw TCP probe writing the literal "ping" (4 bytes) is the
+    #     legacy fallback the older client used and that we must keep
+    #     accepting; bumping the floor to 4 (the existing default) keeps
+    #     that path working but is high enough to filter the empty FIN
+    #     handshakes some scanners send when probing whether the port is
+    #     open.
     def data_ok(self, proto: str, min_bytes: int = 4) -> bool:
         return self.bytes_counts.get(proto, 0) >= min_bytes

@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import subprocess
 import tempfile
 from pathlib import Path
@@ -18,6 +19,18 @@ from pathlib import Path
 from censprobe_listener.echo_server import ECHO_PORTS
 
 logger = logging.getLogger(__name__)
+
+
+def _write_secret(path: Path, content: str) -> None:
+    """Create `path` mode 0o600 — config has hysteria auth + obfs password."""
+    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        fh = os.fdopen(fd, "w", encoding="utf-8")
+    except BaseException:
+        os.close(fd)
+        raise
+    with fh:
+        fh.write(content)
 
 
 class HysteriaResponder:
@@ -83,7 +96,7 @@ class HysteriaResponder:
         }
 
         conf_path = tmpdir / "config.json"
-        conf_path.write_text(json.dumps(config, indent=2))
+        _write_secret(conf_path, json.dumps(config, indent=2))
 
         self._proc = await asyncio.create_subprocess_exec(
             "hysteria", "server", "--config", str(conf_path),
@@ -181,3 +194,10 @@ class HysteriaResponder:
             await loop.run_in_executor(None, _gen)
         except subprocess.CalledProcessError as e:
             raise RuntimeError(f"openssl cert gen failed: {e.stderr.decode(errors='replace')}")
+        # openssl honours the process umask (typically 0o022 → 0o644 file
+        # perms). The key file is short-lived but still secret while in
+        # use; tighten it explicitly. The cert is public so leave as-is.
+        try:
+            os.chmod(key_path, 0o600)
+        except OSError as e:
+            logger.debug("chmod on hysteria key failed: %s", e)

@@ -9,11 +9,33 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import subprocess
 import tempfile
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+def _write_secret(path: Path, content: str) -> None:
+    """Create `path` with mode 0o600 atomically (no TOCTOU window)."""
+    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        fh = os.fdopen(fd, "w", encoding="utf-8")
+    except BaseException:
+        os.close(fd)
+        raise
+    with fh:
+        fh.write(content)
+
+
+# Threshold for "real data flowed through the OpenVPN tun" — see the
+# matching constant in wg_responder. With static-key p2p mode the
+# server-side `TCP/UDP read bytes` counter ticks for every packet that
+# reaches the kernel, so any successful ping (a 64-byte ICMP packet
+# encapsulated in OpenVPN's own header gives ~80-100 bytes on the
+# wire) easily clears 64.
+_MIN_OVPN_BYTES = 64
 
 # Deterministic tun name so we can scrub a stale interface left behind by
 # a SIGKILL — without this, a leftover tun keeps the 10.200.0.x peer route
@@ -38,16 +60,18 @@ class OpenVPNResponder:
         # Cached snapshot of connection/transfer state captured before teardown.
         self._final_handshake_count: int = 0
         self._final_bytes_received: int = 0
+        self._snapshot_taken: bool = False
 
     async def start(self) -> None:
         """Write config files and launch openvpn subprocess."""
         self._config_dir = tempfile.TemporaryDirectory(prefix="censprobe_ovpn_")
         tmpdir = Path(self._config_dir.name)
 
-        # Write PSK file in OpenVPN "Static key V1" PEM format.
+        # Write PSK file in OpenVPN "Static key V1" PEM format. Create
+        # with mode 0o600 atomically to close the TOCTOU window that
+        # `write_text` + `chmod` would leave open.
         psk_path = tmpdir / "static.key"
-        psk_path.write_text(self.psk_pem, encoding="utf-8")
-        psk_path.chmod(0o600)
+        _write_secret(psk_path, self.psk_pem)
 
         # Status/log files colocated with config (never shared across instances).
         self._status_path = tmpdir / "status.log"
@@ -120,6 +144,7 @@ verb 1
         """Capture final state, then terminate openvpn and cleanup."""
         # Capture status BEFORE teardown so data_transfer_ok is observable.
         self._final_handshake_count, self._final_bytes_received = self._read_status()
+        self._snapshot_taken = True
 
         if self._proc:
             try:
@@ -162,7 +187,7 @@ verb 1
     @property
     def connection_count(self) -> int:
         """Handshake count snapshot (falls back to live read while running)."""
-        if self._final_handshake_count:
+        if self._snapshot_taken:
             return self._final_handshake_count
         hs, _ = self._read_status()
         return hs
@@ -170,10 +195,10 @@ verb 1
     @property
     def data_transfer_ok(self) -> bool:
         """Data traversed the tunnel if we observed read bytes > a small threshold."""
-        if self._final_bytes_received:
-            return self._final_bytes_received > 64  # above handshake noise
+        if self._snapshot_taken:
+            return self._final_bytes_received > _MIN_OVPN_BYTES
         _, b = self._read_status()
-        return b > 64
+        return b > _MIN_OVPN_BYTES
 
 
 def _delete_iface(name: str) -> None:

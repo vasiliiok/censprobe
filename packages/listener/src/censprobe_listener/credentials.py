@@ -99,16 +99,26 @@ def generate_credentials() -> ProtocolCredentials:
     creds.awg_server_private, creds.awg_server_public = _wg_keypair()
     creds.awg_client_private, creds.awg_client_public = _wg_keypair()
     creds.awg_preshared_key = _wg_preshared_key()
-    # Random junk header values (32-bit)
-    creds.awg_h1 = secrets.randbits(32)
-    creds.awg_h2 = secrets.randbits(32)
-    creds.awg_h3 = secrets.randbits(32)
-    creds.awg_h4 = secrets.randbits(32)
+    # H1-H4 are AmneziaWG's per-message-type magic header replacements.
+    # Standard WireGuard uses fixed values 1..4 (handshake_init,
+    # handshake_resp, cookie_reply, transport_data — see
+    # drivers/net/wireguard/messages.h); the whole point of overriding
+    # them is to NOT collide with those values, otherwise the on-the-wire
+    # bytes still match a vanilla WG fingerprint. They must also be
+    # mutually distinct, otherwise the AWG demuxer cannot tell which
+    # message type a given inbound packet represents and silently drops
+    # half of the handshake. Sample from a constrained range that avoids
+    # both pitfalls in one shot.
+    creds.awg_h1, creds.awg_h2, creds.awg_h3, creds.awg_h4 = _awg_magic_headers()
     creds.awg_jc = secrets.randbelow(5) + 3   # 3-7 junk packets
     creds.awg_jmin = secrets.randbelow(20) + 40   # 40-59
     creds.awg_jmax = secrets.randbelow(30) + 70   # 70-99
-    
-    # AmneziaWG padding sizes: Randomize S1 and S2, ensure S1+56 != S2
+
+    # AmneziaWG junk-payload sizes for handshake init / response. The
+    # only on-wire constraint is that an obfuscated init packet length
+    # (148 + S1) must NOT equal an obfuscated response length (92 + S2),
+    # i.e. S1 + 56 != S2 — otherwise an observer can demux the two
+    # message types by length alone, defeating the obfuscation.
     creds.awg_s1 = secrets.randbelow(135) + 15
     creds.awg_s2 = secrets.randbelow(135) + 15
     while creds.awg_s1 + 56 == creds.awg_s2:
@@ -129,15 +139,30 @@ def generate_credentials() -> ProtocolCredentials:
     return creds
 
 
-def save_protocols_yaml(creds: ProtocolCredentials, path: Path) -> None:
-    """Write credentials to reports/<test_id>/protocols.yaml.
+# Sidecar filename for server-only secrets (WG/AWG server private keys
+# and the Reality server private key). Lives next to protocols.yaml so
+# they're easy to relate, but the `.secret.yaml` suffix is gitignored
+# (see top-level .gitignore) so these files never enter git history.
+SERVER_SECRETS_SUFFIX = "protocols-server.secret.yaml"
 
-    Server-only secrets (WG server private keys, Reality private key) are
-    persisted alongside the client-facing material because the listener
-    may be restarted across sessions — on the next boot it reads back
-    this file, and empty strings would prevent the VPN binaries from
-    coming up. The repo is assumed private and these are single-use test
-    keys.
+
+def server_secrets_path(protocols_yaml_path: Path) -> Path:
+    """Return the sidecar path for server-only secrets next to protocols.yaml."""
+    return protocols_yaml_path.parent / SERVER_SECRETS_SUFFIX
+
+
+def save_protocols_yaml(creds: ProtocolCredentials, path: Path) -> None:
+    """Write client-facing credentials to reports/<test_id>/protocols.yaml.
+
+    Server-only secrets (WG/AWG server private keys, Reality server
+    private key) are deliberately *omitted* from this file because it
+    gets committed to git so the client container can pull it. They
+    live in a sibling `protocols-server.secret.yaml` (gitignored, mode
+    0o600) which the listener loads at startup if it exists.
+
+    Symmetric secrets (OpenVPN PSK, Shadowsocks password, Hysteria 2
+    auth + obfs) and client-side private keys (WG/AWG client_private)
+    remain in the committed file because both sides need them.
     """
     data: dict[str, Any] = {
         "_note": "One-time test credentials. Do not use for production VPN.",
@@ -148,7 +173,6 @@ def save_protocols_yaml(creds: ProtocolCredentials, path: Path) -> None:
         },
         "wireguard": {
             "port": creds.wg_port,
-            "server_private_key": creds.wg_server_private,
             "server_public_key": creds.wg_server_public,
             "client_private_key": creds.wg_client_private,
             "client_public_key": creds.wg_client_public,
@@ -156,7 +180,6 @@ def save_protocols_yaml(creds: ProtocolCredentials, path: Path) -> None:
         },
         "amneziawg": {
             "port": creds.awg_port,
-            "server_private_key": creds.awg_server_private,
             "server_public_key": creds.awg_server_public,
             "client_private_key": creds.awg_client_private,
             "client_public_key": creds.awg_client_public,
@@ -179,7 +202,6 @@ def save_protocols_yaml(creds: ProtocolCredentials, path: Path) -> None:
         "vless_reality": {
             "port": creds.vless_port,
             "uuid": creds.vless_uuid,
-            "private_key": creds.vless_pvk,
             "public_key": creds.vless_pbk,
             "short_id": creds.vless_short_id,
             "server_name": creds.vless_server_name,
@@ -195,9 +217,80 @@ def save_protocols_yaml(creds: ProtocolCredentials, path: Path) -> None:
     logger.info("Protocols written to %s", path)
 
 
+def save_server_secrets(creds: ProtocolCredentials, path: Path) -> None:
+    """Persist server-only private keys to a local 0o600 sidecar file.
+
+    Written into the same dir as `protocols.yaml` but with a name that
+    matches the gitignore pattern `*.secret.yaml`. Mode 0o600 so even
+    on a multi-tenant host the file is readable only by its owner.
+    """
+    data: dict[str, Any] = {
+        "_note": (
+            "Server-only secrets for censprobe-listener. "
+            "Never commit. Regenerated together with protocols.yaml."
+        ),
+        "wireguard": {
+            "server_private_key": creds.wg_server_private,
+        },
+        "amneziawg": {
+            "server_private_key": creds.awg_server_private,
+        },
+        "vless_reality": {
+            "private_key": creds.vless_pvk,
+        },
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    blob = yaml.dump(data, allow_unicode=True, sort_keys=False)
+    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(blob)
+    logger.info("Server secrets written to %s (mode 0600, gitignored)", path)
+
+
+def load_server_secrets(path: Path, creds: ProtocolCredentials) -> bool:
+    """Populate server-only private keys from the sidecar file.
+
+    Returns True iff the file existed and at least one server private
+    key was loaded. The caller (listener main) treats a missing file
+    on a previously-initialised TEST_ID as a fatal regeneration trigger.
+    """
+    if not path.exists():
+        return False
+    raw = yaml.safe_load(path.read_text()) or {}
+    if not isinstance(raw, dict):
+        return False
+    found_any = False
+    wg = raw.get("wireguard") or {}
+    if wg.get("server_private_key"):
+        creds.wg_server_private = wg["server_private_key"]
+        found_any = True
+    awg = raw.get("amneziawg") or {}
+    if awg.get("server_private_key"):
+        creds.awg_server_private = awg["server_private_key"]
+        found_any = True
+    vless = raw.get("vless_reality") or {}
+    if vless.get("private_key"):
+        creds.vless_pvk = vless["private_key"]
+        found_any = True
+    return found_any
+
+
 def load_protocols_yaml(path: Path) -> ProtocolCredentials:
-    """Load credentials from an existing protocols.yaml."""
-    raw = yaml.safe_load(path.read_text())
+    """Load client-facing credentials from an existing protocols.yaml.
+
+    Note: server-only private keys (wg_server_private, awg_server_private,
+    vless_pvk) are NOT supposed to be in this file — load them separately
+    via `load_server_secrets()` which reads the gitignored sidecar.
+
+    For backwards compatibility, if a legacy protocols.yaml still embeds
+    those server-private fields (older listener versions did), they are
+    surfaced into the returned object so the caller (listener main) can
+    migrate them into the secrets sidecar and rewrite the public file
+    without them. Without this migration path, upgrading the listener on
+    an existing TEST_ID would discard the old server keys entirely.
+    """
+    parsed = yaml.safe_load(path.read_text())
+    raw: dict[str, Any] = parsed if isinstance(parsed, dict) else {}
     c = ProtocolCredentials()
 
     ovpn = raw.get("openvpn", {})
@@ -205,16 +298,18 @@ def load_protocols_yaml(path: Path) -> ProtocolCredentials:
     c.openvpn_port = ovpn.get("port", 1194)
 
     wg = raw.get("wireguard", {})
-    c.wg_server_private = wg.get("server_private_key", "")
     c.wg_server_public = wg.get("server_public_key", "")
+    # Legacy field — kept ONLY for the rewrite-on-load migration.
+    c.wg_server_private = wg.get("server_private_key", "")
     c.wg_client_private = wg.get("client_private_key", "")
     c.wg_client_public = wg.get("client_public_key", "")
     c.wg_preshared_key = wg.get("preshared_key", "")
     c.wg_port = wg.get("port", 51820)
 
     awg = raw.get("amneziawg", {})
-    c.awg_server_private = awg.get("server_private_key", "")
     c.awg_server_public = awg.get("server_public_key", "")
+    # Legacy field — kept ONLY for the rewrite-on-load migration.
+    c.awg_server_private = awg.get("server_private_key", "")
     c.awg_port = awg.get("port", 51821)
     c.awg_client_private = awg.get("client_private_key", "")
     c.awg_client_public = awg.get("client_public_key", "")
@@ -237,6 +332,7 @@ def load_protocols_yaml(path: Path) -> ProtocolCredentials:
     vless = raw.get("vless_reality", {})
     c.vless_port = vless.get("port", 443)
     c.vless_uuid = vless.get("uuid", "")
+    # Legacy field — kept ONLY for the rewrite-on-load migration.
     c.vless_pvk = vless.get("private_key", "")
     c.vless_pbk = vless.get("public_key", "")
     c.vless_short_id = vless.get("short_id", "")
@@ -282,6 +378,27 @@ def _wg_keypair() -> tuple[str, str]:
         priv_bytes = key.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
         pub_bytes = key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
         return base64.b64encode(priv_bytes).decode(), base64.b64encode(pub_bytes).decode()
+
+
+def _awg_magic_headers() -> tuple[int, int, int, int]:
+    """Generate four distinct 32-bit values for AmneziaWG H1..H4.
+
+    Constraints (all enforced by amneziawg-go / amneziawg kernel-module):
+      * each H_i is parsed as a 32-bit unsigned int;
+      * the four values must be pairwise distinct (the receiver demuxes
+        message type by exact-match against H1..H4);
+      * none of them may equal the standard WireGuard message-type ids
+        1, 2, 3, 4 — using those defeats the whole obfuscation since
+        the wire bytes coincide with vanilla WG.
+    """
+    forbidden: set[int] = {1, 2, 3, 4}
+    chosen: list[int] = []
+    while len(chosen) < 4:
+        v = secrets.randbits(32)
+        if v in forbidden or v in chosen:
+            continue
+        chosen.append(v)
+    return chosen[0], chosen[1], chosen[2], chosen[3]
 
 
 def _wg_preshared_key() -> str:
@@ -357,16 +474,22 @@ def _openvpn_static_key() -> str:
     openvpn binary during credential generation doesn't block tests.
     """
     try:
-        # Some openvpn builds refuse to write the key to /dev/stdout; use a
-        # tmpfile and read it back for portability.
-        with tempfile.NamedTemporaryFile(prefix="censprobe_ovpn_", delete=True) as tf:
+        # Some openvpn builds refuse to write the key to /dev/stdout, and
+        # `--genkey secret <file>` refuses to overwrite an existing file.
+        # `NamedTemporaryFile` creates the file *immediately*, then openvpn
+        # would error out with "ERROR: --genkey 'secret' would overwrite
+        # ...". Use a 0o700 TemporaryDirectory and pass a not-yet-existing
+        # path inside it — that gives both the right perms and the
+        # not-yet-created semantics openvpn wants.
+        with tempfile.TemporaryDirectory(prefix="censprobe_ovpn_genkey_") as td:
+            key_path = Path(td) / "static.key"
             subprocess.check_call(
-                ["openvpn", "--genkey", "secret", tf.name],
+                ["openvpn", "--genkey", "secret", str(key_path)],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
-            return Path(tf.name).read_text(encoding="utf-8")
+            return key_path.read_text(encoding="utf-8")
     except Exception:
-        hex_str = os.urandom(256).hex()
+        hex_str = secrets.token_bytes(256).hex()
         lines = [hex_str[i:i + 32] for i in range(0, len(hex_str), 32)]
         return (
             "-----BEGIN OpenVPN Static key V1-----\n"
