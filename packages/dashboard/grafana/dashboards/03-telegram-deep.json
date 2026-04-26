@@ -39,7 +39,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT telegram_health AS \"Telegram Health\" FROM test_runs WHERE test_id = '$test_id' LIMIT 1",
+          "rawSql": "SELECT telegram_health AS \"Telegram Health\" FROM test_runs WHERE test_id = ${test_id:sqlstring} LIMIT 1",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -91,7 +91,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT test, target, verdict, rtt_ms, method FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = '$test_id' AND category = 'telegram' ORDER BY test",
+          "rawSql": "SELECT test, target, verdict, rtt_ms, method FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND category = 'telegram' ORDER BY test",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -135,7 +135,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT verdict, COUNT(*) AS count FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = '$test_id' AND category = 'telegram' GROUP BY verdict",
+          "rawSql": "SELECT verdict, COUNT(*) AS count FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND category = 'telegram' GROUP BY verdict",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -163,7 +163,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT rtt_ms FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = '$test_id' AND category = 'telegram' AND rtt_ms IS NOT NULL AND verdict = 'OK'",
+          "rawSql": "SELECT rtt_ms FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND category = 'telegram' AND rtt_ms IS NOT NULL AND verdict = 'OK'",
           "format": "table",
           "refId": "A",
           "editorMode": "code",

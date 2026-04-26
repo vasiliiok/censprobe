@@ -124,7 +124,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT overall_score AS \"Overall Score\" FROM test_runs WHERE test_id = '$test_id' LIMIT 1",
+          "rawSql": "SELECT overall_score AS \"Overall Score\" FROM test_runs WHERE test_id = ${test_id:sqlstring} LIMIT 1",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -176,7 +176,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT 'Entry' AS role, entry_score AS score FROM test_runs WHERE test_id = '$test_id' UNION ALL SELECT 'Exit', exit_score FROM test_runs WHERE test_id = '$test_id' UNION ALL SELECT 'Relay', relay_score FROM test_runs WHERE test_id = '$test_id'",
+          "rawSql": "SELECT 'Entry' AS role, entry_score AS score FROM test_runs WHERE test_id = ${test_id:sqlstring} UNION ALL SELECT 'Exit', exit_score FROM test_runs WHERE test_id = ${test_id:sqlstring} UNION ALL SELECT 'Relay', relay_score FROM test_runs WHERE test_id = ${test_id:sqlstring}",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -195,7 +195,7 @@
     {
       "id": 3,
       "title": "Server Info",
-      "type": "stat",
+      "type": "table",
       "gridPos": {
         "x": 15,
         "y": 3,
@@ -208,7 +208,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT asn, as_name, location, provider, distro, ipv4_masked FROM test_runs WHERE test_id = '$test_id' LIMIT 1",
+          "rawSql": "SELECT asn, as_name, location, provider, distro, ipv4_masked FROM test_runs WHERE test_id = ${test_id:sqlstring} LIMIT 1",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -220,12 +220,7 @@
         }
       ],
       "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ]
-        },
-        "orientation": "vertical"
+        "showHeader": true
       }
     },
     {
@@ -244,7 +239,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT dns_integrity FROM test_runs WHERE test_id = '$test_id' LIMIT 1",
+          "rawSql": "SELECT dns_integrity FROM test_runs WHERE test_id = ${test_id:sqlstring} LIMIT 1",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -279,7 +274,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT tls_integrity FROM test_runs WHERE test_id = '$test_id' LIMIT 1",
+          "rawSql": "SELECT tls_integrity FROM test_runs WHERE test_id = ${test_id:sqlstring} LIMIT 1",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -314,7 +309,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT telegram_health FROM test_runs WHERE test_id = '$test_id' LIMIT 1",
+          "rawSql": "SELECT telegram_health FROM test_runs WHERE test_id = ${test_id:sqlstring} LIMIT 1",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -349,7 +344,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT CASE WHEN throttling_detected THEN 'YES ⚠' ELSE 'No ✓' END AS throttling FROM test_runs WHERE test_id = '$test_id' LIMIT 1",
+          "rawSql": "SELECT CASE WHEN throttling_detected THEN 'YES ⚠' ELSE 'No ✓' END AS throttling FROM test_runs WHERE test_id = ${test_id:sqlstring} LIMIT 1",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -377,7 +372,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT DISTINCT category, verdict, method, COUNT(*) AS count FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = '$test_id' AND verdict NOT IN ('OK','INCONCLUSIVE') GROUP BY category, verdict, method ORDER BY count DESC LIMIT 50",
+          "rawSql": "SELECT DISTINCT category, verdict, method, COUNT(*) AS count FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND verdict NOT IN ('OK','INCONCLUSIVE') GROUP BY category, verdict, method ORDER BY count DESC LIMIT 50",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -405,7 +400,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT category || ' / ' || verdict AS label, COUNT(*) AS count FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = '$test_id' GROUP BY category, verdict ORDER BY count DESC",
+          "rawSql": "SELECT category || ' / ' || verdict AS label, COUNT(*) AS count FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} GROUP BY category, verdict ORDER BY count DESC",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -419,8 +414,9 @@
     },
     {
       "id": 10,
-      "title": "Recommended Protocols",
-      "type": "text",
+      "title": "Recommended Protocols & Detected Techniques",
+      "description": "Pulled from test_runs.recommended_protocols / detected_techniques (Postgres text[] columns).",
+      "type": "table",
       "gridPos": {
         "x": 12,
         "y": 21,
@@ -433,7 +429,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT recommended_protocols, detected_techniques FROM test_runs WHERE test_id = '$test_id' LIMIT 1",
+          "rawSql": "SELECT array_to_string(recommended_protocols, ', ') AS \"Recommended\", array_to_string(detected_techniques, ', ') AS \"Detected techniques\" FROM test_runs WHERE test_id = ${test_id:sqlstring} LIMIT 1",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -445,7 +441,7 @@
         }
       ],
       "options": {
-        "mode": "markdown"
+        "showHeader": true
       }
     }
   ]

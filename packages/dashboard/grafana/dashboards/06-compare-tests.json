@@ -50,7 +50,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT 'Entry' AS metric, entry_score AS a_score, NULL AS b_score FROM test_runs WHERE test_id = '$test_id_a' UNION ALL SELECT 'Entry', NULL, entry_score FROM test_runs WHERE test_id = '$test_id_b' UNION ALL SELECT 'Exit', exit_score, NULL FROM test_runs WHERE test_id = '$test_id_a' UNION ALL SELECT 'Exit', NULL, exit_score FROM test_runs WHERE test_id = '$test_id_b' UNION ALL SELECT 'Relay', relay_score, NULL FROM test_runs WHERE test_id = '$test_id_a' UNION ALL SELECT 'Relay', NULL, relay_score FROM test_runs WHERE test_id = '$test_id_b' UNION ALL SELECT 'Overall', overall_score, NULL FROM test_runs WHERE test_id = '$test_id_a' UNION ALL SELECT 'Overall', NULL, overall_score FROM test_runs WHERE test_id = '$test_id_b'",
+          "rawSql": "SELECT 'Entry' AS metric, entry_score AS a_score, NULL AS b_score FROM test_runs WHERE test_id = ${test_id_a:sqlstring} UNION ALL SELECT 'Entry', NULL, entry_score FROM test_runs WHERE test_id = ${test_id_b:sqlstring} UNION ALL SELECT 'Exit', exit_score, NULL FROM test_runs WHERE test_id = ${test_id_a:sqlstring} UNION ALL SELECT 'Exit', NULL, exit_score FROM test_runs WHERE test_id = ${test_id_b:sqlstring} UNION ALL SELECT 'Relay', relay_score, NULL FROM test_runs WHERE test_id = ${test_id_a:sqlstring} UNION ALL SELECT 'Relay', NULL, relay_score FROM test_runs WHERE test_id = ${test_id_b:sqlstring} UNION ALL SELECT 'Overall', overall_score, NULL FROM test_runs WHERE test_id = ${test_id_a:sqlstring} UNION ALL SELECT 'Overall', NULL, overall_score FROM test_runs WHERE test_id = ${test_id_b:sqlstring}",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -81,7 +81,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT test_id, asn, as_name, location, provider, distro, ipv4_masked, overall_score, detected_techniques FROM test_runs WHERE test_id = '$test_id_a' LIMIT 1",
+          "rawSql": "SELECT test_id, asn, as_name, location, provider, distro, ipv4_masked, overall_score, detected_techniques FROM test_runs WHERE test_id = ${test_id_a:sqlstring} LIMIT 1",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -109,7 +109,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT test_id, asn, as_name, location, provider, distro, ipv4_masked, overall_score, detected_techniques FROM test_runs WHERE test_id = '$test_id_b' LIMIT 1",
+          "rawSql": "SELECT test_id, asn, as_name, location, provider, distro, ipv4_masked, overall_score, detected_techniques FROM test_runs WHERE test_id = ${test_id_b:sqlstring} LIMIT 1",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -137,7 +137,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT '$test_id_a' AS server, category, method, COUNT(*) AS detections FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = '$test_id_a' AND method IS NOT NULL GROUP BY category, method UNION ALL SELECT '$test_id_b', category, method, COUNT(*) FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = '$test_id_b' AND method IS NOT NULL GROUP BY category, method ORDER BY method, category",
+          "rawSql": "SELECT ${test_id_a:sqlstring} AS server, category, method, COUNT(*) AS detections FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id_a:sqlstring} AND method IS NOT NULL GROUP BY category, method UNION ALL SELECT ${test_id_b:sqlstring}, category, method, COUNT(*) FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id_b:sqlstring} AND method IS NOT NULL GROUP BY category, method ORDER BY method, category",
           "format": "table",
           "refId": "A",
           "editorMode": "code",

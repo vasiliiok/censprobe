@@ -103,10 +103,15 @@ services:
     volumes:
       - db_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U censprobe"]
+      # Pin -d so the probe is satisfied only after Postgres has finished
+      # creating POSTGRES_DB ("censprobe") — `pg_isready` returns 0 as soon
+      # as the postmaster accepts connections, which happens before the
+      # database itself is ready for queries.
+      test: ["CMD-SHELL", "pg_isready -U censprobe -d censprobe"]
       interval: 5s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
 
   sync-api:
     profiles: [dashboard]
@@ -119,12 +124,26 @@ services:
     volumes:
       - ./:/workspace
       - ~/.ssh:/root/.ssh:ro
-    # Bind the port to loopback only. Grafana reaches us over the internal
-    # Docker network (service name "sync-api"), so we don't need to expose
-    # an unauthenticated POST /refresh endpoint (which triggers a heavy
-    # git pull) to the public internet.
+    # Bind to loopback only. The "Pull & Refresh" button on dashboard 01
+    # is a Volkov Labs form panel that POSTs from the *user's browser* —
+    # not from inside the Grafana container — so the URL has to resolve
+    # on the host the dashboard is opened from. Loopback keeps the
+    # unauthenticated /refresh endpoint (which triggers a heavy git pull)
+    # off the public internet while still working when the user opens
+    # Grafana on the same host (or via SSH port-forward).
     ports:
       - "127.0.0.1:8080:8080"
+    healthcheck:
+      # Wrapped in `python -c` so we don't need curl/wget in the slim
+      # image. /health returns 200 once init_db() finishes and FastAPI
+      # is serving — that's the signal Grafana is waiting for below.
+      test:
+        - "CMD-SHELL"
+        - "python -c 'import urllib.request,sys; sys.exit(0 if urllib.request.urlopen(\"http://127.0.0.1:8080/health\", timeout=2).status == 200 else 1)'"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     depends_on:
       postgres:
         condition: service_healthy
@@ -132,15 +151,22 @@ services:
 
   grafana:
     profiles: [dashboard]
-    image: grafana/grafana:11.2.0
+    # 11.5.x is the long-term support line maintained alongside 13.x;
+    # 11.2.0 missed several CVE fixes published in 2025. Bumping the
+    # minor only keeps the schemaVersion: 39 dashboards compatible.
+    image: grafana/grafana:11.5.4
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
       GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s:%(http_port)s/"
       # volkovlabs-form-panel powers the "Pull & Refresh" button in the
-      # main overview dashboard — it POSTs to sync-api /refresh from the
-      # browser, so Grafana itself doesn't need network reachability to
-      # sync-api. Plugin is community-signed, no unsigned-allow needed.
-      GF_INSTALL_PLUGINS: "volkovlabs-form-panel"
+      # main overview dashboard. It POSTs to sync-api /refresh from the
+      # *browser*, so the URL must be reachable on the user's host
+      # (sync-api is bound to 127.0.0.1:8080 — see comment above).
+      #
+      # Pinned to 4.7.0 because Volkov Labs ceased operations in
+      # 2025-09; auto-updating to a future republish (or losing the
+      # plugin from the catalog) would silently break the button.
+      GF_INSTALL_PLUGINS: "volkovlabs-form-panel 4.7.0"
       DB_PASSWORD: ${DB_PASSWORD:-censprobe}
     volumes:
       - grafana_data:/var/lib/grafana
@@ -149,13 +175,19 @@ services:
     ports:
       - "3000:3000"
     depends_on:
-      - postgres
-      - sync-api
+      # Without service_healthy, Grafana would race ahead of Postgres /
+      # sync-api on `up`, log datasource errors, and leave the user
+      # staring at a "Database connection failed" toast.
+      postgres:
+        condition: service_healthy
+      sync-api:
+        condition: service_healthy
     restart: unless-stopped
 
   # ─────────────────────────────────────────────────────────────────
   # 6. REPORTER — HTML/PDF отчёты
-  # Usage: TEST_ID=... FORMAT=html,pdf docker compose --profile reporter up
+  # Usage: TEST_ID=<id> docker compose --profile reporter run --rm reporter
+  #        TEST_ID=<id> docker compose --profile reporter run --rm reporter --pdf
   # ─────────────────────────────────────────────────────────────────
   reporter:
     profiles: [reporter]

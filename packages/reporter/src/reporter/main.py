@@ -42,7 +42,11 @@ logger = logging.getLogger(__name__)
 console = Console()
 
 WORKSPACE = Path(os.getenv("WORKSPACE", "/workspace"))
-TEMPLATES_DIR = Path(__file__).parent.parent.parent / "templates"
+# Templates are bundled with the package (src/reporter/templates/) so they
+# resolve correctly both from a source checkout and after `pip install`.
+# The previous `parent.parent.parent / "templates"` walked above
+# site-packages and could not find anything once the wheel was installed.
+TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 
 @click.command()

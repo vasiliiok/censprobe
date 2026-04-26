@@ -84,7 +84,15 @@ class TestResult(Base):
     __tablename__ = "test_results"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    test_run_id = Column(Integer, ForeignKey("test_runs.id", ondelete="CASCADE"), nullable=False)
+    # Postgres does not auto-index foreign-key columns; every dashboard
+    # JOIN/WHERE on test_run_id would otherwise sequential-scan this table
+    # once it gets large.
+    test_run_id = Column(
+        Integer,
+        ForeignKey("test_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     report_file = Column(String(256), nullable=False)  # e.g. server-solo-2026-04-21.json
     test = Column(String(128), nullable=False)
     category = Column(String(64), nullable=False)
@@ -106,7 +114,12 @@ class ListenerSession(Base):
     __tablename__ = "listener_sessions"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    test_run_id = Column(Integer, ForeignKey("test_runs.id", ondelete="CASCADE"), nullable=False)
+    test_run_id = Column(
+        Integer,
+        ForeignKey("test_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     session_id = Column(String(128), nullable=False)
     report_file = Column(String(256), nullable=False)
     started_at = Column(DateTime(timezone=True), nullable=True)
@@ -124,7 +137,12 @@ class ProtocolResult(Base):
     __tablename__ = "protocol_results"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    session_id = Column(Integer, ForeignKey("listener_sessions.id", ondelete="CASCADE"), nullable=False)
+    session_id = Column(
+        Integer,
+        ForeignKey("listener_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     protocol = Column(String(64), nullable=False)
     verdict = Column(String(64), nullable=False)
     handshake_count = Column(Integer, default=0)
