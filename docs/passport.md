@@ -17,7 +17,7 @@ Censorship Probe — распределённая система из шести
 - Клиенты с разных сетей (сколько удалось собрать).
 - Плюс сравнение с baseline от control-point в чистой юрисдикции.
 
-Визуализация — через локальный Grafana-дашборд с кнопкой "Pull & Refresh", который пуллит отчёты из GitHub по требованию пользователя.
+Визуализация — через локальный Grafana-дашборд. Оператор делает `git pull` на хосте; sync-api сам сканирует `reports/` в фоне и подтягивает новые отчёты в Postgres.
 
 ## Документ
 
@@ -606,8 +606,8 @@ ip_ranges_v4:
 │     └── <test_id>/                                    │
 │         ├── meta.yaml            ← пишет listener    │
 │         ├── protocols.yaml       ← пишет listener    │
-│         ├── server-solo-*.json.gz         ← solo     │
-│         └── server-listener-<sess>-*.json.gz ← listen│
+│         ├── server-solo-*.json         ← solo     │
+│         └── server-listener-<sess>-*.json ← listen│
 └──────┬─────────────────┬──────────────┬───────────────┘
        │ SSH clone+push  │ SSH clone    │ SSH clone (read-only по факту)
        ▼                 ▼              ▼
@@ -617,8 +617,8 @@ ip_ranges_v4:
 │                  │ │                 │ │ читает baseline │
 │                  │ │ Grafana + sync  │ │ + protocols.yaml│
 │  ┌ UDP/TCP ◄──── │ │ Postgres        │ │ → handshakes    │
-│  │ handshakes    │ │ "Pull & Refresh"│ │   на server     │
-│  └ listener      │ │  по кнопке      │ └─────────────────┘
+│  │ handshakes    │ │ scan reports/   │ │   на server     │
+│  └ listener      │ │  каждые 60s     │ └─────────────────┘
 └──────────────────┘ └─────────────────┘
 ```
 
@@ -673,7 +673,7 @@ censprobe/
     └── <test_id>/
         ├── meta.yaml              # описание испытания
         ├── protocols.yaml         # credentials этого теста
-        └── *.json.gz
+        └── *.json
 ```
 
 `protocols/default.yaml` — одинаковый для listener и client:
@@ -784,8 +784,8 @@ protocols:
 8. И так далее для каждой сети.
 
 В итоге в reports для одного test_id накопится:
-- `server-solo-<timestamp>.json.gz` — один файл.
-- `server-listener-<session_id>-<timestamp>.json.gz` — по одному на каждую сетевую сессию.
+- `server-solo-<timestamp>.json` — один файл.
+- `server-listener-<session_id>-<timestamp>.json` — по одному на каждую сетевую сессию.
 
 **Соглашение именования для session_id:**
 ```
@@ -805,10 +805,10 @@ reports/
 ├── selectel-spb-001/
 │   ├── meta.yaml                                                      # описание теста
 │   ├── protocols.yaml                                                 # shared credentials listener ↔ client
-│   ├── server-solo-2026-04-21T12-00-12Z.json.gz                       # от solo (один раз)
-│   ├── server-listener-client-home-rt-spb-2026-04-21T13-30-00Z.json.gz  # сессия с домашнего Ростелекома
-│   ├── server-listener-client-mob-mts-msk-2026-04-21T14-15-31Z.json.gz  # сессия с мобильного МТС
-│   └── server-listener-client-mob-mf-ekb-2026-04-21T16-04-02Z.json.gz   # сессия с МегаФона
+│   ├── server-solo-2026-04-21T12-00-12Z.json                       # от solo (один раз)
+│   ├── server-listener-client-home-rt-spb-2026-04-21T13-30-00Z.json  # сессия с домашнего Ростелекома
+│   ├── server-listener-client-mob-mts-msk-2026-04-21T14-15-31Z.json  # сессия с мобильного МТС
+│   └── server-listener-client-mob-mf-ekb-2026-04-21T16-04-02Z.json   # сессия с МегаФона
 ├── timeweb-msk-001/
 │   └── …
 ├── selectel-spb-002/    # повторный тест того же сервера через месяц
@@ -977,7 +977,7 @@ hysteria2:
 
 Визуализация отчётов через Grafana. **Независимый контейнер** — запускается где удобно: локально на ноутбуке, на отдельном VPS, на том же немецком VPS, где крутится control. Единственное требование — у машины должен быть доступ к GitHub (для pull отчётов).
 
-Пуллит отчёты и baseline из git-репозитория **только по явному запросу пользователя** (кнопка "Pull & Refresh" в Grafana или CLI команда). Никаких таймеров, никаких автообновлений.
+Пуллит отчёты и baseline из git-репозитория **руками оператора** (`git pull` на хосте). Sync-api сам с git не работает; он лишь сканирует смонтированный `/workspace/reports` в фоне и импортирует новые `.json` в Postgres.
 
 ### 5.2. Независимость от других контейнеров
 
@@ -991,7 +991,7 @@ Dashboard не знает о существовании solo/listener/client/con
 Внутри общего `docker-compose.yml` проекта, профиль `dashboard` включает:
 - **postgres** — хранит распарсенные отчёты.
 - **grafana** — UI, datasource: Postgres.
-- **sync-api** — маленький FastAPI на Python. Эндпоинт `POST /refresh` делает `git pull` в локальном `/workspace` (то есть в склонированный репо, смонтированный как volume), парсит новые файлы из `baseline/` и `reports/`, пишет в Postgres.
+- **sync-api** — маленький FastAPI на Python. В фоне (`CENSPROBE_IMPORT_INTERVAL_SEC`, по умолчанию 60s) сканирует `reports/` в смонтированном `/workspace` и импортирует новые `.json` в Postgres. Сам `git pull` оператор делает руками на хосте — sync-api в git-операциях не участвует.
 
 Фрагмент docker-compose:
 ```yaml
@@ -1013,8 +1013,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://censprobe:${DB_PASSWORD:-censprobe}@postgres/censprobe
       WORKSPACE: /workspace
     volumes:
-      - ./:/workspace          # репозиторий для git pull
-      - ~/.ssh:/root/.ssh:ro   # SSH-ключ для git pull
+      - ./:/workspace          # репозиторий, в который оператор делает git pull
     depends_on: [postgres]
 
   grafana:
@@ -1028,23 +1027,12 @@ services:
     depends_on: [postgres, sync-api]
 ```
 
-### 5.4. Кнопка "Pull & Refresh" в Grafana
+### 5.4. Обновление данных в Grafana
 
-В Grafana создаётся панель типа `Text` в HTML-режиме с кнопкой:
-```html
-<button onclick="fetch('/sync-api/refresh', {method:'POST'})
-  .then(r=>r.json())
-  .then(d=>alert('Synced: '+d.new_reports+' new reports'))">
-  Pull & Refresh from GitHub
-</button>
-```
-
-Grafana проксирует `/sync-api/*` на контейнер sync-api. Sync-api делает `cd /workspace && git pull` по SSH и парсит новые файлы.
-
-Fallback — CLI:
-```bash
-docker compose exec sync-api python -m sync_api.cli refresh
-```
+Sync-api сканирует каталог `reports/` каждые `CENSPROBE_IMPORT_INTERVAL_SEC`
+секунд (по умолчанию 60s) и импортирует новые `.json` в Postgres. Чтобы
+подтянуть новые отчёты в дашборд, оператор делает `git pull` на хосте —
+никакой кнопки "Pull & Refresh" нет, sync-api сам с git не работает.
 
 ### 5.5. Схема Postgres
 
@@ -1159,7 +1147,7 @@ docker compose --profile dashboard up -d
 # открой http://<host>:3000 (Grafana)
 ```
 
-При первом запуске Grafana автоматически провизионируется с Postgres-datasource и набором предустановленных дашбордов из `packages/dashboard/grafana/dashboards/`. В главной панели — кнопка "Pull & Refresh".
+При первом запуске Grafana автоматически провизионируется с Postgres-datasource и набором предустановленных дашбордов из `packages/dashboard/grafana/dashboards/`. Чтобы подтянуть новые отчёты — `git pull` на хосте; sync-api в фоне сканирует `reports/` и заливает их в Postgres.
 
 ---
 
@@ -1187,7 +1175,7 @@ docker compose --profile dashboard up -d
    - **YouTube SNI-throttling probe (Метод B из Части 2.5.5)** — три прогона на `speedtest.selectel.ru` с разными SNI (корректный / `googlevideo.com` / опечатка), сравнение профилей. Даёт атрибуцию троттлинга к SNI-инспекции ТСПУ.
    - Middlebox detection.
    - Тесты IPv6 если доступен.
-6. Собирает JSON-отчёт и сохраняет как `reports/<TEST_ID>/server-solo-<timestamp>.json.gz`.
+6. Собирает JSON-отчёт и сохраняет как `reports/<TEST_ID>/server-solo-<timestamp>.json`.
 7. Делает `git add && git commit && git push` по SSH.
 8. Выходит.
 
@@ -1252,7 +1240,7 @@ Listener запускается с **двумя** идентификаторам
 1. `TEST_ID` — идентификатор всего испытания (например, `selectel-spb-001`).
 2. `SESSION_ID` — идентификатор конкретной тестируемой сети (например, `client-mob-mts-msk`).
 
-`SESSION_ID` определяет имя итогового файла отчёта: `server-listener-<SESSION_ID>-<timestamp>.json.gz`. По этому имени dashboard различает, с какой сети шло тестирование.
+`SESSION_ID` определяет имя итогового файла отчёта: `server-listener-<SESSION_ID>-<timestamp>.json`. По этому имени dashboard различает, с какой сети шло тестирование.
 
 Для каждой новой сети listener перезапускается с новым `SESSION_ID`. Сам listener не умеет переключаться между сессиями на лету — это сознательное упрощение, чтобы не разбираться с корреляцией входящих пакетов.
 
@@ -1291,7 +1279,7 @@ Listener запускается с **двумя** идентификаторам
      - `handshake_count > 0` И `data_transfer_ok = True` → `verdict = OK`.
      - `handshake_count > 0` И `data_transfer_ok = False` → `verdict = HANDSHAKE_ONLY` (подозрение на deep inspection данных).
      - `handshake_count == 0` → `verdict = BLOCKED` (TSPU срубил ещё на handshake).
-   - Записывает сводный отчёт `reports/<TEST_ID>/server-listener-<SESSION_ID>-<timestamp>.json.gz`.
+   - Записывает сводный отчёт `reports/<TEST_ID>/server-listener-<SESSION_ID>-<timestamp>.json`.
    - `git add && git commit && git push`.
    - Выходит.
 
@@ -1399,7 +1387,7 @@ TEST_ID=selectel-spb-001 SESSION_ID=client-home-rt-spb \
 # На ноутбуке подключился к домашнему Wi-Fi, запустил клиент-контейнер
 # → клиент стучится на listener, handshakes летят
 # После нескольких минут — Ctrl+C
-# listener коммитит server-listener-client-home-rt-spb-<ts>.json.gz
+# listener коммитит server-listener-client-home-rt-spb-<ts>.json
 # делает git push и выходит
 
 # --- Сессия 2: мобильный МТС ---
@@ -1828,8 +1816,8 @@ censprobe/
 │   └── <test_id>/
 │       ├── meta.yaml
 │       ├── protocols.yaml
-│       ├── server-solo-*.json.gz
-│       └── server-listener-<session>-*.json.gz
+│       ├── server-solo-*.json
+│       └── server-listener-<session>-*.json
 │
 └── docs/
     └── passport.md              # архитектурная спецификация

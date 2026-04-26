@@ -125,10 +125,8 @@ docker compose --profile dashboard up --build -d
 ```
 
 1. Откройте `http://localhost:3000` (логин: `admin`, пароль: `admin`).
-   > **Важно:** кнопка **Pull & Refresh** делает POST из браузера на `http://localhost:8080/refresh` (sync-api), привязанный к loopback. Поэтому Grafana должна открываться **с той же машины**, где поднят compose, либо через SSH-туннель:
-   > `ssh -L 3000:localhost:3000 -L 8080:localhost:8080 user@host`.
-2. Откройте дашборд **01 — Test Overview** и нажмите **Pull & Refresh** — sync-api сделает `git pull` и импортирует новые отчёты в Postgres.
-3. Дашборд **07 — Server Suitability** — результаты одного сервера. **06 — Compare Tests** — сравнение двух серверов.
+2. Чтобы подтянуть новые отчёты, выполните `git pull` в каталоге репозитория на хосте — sync-api сканирует `reports/` в фоне (`CENSPROBE_IMPORT_INTERVAL_SEC`, по умолчанию 60s) и импортирует новые `.json` в Postgres автоматически.
+3. Дашборд **01 — Test Overview** показывает свежие данные после импорта. **07 — Server Suitability** — результаты одного сервера. **06 — Compare Tests** — сравнение двух серверов.
 
 ### Экспорт в HTML/PDF
 

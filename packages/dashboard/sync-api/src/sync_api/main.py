@@ -3,15 +3,18 @@ sync_api/main.py — FastAPI service for Grafana data sync.
 
 Endpoints:
   GET  /health             — liveness check
-  POST /refresh            — git pull + parse new reports → Postgres
   GET  /test-runs          — list all test_ids with latest scores
   GET  /test-runs/{id}     — single test run details
   GET  /results/{id}       — paginated test results for a test_id
   GET  /protocols/{id}     — protocol reachability matrix for a test_id
   GET  /baseline           — current baseline metadata
 
+Update flow: an operator runs ``git pull`` on the workspace manually.
+A background task scans the reports tree every IMPORT_INTERVAL seconds
+and imports any new .json reports into Postgres. There is no HTTP
+trigger and no Grafana button — pulling is fast enough to do by hand.
+
 Grafana connects to Postgres directly via the Postgres datasource plugin.
-The /refresh endpoint is called via Grafana button or manual curl.
 """
 from __future__ import annotations
 
@@ -26,16 +29,9 @@ from typing import AsyncIterator, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 from sqlalchemy import distinct, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-# Reuse probe-core's git helpers so sync-api shares the same fcntl lock
-# (peer containers writing solo/listener reports stay serialised) AND the
-# same GIT_SSH_COMMAND env (StrictHostKeyChecking, BatchMode, writable
-# UserKnownHostsFile). A bare `subprocess.run(["git", "pull"])` would skip
-# all of that and break on read-only ~/.ssh mounts.
-from censprobe_core.git_io import git_pull as _core_git_pull
 from censprobe_core.models import (
     ListenerReport as CoreListenerReport,
     TestResult as CoreTestResult,
@@ -51,7 +47,7 @@ from sync_api.db import (
     init_db,
 )
 from sync_api.parser import (
-    _load_gz,
+    _load_json,
     is_listener_report,
     is_solo_report,
     parse_listener_report,
@@ -64,25 +60,26 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 # Single source of truth for the API/version metadata. Used in both the FastAPI
 # constructor and /health, and surfaced in pyproject.toml. Bumping here is the
 # only change required to keep them in lockstep.
-SERVICE_VERSION = "0.3.0"
+SERVICE_VERSION = "0.4.0"
 
 WORKSPACE = Path(os.environ.get("WORKSPACE", "/workspace"))
-
-# Serialize /refresh calls: the endpoint runs `git pull --rebase` which
-# takes an exclusive .git/index.lock, and a second concurrent call
-# (Grafana double-click on "Pull & Refresh") collides and aborts with a
-# 500. One global lock is enough — refresh is a single-writer op; later
-# callers simply wait for the in-flight run to finish, then run their own
-# (a re-pull is cheap once the working tree is already at HEAD).
-_REFRESH_LOCK = asyncio.Lock()
+IMPORT_INTERVAL_SEC = float(os.environ.get("CENSPROBE_IMPORT_INTERVAL_SEC", "60"))
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Initialize database tables on startup."""
+    """Initialize DB tables and start the background importer."""
     await init_db()
     logger.info("DB tables initialized")
-    yield
+    importer_task = asyncio.create_task(_import_loop())
+    try:
+        yield
+    finally:
+        importer_task.cancel()
+        try:
+            await importer_task
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(
@@ -109,110 +106,53 @@ async def health() -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Refresh — git pull + parse new reports
+# Background importer — scans /workspace/reports and ingests new .json files.
 # ─────────────────────────────────────────────────────────────────────────────
 
-class RefreshResponse(BaseModel):
-    status: str
-    new_runs: int
-    new_results: int
-    new_sessions: int
-    errors: list[str]
-
-
-def _git_pull_sync() -> None:
-    """Run `git pull --rebase` synchronously in a worker thread.
-
-    Delegates to ``censprobe_core.git_io.git_pull``, which already:
-      * holds the cross-container fcntl lock on /workspace/.git/censprobe.lock
-        (so a concurrent solo/listener commit doesn't race .git/index.lock);
-      * applies the censprobe GIT_SSH_COMMAND (BatchMode, accept-new with a
-        writable UserKnownHostsFile under /tmp).
-    Without that env, sync-api would fall back to the user's ~/.ssh/config
-    and fail on the read-only ``~/.ssh:/root/.ssh:ro`` bind mount.
-    """
-    _core_git_pull()
+async def _import_loop() -> None:
+    """Periodically scan the reports tree and import any new files."""
+    logger.info("Background importer started (every %.0fs)", IMPORT_INTERVAL_SEC)
+    while True:
+        try:
+            await _import_once()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Background importer iteration failed")
+        await asyncio.sleep(IMPORT_INTERVAL_SEC)
 
 
 def _list_report_files(reports_root: Path) -> list[tuple[str, Path, list[Path]]]:
-    """
-    Enumerate report files on disk in a worker thread.
-
-    Returns a list of (test_id, meta_path, report_files) tuples. Doing
-    this in a single blocking pass (then dispatching async DB work) keeps
-    the event loop responsive on large trees.
-    """
+    """Enumerate (test_id, meta_path, [report_files]) tuples on disk."""
     out: list[tuple[str, Path, list[Path]]] = []
     if not reports_root.exists():
         return out
     for test_dir in sorted(reports_root.iterdir()):
         if not test_dir.is_dir():
             continue
-        report_files = sorted(
-            list(test_dir.glob("*.json")) + list(test_dir.glob("*.json.gz"))
-        )
+        report_files = sorted(test_dir.glob("*.json"))
         out.append((test_dir.name, test_dir / "meta.yaml", report_files))
     return out
 
 
-@app.post("/refresh", response_model=RefreshResponse)
-async def refresh() -> RefreshResponse:
-    """Pull latest from git and sync new reports into Postgres.
-
-    Git I/O, directory enumeration, and .json(.gz) parsing are all blocking;
-    they are dispatched to the default thread pool so the event loop keeps
-    serving /health and read endpoints during a refresh.
-    """
-    async with _REFRESH_LOCK:
-        return await _do_refresh()
-
-
-async def _do_refresh() -> RefreshResponse:
-    errors: list[str] = []
-
-    # 1. Git pull (blocking — run off-loop). git_io raises RuntimeError
-    # with stdout/stderr embedded; everything else is unexpected but must
-    # not abort the parse pass — the operator can still browse what's
-    # already on disk.
-    try:
-        await asyncio.to_thread(_git_pull_sync)
-        logger.info("git pull done")
-    except Exception as e:
-        logger.warning("git pull failed: %s", e)
-        errors.append(f"git pull: {e}")
-
-    # 2. Enumerate report files off-loop.
+async def _import_once() -> None:
+    """One pass over the reports directory: import new files and rescore touched runs."""
     reports_root = WORKSPACE / "reports"
     test_dirs = await asyncio.to_thread(_list_report_files, reports_root)
     if not test_dirs:
-        return RefreshResponse(
-            status="ok", new_runs=0, new_results=0, new_sessions=0, errors=errors
-        )
-
-    new_runs = 0
-    new_results = 0
-    new_sessions = 0
+        return
 
     async with async_session_factory() as session:
         for test_id, meta_path, report_files in test_dirs:
-            # Wrap row creation in its own savepoint: a transient PG error
-            # during the initial INSERT (or a race on the unique test_id
-            # constraint) would otherwise poison the outer transaction and
-            # take down every subsequent test_dir in the same /refresh.
             try:
                 async with session.begin_nested():
                     run = await _get_or_create_test_run(session, test_id, meta_path)
             except Exception as e:
                 logger.error("Could not get/create test_run %s: %s", test_id, e)
-                errors.append(f"test_run[{test_id}]: {e}")
                 continue
             if run is None:
                 continue
 
-            # Pull all already-imported filenames for this run in ONE query
-            # each (vs. N+1 point lookups per file). DISTINCT lets Postgres
-            # serve the answer from the (test_run_id, report_file) index
-            # without re-reading every TestResult row.
             imported_results = {
                 fn
                 for (fn,) in (
@@ -238,36 +178,22 @@ async def _do_refresh() -> RefreshResponse:
                 fn = report_file.name
                 if fn in imported_results or fn in imported_sessions:
                     continue
-
-                # Wrap each report in a savepoint so that a single bad
-                # file (oversize string, DB constraint violation, ...)
-                # aborts only its own import, not the whole batch. Without
-                # this, any failure poisons the outer transaction and
-                # every subsequent add()/commit() raises
-                # PendingRollbackError.
                 try:
                     async with session.begin_nested():
                         if is_solo_report(fn):
-                            n_r, n_run = await _import_solo_report(session, run, report_file)
-                            new_results += n_r
-                            if n_run:
-                                new_runs += 1
+                            n_r, _ = await _import_solo_report(session, run, report_file)
+                            if n_r:
                                 run_touched = True
-
                         elif is_listener_report(fn):
                             n_s = await _import_listener_report(session, run, report_file)
-                            new_sessions += n_s
                             if n_s:
                                 run_touched = True
                 except Exception as e:
                     logger.error("Error importing %s: %s", fn, e)
-                    errors.append(f"{fn}: {e}")
 
-            # Once we've consumed everything new for this test_id,
-            # recompute scores from raw report files on disk so the
-            # dashboard reflects the latest listener data. Solo's own
-            # scoring ran without any listener signal, leaving protocol
-            # reachability at the neutral 0.5 default.
+            # Solo's own scores were computed before any listener report
+            # was on disk, so protocol reachability sat at the neutral 0.5
+            # default. Re-blend solo + listener whenever a side adds new data.
             if run_touched:
                 try:
                     async with session.begin_nested():
@@ -277,17 +203,8 @@ async def _do_refresh() -> RefreshResponse:
                         _apply_scores(run, *loaded)
                 except Exception as e:
                     logger.warning("score recompute failed for %s: %s", test_id, e)
-                    errors.append(f"scores[{test_id}]: {e}")
 
         await session.commit()
-
-    return RefreshResponse(
-        status="ok",
-        new_runs=new_runs,
-        new_results=new_results,
-        new_sessions=new_sessions,
-        errors=errors,
-    )
 
 
 def _apply_scores(
@@ -295,14 +212,7 @@ def _apply_scores(
     solo_results: list[CoreTestResult],
     listener_reports: list[CoreListenerReport],
 ) -> None:
-    """Rebuild server scores and write them onto `run`.
-
-    Authoritative scoring lives here rather than in the solo container:
-    solo runs BEFORE listener, so any numbers it bakes into its own
-    report miss the real protocol-reachability signal. We re-blend the
-    latest solo run's raw TestResults with every listener session on
-    disk whenever either side adds a new report.
-    """
+    """Rebuild server scores and write them onto `run`."""
     if not solo_results:
         return
     scores = compute_scores(
@@ -328,12 +238,7 @@ def _apply_scores(
 def _load_reports_for_scoring(
     report_files: list[Path],
 ) -> tuple[list[CoreTestResult], list[CoreListenerReport]]:
-    """Load the latest solo report + all listener reports as core pydantic models.
-
-    Filenames embed an ISO-8601 timestamp (``server-solo-<ts>.json``), so
-    sorting by name yields chronological order — `solo_files[-1]` is always
-    the most recent solo run.
-    """
+    """Load the latest solo report + all listener reports as core pydantic models."""
     solo_files = sorted(
         (p for p in report_files if is_solo_report(p.name)),
         key=lambda p: p.name,
@@ -345,7 +250,7 @@ def _load_reports_for_scoring(
 
     solo_results: list[CoreTestResult] = []
     if solo_files:
-        raw = _load_gz(solo_files[-1])
+        raw = _load_json(solo_files[-1])
         if isinstance(raw, dict):
             raw_results = raw.get("results", []) or []
             if isinstance(raw_results, list):
@@ -357,7 +262,7 @@ def _load_reports_for_scoring(
 
     listener_reports: list[CoreListenerReport] = []
     for path in listener_files:
-        raw = _load_gz(path)
+        raw = _load_json(path)
         if not isinstance(raw, dict):
             continue
         try:
@@ -454,13 +359,7 @@ def _read_baseline_sync(baseline_path: Path) -> Optional[dict]:
 
 @app.get("/baseline")
 async def get_baseline() -> dict:
-    """Return current baseline metadata (not the full data, just meta).
-
-    File I/O and JSON parsing are off-loaded to a worker thread. baseline
-    payloads can grow into hundreds of KB once it covers all targets, and
-    decoding that on the event loop would stall /health and the read
-    endpoints during a refresh.
-    """
+    """Return current baseline metadata (not the full data, just meta)."""
     baseline_path = WORKSPACE / "baseline" / "latest.json"
     try:
         raw = await asyncio.to_thread(_read_baseline_sync, baseline_path)
@@ -533,15 +432,7 @@ async def _get_or_create_test_run(
 async def _import_solo_report(
     session: AsyncSession, run: TestRun, path: Path
 ) -> tuple[int, bool]:
-    """Import a solo report. Returns (n_results_added, is_new_run).
-
-    Scores are NOT written here anymore — the solo report's meta.scores
-    were computed before any listener data was available, so using them
-    would permanently freeze recommended_protocols and entry_score at
-    their neutral defaults. `_apply_scores` recomputes them below once
-    per touched run.
-    """
-    # parse_solo_report does disk I/O + gzip + JSON decoding — block off-loop.
+    """Import a solo report. Returns (n_results_added, is_new_run)."""
     _meta, results = await asyncio.to_thread(parse_solo_report, path)
     if not results:
         return 0, False

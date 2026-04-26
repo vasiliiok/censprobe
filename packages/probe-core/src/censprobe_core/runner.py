@@ -56,6 +56,7 @@ class ProbeRunner:
         )
         self.comparator = BaselineComparator(self.baseline)
         self._targets: dict[str, Any] = {}
+        self.module_failures: list[str] = []
 
     def _load_targets(self, name: str) -> dict:
         """Load targets/<name>.yaml"""
@@ -69,8 +70,15 @@ class ProbeRunner:
         return self._targets[name]
 
     async def run_all(self, repeats: int = 3) -> list[TestResult]:
-        """Run all measurement modules and return aggregated results."""
+        """Run all measurement modules and return aggregated results.
+
+        Tracks per-module failures in ``self.module_failures`` so the report
+        summary can surface which phases produced no data — otherwise scoring
+        on partial results silently degrades to neutral 50% and the operator
+        has no signal that half the measurements are missing.
+        """
         results: list[TestResult] = []
+        self.module_failures: list[str] = []
 
         logger.info("[%s] Starting probe run (mode=%s, repeats=%d)", self.test_id, self.mode, repeats)
 
@@ -83,6 +91,7 @@ class ProbeRunner:
             logger.info("[%s] DNS: %d results", self.test_id, len(dns_results))
         except Exception:
             logger.exception("[%s] DNS module failed", self.test_id)
+            self.module_failures.append("dns")
 
         # ── 2. TCP ────────────────────────────────────────────────────────────
         logger.info("[%s] Running TCP reachability tests...", self.test_id)
@@ -93,6 +102,7 @@ class ProbeRunner:
             logger.info("[%s] TCP: %d results", self.test_id, len(tcp_results))
         except Exception:
             logger.exception("[%s] TCP module failed", self.test_id)
+            self.module_failures.append("tcp")
 
         # ── 3. TLS/SNI ───────────────────────────────────────────────────────
         logger.info("[%s] Running TLS/SNI tests...", self.test_id)
@@ -103,6 +113,7 @@ class ProbeRunner:
             logger.info("[%s] TLS: %d results", self.test_id, len(tls_results))
         except Exception:
             logger.exception("[%s] TLS module failed", self.test_id)
+            self.module_failures.append("tls")
 
         # ── 4. HTTP/HTTPS ─────────────────────────────────────────────────────
         logger.info("[%s] Running HTTP tests...", self.test_id)
@@ -113,6 +124,7 @@ class ProbeRunner:
             logger.info("[%s] HTTP: %d results", self.test_id, len(http_results))
         except Exception:
             logger.exception("[%s] HTTP module failed", self.test_id)
+            self.module_failures.append("http")
 
         # ── 5. Telegram ───────────────────────────────────────────────────────
         logger.info("[%s] Running Telegram tests...", self.test_id)
@@ -122,6 +134,7 @@ class ProbeRunner:
             logger.info("[%s] Telegram: %d results", self.test_id, len(tg_results))
         except Exception:
             logger.exception("[%s] Telegram module failed", self.test_id)
+            self.module_failures.append("telegram")
 
         # ── 6. Throttling (Method A + B) ──────────────────────────────────────
         logger.info("[%s] Running throttling tests...", self.test_id)
@@ -131,6 +144,7 @@ class ProbeRunner:
             logger.info("[%s] Throttling: %d results", self.test_id, len(thr_results))
         except Exception:
             logger.exception("[%s] Throttling module failed", self.test_id)
+            self.module_failures.append("throttling")
 
         # ── 7. Middlebox ──────────────────────────────────────────────────────
         logger.info("[%s] Running middlebox tests...", self.test_id)
@@ -140,6 +154,7 @@ class ProbeRunner:
             logger.info("[%s] Middlebox: %d results", self.test_id, len(mb_results))
         except Exception:
             logger.exception("[%s] Middlebox module failed", self.test_id)
+            self.module_failures.append("middlebox")
 
         # ── 8. Protocol signatures (solo-only, no listener needed) ────────────
         logger.info("[%s] Protocol signature tests...", self.test_id)
@@ -148,7 +163,13 @@ class ProbeRunner:
             results.extend(proto_results)
         except Exception:
             logger.exception("[%s] Protocol module failed", self.test_id)
+            self.module_failures.append("protocols")
 
+        if self.module_failures:
+            logger.warning(
+                "[%s] %d module(s) failed: %s",
+                self.test_id, len(self.module_failures), ", ".join(self.module_failures),
+            )
         logger.info("[%s] Probe complete. Total results: %d", self.test_id, len(results))
         return results
 
@@ -247,10 +268,10 @@ class ProbeRunner:
         """
         Serialize results as pretty JSON and save.
 
-        We write plain .json (not .json.gz) because git's pack format already
-        deflates textual blobs with zlib and computes delta chains across
-        revisions. Gzipping upstream defeats delta compression — each commit
-        stores a full new copy — and makes the .git directory grow quickly.
+        Reports are plain .json: git's pack format already deflates textual
+        blobs with zlib and computes delta chains across revisions, so
+        gzipping upstream would defeat delta compression and make the
+        .git directory grow quickly.
         """
         if output_path is None:
             ts = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
@@ -271,7 +292,7 @@ class ProbeRunner:
             "server_meta": server_meta.model_dump() if server_meta else None,
             "scores": scores.model_dump() if scores else None,
             "results": [r.model_dump(mode="json") for r in results],
-            "summary": _summarize(results),
+            "summary": _summarize(results, module_failures=list(self.module_failures)),
         }
 
         output_path.write_text(
@@ -283,8 +304,14 @@ class ProbeRunner:
         return output_path
 
 
-def _summarize(results: list[TestResult]) -> dict:
-    """Quick summary statistics for the report."""
+def _summarize(results: list[TestResult], module_failures: Optional[list[str]] = None) -> dict:
+    """Quick summary statistics for the report.
+
+    ``module_failures`` lists modules that raised before producing any
+    results (DNS unreachable, import error, etc.). Surfaced so the
+    dashboard can flag scoring done on partial data instead of treating
+    a half-empty run as legitimate "neutral 50%".
+    """
     # Verdicts that mean "this target was actually censored / unreachable",
     # not just "we didn't get a clean OK". Keep this in sync with the
     # dashboard's "blocked" filter (packages/dashboard/grafana/dashboards).
@@ -328,4 +355,5 @@ def _summarize(results: list[TestResult]) -> dict:
         "detected_techniques": sorted(techniques),
         "blocked_count": blocked_count,
         "ok_count": ok_count,
+        "module_failures": list(module_failures or []),
     }

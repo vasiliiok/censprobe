@@ -18,7 +18,6 @@ Important: Solo must run BEFORE listener.
 from __future__ import annotations
 
 import asyncio
-import gzip
 import json
 import logging
 import os
@@ -239,27 +238,17 @@ def _print_summary(results, scores) -> None:
 
 
 def _load_listener_reports(reports_dir: Path) -> list[ListenerReport]:
-    """
-    Load all server-listener-*.json[.gz] files from the test_id reports directory.
-    Accepts both the new plain .json layout and legacy .json.gz archives so
-    old reports on disk keep working after the format switch.
+    """Load all server-listener-*.json files from the test_id reports directory.
+
     Returns empty list if none exist or directory doesn't exist.
     """
     if not reports_dir.exists():
         return []
 
     reports: list[ListenerReport] = []
-    paths = sorted(
-        list(reports_dir.glob("server-listener-*.json"))
-        + list(reports_dir.glob("server-listener-*.json.gz"))
-    )
-    for path in paths:
+    for path in sorted(reports_dir.glob("server-listener-*.json")):
         try:
-            if path.suffix == ".gz":
-                with gzip.open(path, "rb") as f:
-                    data = json.loads(f.read())
-            else:
-                data = json.loads(path.read_text(encoding="utf-8"))
+            data = json.loads(path.read_text(encoding="utf-8"))
             reports.append(ListenerReport.model_validate(data))
             logger.debug("Loaded listener report: %s", path.name)
         except Exception as e:

@@ -3,7 +3,7 @@ db.py — SQLAlchemy async models and DB initialization.
 
 Schema:
   test_runs — one row per test_id, tracks meta
-  test_results — one row per TestResult (from .json or legacy .json.gz)
+  test_results — one row per TestResult (from .json reports)
   listener_sessions — one row per listener session
   protocol_results — one row per protocol per session
 """
@@ -81,7 +81,7 @@ class TestRun(Base):
 
 
 class TestResult(Base):
-    """One row per TestResult entry (from server-solo-*.json[.gz] or server-listener-*.json[.gz])."""
+    """One row per TestResult entry (from server-solo-*.json or server-listener-*.json)."""
     __tablename__ = "test_results"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -142,7 +142,7 @@ class ListenerSession(Base):
     )
 
     # Hard guarantee that one listener report file produces exactly one row.
-    # The /refresh dedup query already filters by report_file, but a second
+    # The importer's dedup query already filters by report_file, but a second
     # sync-api replica (or a partially-completed transaction that gets
     # committed twice) would otherwise dupe sessions and double-count
     # protocol_results in dashboards.

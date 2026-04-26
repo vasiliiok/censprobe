@@ -1,13 +1,12 @@
 """
-parser.py — Parse censprobe report files (.json or legacy .json.gz) into DB models.
+parser.py — Parse censprobe report files (.json) into DB models.
 
 Handles:
-  - server-solo-<ts>.json[.gz]            → TestRun + TestResult rows
-  - server-listener-<session>-<ts>.json[.gz] → ListenerSession + ProtocolResult rows
+  - server-solo-<ts>.json            → TestRun + TestResult rows
+  - server-listener-<session>-<ts>.json → ListenerSession + ProtocolResult rows
 """
 from __future__ import annotations
 
-import gzip
 import json
 import logging
 from datetime import datetime, timezone
@@ -39,12 +38,12 @@ def parse_solo_report(
     path: Path,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """
-    Parse a server-solo-*.json[.gz] report.
+    Parse a server-solo-*.json report.
 
     Returns:
         (meta_dict, list_of_result_dicts)
     """
-    raw = _load_gz(path)
+    raw = _load_json(path)
     if not raw or not isinstance(raw, dict):
         return {}, []
 
@@ -81,12 +80,12 @@ def parse_listener_report(
     path: Path,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """
-    Parse a server-listener-<session>-*.json[.gz] report.
+    Parse a server-listener-<session>-*.json report.
 
     Returns:
         (session_dict, list_of_protocol_result_dicts)
     """
-    raw = _load_gz(path)
+    raw = _load_json(path)
     if not raw or not isinstance(raw, dict):
         return {}, []
 
@@ -123,41 +122,30 @@ def parse_listener_report(
     return session_meta, protocol_results
 
 
-# Filename predicates: prefix + extension. We only match the canonical
-# .json / .json.gz suffixes so a stray editor swap-file ("server-solo-…json~")
-# or a tarball ("server-solo-…tar.gz") never gets handed to the JSON loader.
+# Filename predicates: only the canonical .json suffix. Stray editor swap
+# files ("server-solo-…json~") or tarballs ("server-solo-…tar.gz") are
+# never handed to the JSON loader.
 def is_solo_report(filename: str) -> bool:
-    return filename.startswith("server-solo-") and (
-        filename.endswith(".json") or filename.endswith(".json.gz")
-    )
+    return filename.startswith("server-solo-") and filename.endswith(".json")
 
 
 def is_listener_report(filename: str) -> bool:
-    return filename.startswith("server-listener-") and (
-        filename.endswith(".json") or filename.endswith(".json.gz")
-    )
+    return filename.startswith("server-listener-") and filename.endswith(".json")
 
 
-def _load_gz(path: Path) -> Optional[dict]:
-    """Load a .json.gz or .json file into a dict.
+def _load_json(path: Path) -> Optional[dict]:
+    """Load a .json file into a dict.
 
     Returns None on any I/O / decode failure so callers can short-circuit
     cleanly (a half-written report on disk during a concurrent push is the
-    common case — log it and let the next /refresh re-try).
+    common case — log it and let the next import re-try).
     """
     try:
-        if path.suffix == ".gz":
-            with gzip.open(path, "rb") as f:
-                payload = f.read()
-        else:
-            payload = path.read_bytes()
+        payload = path.read_bytes()
         if not payload:
             logger.warning("Report %s is empty; skipping", path.name)
             return None
         return json.loads(payload)
-    except gzip.BadGzipFile as e:
-        logger.error("Report %s: corrupt gzip (%s); skipping", path.name, e)
-        return None
     except json.JSONDecodeError as e:
         logger.error("Report %s: invalid JSON at line %d col %d: %s",
                      path.name, e.lineno, e.colno, e.msg)
@@ -166,7 +154,7 @@ def _load_gz(path: Path) -> Optional[dict]:
         logger.error("Report %s: I/O error: %s", path.name, e)
         return None
     except Exception as e:
-        # Last-ditch guard so one weird file never aborts the whole refresh.
+        # Last-ditch guard so one weird file never aborts the whole import.
         logger.error("Report %s: unexpected parse error: %s", path.name, e)
         return None
 

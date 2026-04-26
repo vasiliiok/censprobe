@@ -13,8 +13,8 @@ Usage:
 
 Reads:
   - reports/<test_id>/meta.yaml
-  - reports/<test_id>/server-solo-*.json  (latest; legacy .json.gz also supported)
-  - reports/<test_id>/server-listener-*.json (all; legacy .json.gz also supported)
+  - reports/<test_id>/server-solo-*.json  (latest)
+  - reports/<test_id>/server-listener-*.json (all)
 
 Writes:
   - reports/<test_id>/report.html   (default)
@@ -22,7 +22,6 @@ Writes:
 """
 from __future__ import annotations
 
-import gzip
 import json
 import logging
 import os
@@ -113,11 +112,9 @@ def _build_context(test_id: str, reports_dir: Path) -> dict[str, Any]:
     server: dict = meta.get("server", {})
     scores_raw: dict = meta.get("scores", {})
 
-    # Find latest solo report. We accept both plain .json (current format)
-    # and .json.gz (legacy format) so historical data keeps rendering.
+    # Find latest solo report.
     solo_files = sorted(
-        list(reports_dir.glob("server-solo-*.json"))
-        + list(reports_dir.glob("server-solo-*.json.gz")),
+        reports_dir.glob("server-solo-*.json"),
         reverse=True,
     )
     results_all: list[dict] = []
@@ -143,11 +140,8 @@ def _build_context(test_id: str, reports_dir: Path) -> dict[str, Any]:
     for cat in by_category:
         by_category[cat].sort(key=lambda r: verdict_order.get(r.get("verdict", ""), 5))
 
-    # Listener sessions (plain .json + legacy .json.gz).
-    listener_files = sorted(
-        list(reports_dir.glob("server-listener-*.json"))
-        + list(reports_dir.glob("server-listener-*.json.gz"))
-    )
+    # Listener sessions.
+    listener_files = sorted(reports_dir.glob("server-listener-*.json"))
     listener_sessions = []
     for lf in listener_files:
         ld = _load_report(lf)
@@ -208,11 +202,8 @@ def _build_context(test_id: str, reports_dir: Path) -> dict[str, Any]:
 
 
 def _load_report(path: Path) -> Optional[dict]:
-    """Load a .json or legacy .json.gz report file."""
+    """Load a .json report file."""
     try:
-        if path.suffix == ".gz":
-            with gzip.open(path, "rb") as f:
-                return json.loads(f.read())
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception as e:
         logger.warning("Could not load %s: %s", path.name, e)

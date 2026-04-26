@@ -123,14 +123,8 @@ services:
       WORKSPACE: /workspace
     volumes:
       - ./:/workspace
-      - ~/.ssh:/root/.ssh:ro
-    # Bind to loopback only. The "Pull & Refresh" button on dashboard 01
-    # is a Volkov Labs form panel that POSTs from the *user's browser* —
-    # not from inside the Grafana container — so the URL has to resolve
-    # on the host the dashboard is opened from. Loopback keeps the
-    # unauthenticated /refresh endpoint (which triggers a heavy git pull)
-    # off the public internet while still working when the user opens
-    # Grafana on the same host (or via SSH port-forward).
+    # Bind to loopback only — the API has no authentication, and the only
+    # in-cluster consumer is Grafana (read-only via Postgres anyway).
     ports:
       - "127.0.0.1:8080:8080"
     healthcheck:
@@ -158,15 +152,6 @@ services:
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
       GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s:%(http_port)s/"
-      # volkovlabs-form-panel powers the "Pull & Refresh" button in the
-      # main overview dashboard. It POSTs to sync-api /refresh from the
-      # *browser*, so the URL must be reachable on the user's host
-      # (sync-api is bound to 127.0.0.1:8080 — see comment above).
-      #
-      # Pinned to 4.7.0 because Volkov Labs ceased operations in
-      # 2025-09; auto-updating to a future republish (or losing the
-      # plugin from the catalog) would silently break the button.
-      GF_INSTALL_PLUGINS: "volkovlabs-form-panel 4.7.0"
       DB_PASSWORD: ${DB_PASSWORD:-censprobe}
     volumes:
       - grafana_data:/var/lib/grafana

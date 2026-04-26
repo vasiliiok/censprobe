@@ -30,91 +30,12 @@
   },
   "panels": [
     {
-      "id": 100,
-      "type": "volkovlabs-form-panel",
-      "title": "Pull & Refresh from GitHub",
-      "description": "Triggers `git pull` + DB import on sync-api. Use after a new test_id has been pushed to the repo.",
-      "gridPos": {
-        "x": 0,
-        "y": 0,
-        "w": 24,
-        "h": 3
-      },
-      "datasource": {
-        "type": "postgres",
-        "uid": "DS_CENSPROBE_PG"
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "postgres",
-            "uid": "DS_CENSPROBE_PG"
-          },
-          "rawSql": "SELECT 1",
-          "format": "table",
-          "editorMode": "code",
-          "rawQuery": true
-        }
-      ],
-      "options": {
-        "buttonGroup": {
-          "orientation": "center",
-          "size": "md"
-        },
-        "elements": [],
-        "initial": {
-          "method": "-",
-          "url": "",
-          "code": "",
-          "highlight": false,
-          "highlightColor": "red"
-        },
-        "update": {
-          "method": "POST",
-          "url": "http://localhost:8080/refresh",
-          "code": "",
-          "header": [],
-          "confirm": false,
-          "getPayload": "return {}"
-        },
-        "submit": {
-          "icon": "sync",
-          "text": "Pull & Refresh",
-          "size": "lg",
-          "variant": "primary"
-        },
-        "saveDefault": {
-          "icon": "save",
-          "text": "Save Default",
-          "variant": "hidden"
-        },
-        "reset": {
-          "icon": "process",
-          "text": "Reset",
-          "variant": "hidden"
-        },
-        "layout": {
-          "variant": "single",
-          "padding": 10,
-          "orientation": "horizontal"
-        },
-        "resetAction": {
-          "mode": "initial",
-          "code": "",
-          "confirm": false
-        },
-        "sync": false,
-        "saveDefault.text": "Save Default"
-      }
-    },
-    {
       "id": 1,
       "title": "Overall VPN Suitability Score",
       "type": "gauge",
       "gridPos": {
         "x": 0,
-        "y": 3,
+        "y": 0,
         "w": 6,
         "h": 8
       },
@@ -166,7 +87,7 @@
       "type": "barchart",
       "gridPos": {
         "x": 6,
-        "y": 3,
+        "y": 0,
         "w": 9,
         "h": 8
       },
@@ -198,7 +119,7 @@
       "type": "table",
       "gridPos": {
         "x": 15,
-        "y": 3,
+        "y": 0,
         "w": 9,
         "h": 8
       },
@@ -229,7 +150,7 @@
       "type": "gauge",
       "gridPos": {
         "x": 0,
-        "y": 11,
+        "y": 8,
         "w": 4,
         "h": 5
       },
@@ -264,7 +185,7 @@
       "type": "gauge",
       "gridPos": {
         "x": 4,
-        "y": 11,
+        "y": 8,
         "w": 4,
         "h": 5
       },
@@ -299,7 +220,7 @@
       "type": "gauge",
       "gridPos": {
         "x": 8,
-        "y": 11,
+        "y": 8,
         "w": 4,
         "h": 5
       },
@@ -334,7 +255,7 @@
       "type": "stat",
       "gridPos": {
         "x": 12,
-        "y": 11,
+        "y": 8,
         "w": 4,
         "h": 5
       },
@@ -362,7 +283,7 @@
       "type": "table",
       "gridPos": {
         "x": 0,
-        "y": 16,
+        "y": 13,
         "w": 24,
         "h": 5
       },
@@ -390,7 +311,7 @@
       "type": "piechart",
       "gridPos": {
         "x": 0,
-        "y": 21,
+        "y": 18,
         "w": 12,
         "h": 8
       },
@@ -419,7 +340,7 @@
       "type": "table",
       "gridPos": {
         "x": 12,
-        "y": 21,
+        "y": 18,
         "w": 12,
         "h": 8
       },
