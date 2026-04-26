@@ -20,4 +20,3 @@ censprobe-report = "reporter.main:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/reporter"]
-artifacts = ["templates/*"]

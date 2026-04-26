@@ -40,7 +40,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT category, test, target, verdict, method, rtt_ms, attempts FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = '$test_id' ORDER BY category, verdict DESC, target LIMIT 1000",
+          "rawSql": "SELECT category, test, target, verdict, method, rtt_ms, attempts FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} ORDER BY category, verdict DESC, target LIMIT 1000",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -145,7 +145,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT category, COUNT(*) AS blocked FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = '$test_id' AND verdict NOT IN ('OK','INCONCLUSIVE','ERROR') GROUP BY category ORDER BY blocked DESC",
+          "rawSql": "SELECT category, COUNT(*) AS blocked FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND verdict NOT IN ('OK','INCONCLUSIVE','ERROR') GROUP BY category ORDER BY blocked DESC",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -173,7 +173,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT target, verdict, method FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = '$test_id' AND verdict NOT IN ('OK','INCONCLUSIVE','ERROR') ORDER BY verdict, target LIMIT 50",
+          "rawSql": "SELECT target, verdict, method FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND verdict NOT IN ('OK','INCONCLUSIVE','ERROR') ORDER BY verdict, target LIMIT 50",
           "format": "table",
           "refId": "A",
           "editorMode": "code",

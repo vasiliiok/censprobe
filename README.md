@@ -125,20 +125,24 @@ docker compose --profile dashboard up --build -d
 ```
 
 1. Откройте `http://localhost:3000` (логин: `admin`, пароль: `admin`).
-2. Нажмите **Pull & Refresh** на главном дашборде для загрузки результатов из GitHub.
-3. Дашборд **Server Suitability** — результаты одного сервера. **Compare Tests** — сравнение двух серверов.
+   > **Важно:** кнопка **Pull & Refresh** делает POST из браузера на `http://localhost:8080/refresh` (sync-api), привязанный к loopback. Поэтому Grafana должна открываться **с той же машины**, где поднят compose, либо через SSH-туннель:
+   > `ssh -L 3000:localhost:3000 -L 8080:localhost:8080 user@host`.
+2. Откройте дашборд **01 — Test Overview** и нажмите **Pull & Refresh** — sync-api сделает `git pull` и импортирует новые отчёты в Postgres.
+3. Дашборд **07 — Server Suitability** — результаты одного сервера. **06 — Compare Tests** — сравнение двух серверов.
 
 ### Экспорт в HTML/PDF
 
 Статичный отчёт для конкретного тестирования:
 
 ```bash
+# HTML (по умолчанию)
 TEST_ID=selectel-spb-001 docker compose --profile reporter run --rm reporter
-# С PDF: добавьте флаг --pdf
+
+# HTML + PDF (требует WeasyPrint, уже установленного в образе)
 TEST_ID=selectel-spb-001 docker compose --profile reporter run --rm reporter --pdf
 ```
 
-Отчёты сохраняются в `reports/<TEST_ID>/`.
+Отчёты сохраняются в `reports/<TEST_ID>/report.html` (и `report.pdf` при `--pdf`).
 
 ---
 
