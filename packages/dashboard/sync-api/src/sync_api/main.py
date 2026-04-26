@@ -16,21 +16,26 @@ The /refresh endpoint is called via Grafana button or manual curl.
 from __future__ import annotations
 
 import asyncio
+import json as _json
 import logging
 import os
-import subprocess
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, AsyncIterator, Optional
+from typing import AsyncIterator, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import distinct, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from censprobe_core.git_io import _git_lock  # reuse the shared fcntl lock
+# Reuse probe-core's git helpers so sync-api shares the same fcntl lock
+# (peer containers writing solo/listener reports stay serialised) AND the
+# same GIT_SSH_COMMAND env (StrictHostKeyChecking, BatchMode, writable
+# UserKnownHostsFile). A bare `subprocess.run(["git", "pull"])` would skip
+# all of that and break on read-only ~/.ssh mounts.
+from censprobe_core.git_io import git_pull as _core_git_pull
 from censprobe_core.models import (
     ListenerReport as CoreListenerReport,
     TestResult as CoreTestResult,
@@ -56,14 +61,19 @@ from sync_api.parser import (
 logger = logging.getLogger("censprobe.sync_api")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
+# Single source of truth for the API/version metadata. Used in both the FastAPI
+# constructor and /health, and surfaced in pyproject.toml. Bumping here is the
+# only change required to keep them in lockstep.
+SERVICE_VERSION = "0.3.0"
+
 WORKSPACE = Path(os.environ.get("WORKSPACE", "/workspace"))
 
 # Serialize /refresh calls: the endpoint runs `git pull --rebase` which
 # takes an exclusive .git/index.lock, and a second concurrent call
 # (Grafana double-click on "Pull & Refresh") collides and aborts with a
-# 500. One global lock is enough — refresh is a single-writer op, and
-# we want later callers to wait for, and share the result of, the in-
-# flight run rather than racing.
+# 500. One global lock is enough — refresh is a single-writer op; later
+# callers simply wait for the in-flight run to finish, then run their own
+# (a re-pull is cheap once the working tree is already at HEAD).
 _REFRESH_LOCK = asyncio.Lock()
 
 
@@ -77,7 +87,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     title="censprobe-sync-api",
-    version="0.3.0",
+    version=SERVICE_VERSION,
     description="Sync censprobe git reports into Postgres for Grafana",
     lifespan=lifespan,
 )
@@ -95,7 +105,7 @@ app.add_middleware(
 
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok", "version": "0.3.0", "workspace": str(WORKSPACE)}
+    return {"status": "ok", "version": SERVICE_VERSION, "workspace": str(WORKSPACE)}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -110,19 +120,18 @@ class RefreshResponse(BaseModel):
     errors: list[str]
 
 
-def _git_pull_sync(workspace: Path) -> None:
+def _git_pull_sync() -> None:
     """Run `git pull --rebase` synchronously in a worker thread.
 
-    Held under the process-global fcntl lock so we never race a concurrent
-    solo / listener commit on .git/index.lock.
+    Delegates to ``censprobe_core.git_io.git_pull``, which already:
+      * holds the cross-container fcntl lock on /workspace/.git/censprobe.lock
+        (so a concurrent solo/listener commit doesn't race .git/index.lock);
+      * applies the censprobe GIT_SSH_COMMAND (BatchMode, accept-new with a
+        writable UserKnownHostsFile under /tmp).
+    Without that env, sync-api would fall back to the user's ~/.ssh/config
+    and fail on the read-only ``~/.ssh:/root/.ssh:ro`` bind mount.
     """
-    with _git_lock():
-        subprocess.run(
-            ["git", "pull", "--rebase"],
-            cwd=workspace,
-            capture_output=True,
-            check=True,
-        )
+    _core_git_pull()
 
 
 def _list_report_files(reports_root: Path) -> list[tuple[str, Path, list[Path]]]:
@@ -161,14 +170,13 @@ async def refresh() -> RefreshResponse:
 async def _do_refresh() -> RefreshResponse:
     errors: list[str] = []
 
-    # 1. Git pull (blocking — run off-loop).
+    # 1. Git pull (blocking — run off-loop). git_io raises RuntimeError
+    # with stdout/stderr embedded; everything else is unexpected but must
+    # not abort the parse pass — the operator can still browse what's
+    # already on disk.
     try:
-        await asyncio.to_thread(_git_pull_sync, WORKSPACE)
+        await asyncio.to_thread(_git_pull_sync)
         logger.info("git pull done")
-    except subprocess.CalledProcessError as e:
-        stderr = e.stderr.decode(errors="replace") if e.stderr else ""
-        logger.warning("git pull failed: %s", stderr or e)
-        errors.append(f"git pull: {stderr or e}")
     except Exception as e:
         logger.warning("git pull failed: %s", e)
         errors.append(f"git pull: {e}")
@@ -187,18 +195,30 @@ async def _do_refresh() -> RefreshResponse:
 
     async with async_session_factory() as session:
         for test_id, meta_path, report_files in test_dirs:
-            run = await _get_or_create_test_run(session, test_id, meta_path)
+            # Wrap row creation in its own savepoint: a transient PG error
+            # during the initial INSERT (or a race on the unique test_id
+            # constraint) would otherwise poison the outer transaction and
+            # take down every subsequent test_dir in the same /refresh.
+            try:
+                async with session.begin_nested():
+                    run = await _get_or_create_test_run(session, test_id, meta_path)
+            except Exception as e:
+                logger.error("Could not get/create test_run %s: %s", test_id, e)
+                errors.append(f"test_run[{test_id}]: {e}")
+                continue
             if run is None:
                 continue
 
             # Pull all already-imported filenames for this run in ONE query
-            # each (vs. N+1 point lookups per file). Fits fine in memory —
-            # one short string per report.
+            # each (vs. N+1 point lookups per file). DISTINCT lets Postgres
+            # serve the answer from the (test_run_id, report_file) index
+            # without re-reading every TestResult row.
             imported_results = {
                 fn
                 for (fn,) in (
                     await session.execute(
-                        select(TestResult.report_file).where(TestResult.test_run_id == run.id)
+                        select(distinct(TestResult.report_file))
+                        .where(TestResult.test_run_id == run.id)
                     )
                 ).all()
             }
@@ -308,29 +328,37 @@ def _apply_scores(
 def _load_reports_for_scoring(
     report_files: list[Path],
 ) -> tuple[list[CoreTestResult], list[CoreListenerReport]]:
-    """Load the latest solo report + all listener reports as core pydantic models."""
+    """Load the latest solo report + all listener reports as core pydantic models.
+
+    Filenames embed an ISO-8601 timestamp (``server-solo-<ts>.json``), so
+    sorting by name yields chronological order — `solo_files[-1]` is always
+    the most recent solo run.
+    """
     solo_files = sorted(
         (p for p in report_files if is_solo_report(p.name)),
         key=lambda p: p.name,
     )
     listener_files = sorted(
-        p for p in report_files if is_listener_report(p.name)
+        (p for p in report_files if is_listener_report(p.name)),
+        key=lambda p: p.name,
     )
 
     solo_results: list[CoreTestResult] = []
     if solo_files:
         raw = _load_gz(solo_files[-1])
-        if raw:
-            for r in raw.get("results", []):
-                try:
-                    solo_results.append(CoreTestResult.model_validate(r))
-                except Exception:
-                    continue
+        if isinstance(raw, dict):
+            raw_results = raw.get("results", []) or []
+            if isinstance(raw_results, list):
+                for r in raw_results:
+                    try:
+                        solo_results.append(CoreTestResult.model_validate(r))
+                    except Exception:
+                        continue
 
     listener_reports: list[CoreListenerReport] = []
     for path in listener_files:
         raw = _load_gz(path)
-        if not raw:
+        if not isinstance(raw, dict):
             continue
         try:
             listener_reports.append(CoreListenerReport.model_validate(raw))
@@ -417,28 +445,42 @@ async def get_protocol_matrix(
 # Baseline metadata
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _read_baseline_sync(baseline_path: Path) -> Optional[dict]:
+    """Blocking baseline reader — exists/read/parse."""
+    if not baseline_path.exists():
+        return None
+    return _json.loads(baseline_path.read_text(encoding="utf-8"))
+
+
 @app.get("/baseline")
 async def get_baseline() -> dict:
-    """Return current baseline metadata (not the full data, just meta)."""
-    import json as _json
+    """Return current baseline metadata (not the full data, just meta).
+
+    File I/O and JSON parsing are off-loaded to a worker thread. baseline
+    payloads can grow into hundreds of KB once it covers all targets, and
+    decoding that on the event loop would stall /health and the read
+    endpoints during a refresh.
+    """
     baseline_path = WORKSPACE / "baseline" / "latest.json"
-    if not baseline_path.exists():
-        return {"status": "missing"}
     try:
-        raw = _json.loads(baseline_path.read_text())
-        return {
-            "status": "ok",
-            "version": raw.get("version", "unknown"),
-            "generated_at": raw.get("generated_at"),
-            "validity_until": raw.get("validity_until"),
-            "runs_count": raw.get("runs_count", 0),
-            "generated_from": raw.get("generated_from", {}),
-            "dns_count": len(raw.get("dns", {})),
-            "http_count": len(raw.get("http", {})),
-            "telegram_count": len(raw.get("telegram", {})),
-        }
+        raw = await asyncio.to_thread(_read_baseline_sync, baseline_path)
     except Exception as e:
         return {"status": "error", "error": str(e)}
+    if raw is None:
+        return {"status": "missing"}
+    if not isinstance(raw, dict):
+        return {"status": "error", "error": "baseline is not a JSON object"}
+    return {
+        "status": "ok",
+        "version": raw.get("version", "unknown"),
+        "generated_at": raw.get("generated_at"),
+        "validity_until": raw.get("validity_until"),
+        "runs_count": raw.get("runs_count", 0),
+        "generated_from": raw.get("generated_from", {}),
+        "dns_count": len(raw.get("dns", {}) or {}),
+        "http_count": len(raw.get("http", {}) or {}),
+        "telegram_count": len(raw.get("telegram", {}) or {}),
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -559,6 +601,7 @@ def _run_to_dict(run: TestRun) -> dict:
         "ipv4_masked": run.ipv4_masked,
         "ipv6_available": run.ipv6_available,
         "provider": run.provider,
+        "kernel": run.kernel,
         "distro": run.distro,
         "created_at": run.created_at.isoformat() if run.created_at else None,
         "last_synced_at": run.last_synced_at.isoformat() if run.last_synced_at else None,

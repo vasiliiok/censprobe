@@ -19,6 +19,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -108,6 +109,15 @@ class TestResult(Base):
 
     test_run = relationship("TestRun", back_populates="results")
 
+    # Composite index keeps the per-refresh dedup query
+    # (`SELECT DISTINCT report_file WHERE test_run_id = ?`) on an index-only
+    # path: without it, Postgres uses the single-column test_run_id index and
+    # then re-fetches every row to read report_file. We deduplicate hundreds
+    # of rows per file every refresh.
+    __table_args__ = (
+        Index("ix_test_results_run_file", "test_run_id", "report_file"),
+    )
+
 
 class ListenerSession(Base):
     """One row per listener session (per SESSION_ID)."""
@@ -129,6 +139,18 @@ class ListenerSession(Base):
     test_run = relationship("TestRun", back_populates="sessions")
     protocol_results = relationship(
         "ProtocolResult", back_populates="session", cascade="all, delete-orphan"
+    )
+
+    # Hard guarantee that one listener report file produces exactly one row.
+    # The /refresh dedup query already filters by report_file, but a second
+    # sync-api replica (or a partially-completed transaction that gets
+    # committed twice) would otherwise dupe sessions and double-count
+    # protocol_results in dashboards.
+    __table_args__ = (
+        UniqueConstraint(
+            "test_run_id", "report_file",
+            name="uq_listener_sessions_run_file",
+        ),
     )
 
 
@@ -153,10 +175,83 @@ class ProtocolResult(Base):
     session = relationship("ListenerSession", back_populates="protocol_results")
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Idempotent schema migrations
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# `Base.metadata.create_all` only creates *missing* tables — it never adds new
+# columns or constraints to tables that already exist. We don't ship a full
+# Alembic setup (overkill for ~4 tables, single writer), so we patch the live
+# schema by hand using ``IF NOT EXISTS`` DDL. Every statement here MUST be
+# idempotent: this function runs on every container start.
+#
+# When you add or rename a column in a model, append an ``ALTER TABLE``
+# statement here so existing dashboard deployments pick it up without manual
+# `psql` surgery.
+_MIGRATIONS: tuple[str, ...] = (
+    # test_runs: kernel/distro were added after v0.1; nullable so they're
+    # safe to backfill as NULL on upgrade.
+    "ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS kernel VARCHAR(64)",
+    "ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS distro VARCHAR(128)",
+    "ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS last_synced_at TIMESTAMPTZ",
+    "ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS detected_techniques TEXT[]",
+    "ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS recommended_protocols TEXT[]",
+    "ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS dns_integrity DOUBLE PRECISION",
+    "ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS tls_integrity DOUBLE PRECISION",
+    "ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS telegram_health DOUBLE PRECISION",
+    "ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS throttling_detected BOOLEAN DEFAULT FALSE",
+    # Composite dedup index (matches __table_args__ on TestResult).
+    "CREATE INDEX IF NOT EXISTS ix_test_results_run_file "
+    "ON test_results(test_run_id, report_file)",
+)
+
+
+async def _run_migrations(conn) -> None:
+    """Apply additive, idempotent DDL on top of create_all.
+
+    The unique constraint on listener_sessions(test_run_id, report_file) is
+    handled separately because Postgres lacks an ``ADD CONSTRAINT IF NOT
+    EXISTS`` form — we look it up in pg_catalog first.
+    """
+    for stmt in _MIGRATIONS:
+        await conn.execute(text(stmt))
+
+    # Add the unique constraint only if it isn't there yet, and only if the
+    # existing data permits it (older deployments may have dupes from before
+    # the constraint existed; in that case we log and skip rather than crash
+    # the whole startup).
+    exists = (
+        await conn.execute(
+            text(
+                "SELECT 1 FROM pg_constraint "
+                "WHERE conname = 'uq_listener_sessions_run_file'"
+            )
+        )
+    ).scalar()
+    if not exists:
+        try:
+            await conn.execute(
+                text(
+                    "ALTER TABLE listener_sessions "
+                    "ADD CONSTRAINT uq_listener_sessions_run_file "
+                    "UNIQUE (test_run_id, report_file)"
+                )
+            )
+        except Exception as e:  # pragma: no cover — recovery path
+            # Likely a duplicate row left over from a pre-constraint refresh.
+            # Don't kill startup over this; surface it for the operator and
+            # let dedupe-by-query keep doing its job.
+            import logging
+            logging.getLogger(__name__).warning(
+                "Could not add uq_listener_sessions_run_file (duplicate rows?): %s", e
+            )
+
+
 async def init_db() -> None:
-    """Create all tables if they don't exist."""
+    """Create all tables (if missing), then patch any new columns/indexes."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await _run_migrations(conn)
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
