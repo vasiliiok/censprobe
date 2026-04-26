@@ -43,6 +43,11 @@ _GIT_LOCK_PATH = Path(
 # weakening StrictHostKeyChecking to "no".
 _SSH_KNOWN_HOSTS = os.getenv("CENSPROBE_KNOWN_HOSTS", "/tmp/censprobe_known_hosts")
 
+# Committer identity is configurable per-deployment so a second operator
+# can run censprobe without commits being attributed to the original author.
+_GIT_NAME = os.getenv("CENSPROBE_GIT_NAME", "censprobe-bot")
+_GIT_EMAIL = os.getenv("CENSPROBE_GIT_EMAIL", "noreply@censprobe.local")
+
 GIT_ENV = {
     **os.environ,
     "GIT_SSH_COMMAND": (
@@ -50,10 +55,10 @@ GIT_ENV = {
         "-o BatchMode=yes "
         f"-o UserKnownHostsFile={_SSH_KNOWN_HOSTS}"
     ),
-    "GIT_AUTHOR_NAME": "censprobe-bot",
-    "GIT_AUTHOR_EMAIL": "starvasyaa@gmail.com",
-    "GIT_COMMITTER_NAME": "censprobe-bot",
-    "GIT_COMMITTER_EMAIL": "starvasyaa@gmail.com",
+    "GIT_AUTHOR_NAME": _GIT_NAME,
+    "GIT_AUTHOR_EMAIL": _GIT_EMAIL,
+    "GIT_COMMITTER_NAME": _GIT_NAME,
+    "GIT_COMMITTER_EMAIL": _GIT_EMAIL,
 }
 
 

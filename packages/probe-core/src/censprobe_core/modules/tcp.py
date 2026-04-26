@@ -2,7 +2,7 @@
 modules/tcp.py — TCP reachability measurement module.
 
 Tests TCP connectivity to (IP, port) pairs using asyncio.open_connection
-(full 3-way handshake — no raw sockets / Scapy).
+(full 3-way handshake — no raw sockets).
 
 Verdicts:
   OK            — connect() succeeded
@@ -16,7 +16,7 @@ Verdicts:
                   mislabeled as RST_INJECTED. Treat this verdict as a hint,
                   not a conclusion.
 
-True TTL-delta analysis requires raw sockets (Scapy or eBPF) and is
+True TTL-delta analysis requires raw sockets (eBPF or similar) and is
 deliberately not implemented in the MVP — we surface the heuristic RTT
 in evidence.rtts_ms so reviewers can sanity-check it.
 """

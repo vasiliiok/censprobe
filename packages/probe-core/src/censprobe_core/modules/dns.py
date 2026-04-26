@@ -36,6 +36,27 @@ from censprobe_core.baseline import BaselineComparator
 
 logger = logging.getLogger(__name__)
 
+# Process-wide HTTP clients for DoH and ASN lookups. Re-used across the
+# whole probe run — fresh httpx.AsyncClient per call meant a new TLS
+# handshake to 1.1.1.1/dns.google for every domain, which inflated DNS
+# RTT readings (we measure them inside the same path).
+_DOH_CLIENT: Optional[httpx.AsyncClient] = None
+_ASN_CLIENT: Optional[httpx.AsyncClient] = None
+
+
+def _get_doh_client() -> httpx.AsyncClient:
+    global _DOH_CLIENT
+    if _DOH_CLIENT is None:
+        _DOH_CLIENT = httpx.AsyncClient(timeout=httpx.Timeout(10.0), http2=True)
+    return _DOH_CLIENT
+
+
+def _get_asn_client() -> httpx.AsyncClient:
+    global _ASN_CLIENT
+    if _ASN_CLIENT is None:
+        _ASN_CLIENT = httpx.AsyncClient(timeout=httpx.Timeout(5.0))
+    return _ASN_CLIENT
+
 # Public DNS resolvers to test
 PUBLIC_RESOLVERS = [
     ("google_1", "8.8.8.8"),
@@ -80,33 +101,33 @@ async def run_dns_tests(
 async def _test_doh_accessibility() -> list[TestResult]:
     """Test whether DoH resolvers are reachable at all."""
     results = []
-    async with httpx.AsyncClient(timeout=httpx.Timeout(10.0), http2=True) as client:
-        for name, url in DOH_RESOLVERS:
-            test_name = f"doh_access_{name}"
-            try:
-                # Send a minimal DoH query for 'example.com'
-                r = await client.get(
-                    url,
-                    params={"name": "example.com", "type": "A"},
-                    headers={"Accept": "application/dns-json"},
-                )
-                verdict = Verdict.OK if r.status_code == 200 else Verdict.ANOMALY
-                results.append(TestResult(
-                    test=test_name,
-                    category="dns",
-                    target=url,
-                    verdict=verdict,
-                    evidence={"status_code": r.status_code},
-                ))
-            except Exception as e:
-                results.append(TestResult(
-                    test=test_name,
-                    category="dns",
-                    target=url,
-                    verdict=Verdict.BLOCKED,
-                    method=BlockingMethod.DOH_BLOCKED,
-                    evidence={"error": str(e)},
-                ))
+    client = _get_doh_client()
+    for name, url in DOH_RESOLVERS:
+        test_name = f"doh_access_{name}"
+        try:
+            # Send a minimal DoH query for 'example.com'
+            r = await client.get(
+                url,
+                params={"name": "example.com", "type": "A"},
+                headers={"Accept": "application/dns-json"},
+            )
+            verdict = Verdict.OK if r.status_code == 200 else Verdict.ANOMALY
+            results.append(TestResult(
+                test=test_name,
+                category="dns",
+                target=url,
+                verdict=verdict,
+                evidence={"status_code": r.status_code},
+            ))
+        except Exception as e:
+            results.append(TestResult(
+                test=test_name,
+                category="dns",
+                target=url,
+                verdict=Verdict.BLOCKED,
+                method=BlockingMethod.DOH_BLOCKED,
+                evidence={"error": str(e)},
+            ))
     return results
 
 
@@ -296,19 +317,19 @@ async def _resolve_via(domain: str, nameserver_ip: str) -> tuple[list[str], bool
 async def _resolve_doh(domain: str, url: str) -> list[str]:
     """Resolve via DoH endpoint."""
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0), http2=True) as client:
-            r = await client.get(
-                url,
-                params={"name": domain, "type": "A"},
-                headers={"Accept": "application/dns-json"},
-            )
-            if r.status_code == 200:
-                data = r.json()
-                return [
-                    ans["data"]
-                    for ans in data.get("Answer", [])
-                    if ans.get("type") == 1  # A record
-                ]
+        client = _get_doh_client()
+        r = await client.get(
+            url,
+            params={"name": domain, "type": "A"},
+            headers={"Accept": "application/dns-json"},
+        )
+        if r.status_code == 200:
+            data = r.json()
+            return [
+                ans["data"]
+                for ans in data.get("Answer", [])
+                if ans.get("type") == 1  # A record
+            ]
     except Exception:
         pass
     return []
@@ -369,22 +390,22 @@ async def _ip_to_asn(ip: str) -> Optional[str]:
         return None
 
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as client:
-            r = await client.get(f"http://ip-api.com/json/{ip}?fields=as")
-            if r.status_code == 429:
-                # ip-api returns plaintext 429 with a Retry-After-ish hint;
-                # be conservative and pause for 90s so we don't melt the
-                # whole suite. Don't poison this IP in the cache — once
-                # the backoff expires we want to retry it.
-                _ASN_BACKOFF_UNTIL = now + 90.0
-                return None
-            if r.status_code == 200:
-                data = r.json()
-                raw = data.get("as", "")
-                if raw:
-                    asn = raw.split(" ")[0]  # "AS13335 Cloudflare" → "AS13335"
-                    _ASN_CACHE[ip] = asn
-                    return asn
+        client = _get_asn_client()
+        r = await client.get(f"http://ip-api.com/json/{ip}?fields=as")
+        if r.status_code == 429:
+            # ip-api returns plaintext 429 with a Retry-After-ish hint;
+            # be conservative and pause for 90s so we don't melt the
+            # whole suite. Don't poison this IP in the cache — once
+            # the backoff expires we want to retry it.
+            _ASN_BACKOFF_UNTIL = now + 90.0
+            return None
+        if r.status_code == 200:
+            data = r.json()
+            raw = data.get("as", "")
+            if raw:
+                asn = raw.split(" ")[0]  # "AS13335 Cloudflare" → "AS13335"
+                _ASN_CACHE[ip] = asn
+                return asn
     except Exception:
         pass
     _ASN_CACHE[ip] = None

@@ -9,9 +9,8 @@ description = "Censprobe shared measurement library"
 requires-python = ">=3.11"
 dependencies = [
     "httpx[http2]>=0.27",
-    "dnspython[doh,doq]>=2.6",
+    "dnspython[doh]>=2.6",
     "aiodns>=3.2",
-    "scapy>=2.5",
     "cryptography>=42",
     "pydantic>=2.7",
     "pyyaml>=6.0",
@@ -24,7 +23,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-control = ["numpy>=1.26"]
+control = []
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/censprobe_core"]

@@ -37,6 +37,9 @@ import yaml
 from jinja2 import Environment, FileSystemLoader
 from rich.console import Console
 
+from censprobe_core.models import ListenerReport, TestResult
+from censprobe_core.scoring import compute_scores
+
 logger = logging.getLogger(__name__)
 console = Console()
 
@@ -110,7 +113,6 @@ def _build_context(test_id: str, reports_dir: Path) -> dict[str, Any]:
         meta = yaml.safe_load(meta_path.read_text()) or {}
 
     server: dict = meta.get("server", {})
-    scores_raw: dict = meta.get("scores", {})
 
     # Find latest solo report.
     solo_files = sorted(
@@ -118,14 +120,12 @@ def _build_context(test_id: str, reports_dir: Path) -> dict[str, Any]:
         reverse=True,
     )
     results_all: list[dict] = []
+    solo_data: Optional[dict] = None
     if solo_files:
         solo_data = _load_report(solo_files[0])
         results_all = solo_data.get("results", []) if solo_data else []
-        # Use scores from solo if not in meta
-        if not scores_raw and solo_data:
-            scores_raw = solo_data.get("scores", {})
         if not server and solo_data:
-            server = solo_data.get("server_meta", {})
+            server = solo_data.get("server_meta", {}) or {}
 
     # Group results by category
     by_category: dict[str, list] = defaultdict(list)
@@ -166,16 +166,18 @@ def _build_context(test_id: str, reports_dir: Path) -> dict[str, Any]:
             "results": proto_results,
         })
 
-    # Build score cards
+    # Compute scores fresh from raw solo + listener reports. Solo's saved
+    # JSON intentionally has no `scores` field anymore — the data on disk
+    # might post-date solo's run, so any frozen score would lag.
+    computed = _compute_scores_safely(results_all, listener_files)
     scores = {
-        "Overall": scores_raw.get("overall", 0.0),
-        "Entry":   scores_raw.get("entry_score", 0.0),
-        "Exit":    scores_raw.get("exit_score", 0.0),
-        "Relay":   scores_raw.get("relay_score", 0.0),
+        "Overall": computed.overall if computed else 0.0,
+        "Entry":   computed.entry_score if computed else 0.0,
+        "Exit":    computed.exit_score if computed else 0.0,
+        "Relay":   computed.relay_score if computed else 0.0,
     }
-
-    techniques = scores_raw.get("detected_techniques", [])
-    protocols = scores_raw.get("recommended_protocols", [])
+    techniques = list(computed.detected_techniques) if computed and computed.detected_techniques else []
+    protocols = list(computed.recommended_protocols) if computed and computed.recommended_protocols else []
 
     return {
         "meta": {
@@ -207,6 +209,44 @@ def _load_report(path: Path) -> Optional[dict]:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception as e:
         logger.warning("Could not load %s: %s", path.name, e)
+        return None
+
+
+def _compute_scores_safely(
+    raw_results: list[dict], listener_files: list[Path]
+):
+    """Recompute scores from raw solo results + listener reports.
+
+    Returns a ServerScores or None if input is unusable. Wrapped in
+    broad try/except because reporter is a presentation layer — a
+    schema drift in one report file should never crash the HTML build.
+    """
+    if not raw_results:
+        return None
+    try:
+        solo_models: list[TestResult] = []
+        for r in raw_results:
+            try:
+                solo_models.append(TestResult.model_validate(r))
+            except Exception:
+                continue
+        if not solo_models:
+            return None
+        listener_models: list[ListenerReport] = []
+        for lf in listener_files:
+            data = _load_report(lf)
+            if not isinstance(data, dict):
+                continue
+            try:
+                listener_models.append(ListenerReport.model_validate(data))
+            except Exception:
+                continue
+        return compute_scores(
+            solo_results=solo_models,
+            listener_reports=listener_models or None,
+        )
+    except Exception as e:
+        logger.warning("score computation failed: %s", e)
         return None
 
 

@@ -70,8 +70,8 @@ async def detect_server_meta() -> ServerMeta:
     meta.ipv6_available = await _check_ipv6()
 
     # --- Kernel / Distro ---
-    meta.kernel = _detect_kernel()
-    meta.distro = _detect_distro()
+    meta.kernel = detect_kernel()
+    meta.distro = detect_distro()
 
     return meta
 
@@ -191,16 +191,16 @@ async def _check_ipv6() -> bool:
         sock.close()
 
 
-def _detect_kernel() -> str:
-    """Detect kernel version string."""
+def detect_kernel() -> str:
+    """Detect kernel version string. Cheap, no network."""
     try:
         return platform.uname().release
     except Exception:
         return "unknown"
 
 
-def _detect_distro() -> str:
-    """Detect Linux distro from /etc/os-release."""
+def detect_distro() -> str:
+    """Detect Linux distro from /etc/os-release. Cheap, no network."""
     try:
         path = Path("/etc/os-release")
         if path.exists():
@@ -215,6 +215,12 @@ def _detect_distro() -> str:
     except Exception:
         pass
     return platform.system()
+
+
+# Backwards-compatible aliases for any external caller still importing the
+# private names. Internal call sites use the public spelling above.
+_detect_kernel = detect_kernel
+_detect_distro = detect_distro
 
 
 def _guess_provider(as_name: str) -> Optional[str]:

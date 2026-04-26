@@ -36,7 +36,7 @@ from censprobe_core.git_io import git_add_commit_push, git_pull_async
 from censprobe_core.models import ListenerReport, ReportMeta, ServerMeta
 from censprobe_core.runner import ProbeRunner
 from censprobe_core.scoring import compute_scores
-from censprobe_core.server_meta import detect_server_meta
+from censprobe_core.server_meta import detect_distro, detect_kernel, detect_server_meta
 
 # Bootstrap logging (after imports to avoid E402)
 logging.basicConfig(
@@ -127,6 +127,14 @@ async def _async_main(test_id: str, repeats: int, skip_push: bool) -> None:
                 logger.warning("Re-detection also failed: %s", detect_err)
                 server_meta = ServerMeta()
 
+        # Backfill kernel/distro for meta.yaml created before this code
+        # populated those fields. Both detectors are local (uname /
+        # /etc/os-release) so this is cheap and offline-safe.
+        if not server_meta.kernel:
+            server_meta.kernel = detect_kernel()
+        if not server_meta.distro:
+            server_meta.distro = detect_distro()
+
     # ── Step 3: Run all tests ─────────────────────────────────────────────────
     runner = ProbeRunner(workspace=WORKSPACE, test_id=test_id, mode="solo")
 
@@ -144,14 +152,18 @@ async def _async_main(test_id: str, repeats: int, skip_push: bool) -> None:
     if listener_reports:
         console.print(f"[dim]Found {len(listener_reports)} listener session(s) — incorporating into scores[/dim]")
 
-    # ── Step 5: Compute scores ────────────────────────────────────────────────
+    # ── Step 5: Compute scores for the local CLI summary ─────────────────────
+    # Scores are NOT written into the saved JSON — they would be stale the
+    # moment a listener report lands later, and downstream readers
+    # (sync-api, reporter) recompute from raw results + listener data.
+    # Here we use them only to print the operator-facing summary panel.
     scores = compute_scores(solo_results=results, listener_reports=listener_reports or None)
 
     # ── Step 6: Print summary ─────────────────────────────────────────────────
     _print_summary(results, scores)
 
     # ── Step 7: Save report ───────────────────────────────────────────────────
-    report_path = runner.save_report(results, server_meta=server_meta, scores=scores)
+    report_path = runner.save_report(results, server_meta=server_meta)
     console.print(f"[green]Report saved:[/green] {report_path.name}")
 
     # ── Step 8: git push ──────────────────────────────────────────────────────

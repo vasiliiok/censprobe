@@ -21,8 +21,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-import numpy as np
-
 # Tests that record bandwidth in the *top-level* `bandwidth_mbps` evidence
 # key — Method-A throttling targets, in other words. The Method-B SNI probe
 # nests its per-SNI bandwidths under `evidence.runs[*].bandwidth_mbps` and
@@ -300,13 +298,12 @@ def _aggregate_throttling(results: list[TestResult]) -> dict[str, BaselineThrott
     for domain, bw_samples in by_domain.items():
         if len(bw_samples) < 2:
             continue
-        # numpy.percentile uses linear interpolation, which gives correct
-        # percentiles for small N (instead of the previous nearest-rank
-        # implementation that returned sorted[0] for any n<10 and was off
-        # by one for larger n).
-        arr = np.asarray(bw_samples, dtype=float)
-        p10 = float(np.percentile(arr, 10))
-        p50 = float(np.percentile(arr, 50))
+        # statistics.quantiles(method="inclusive") uses linear interpolation
+        # between order statistics, matching numpy.percentile's default.
+        # n=10 gives the nine deciles [p10, p20, ..., p90]; we want p10 and p50.
+        deciles = statistics.quantiles(bw_samples, n=10, method="inclusive")
+        p10 = deciles[0]
+        p50 = deciles[4]
         baseline_thr[domain] = BaselineThrottlingEntry(
             bandwidth_mbps_p10=round(p10, 2),
             bandwidth_mbps_p50=round(p50, 2),

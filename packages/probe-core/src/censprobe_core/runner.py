@@ -19,7 +19,6 @@ from censprobe_core.baseline import BaselineComparator, load_baseline
 from censprobe_core.models import (
     BaselineData,
     ServerMeta,
-    ServerScores,
     TestResult,
 )
 from censprobe_core.modules import dns, tcp, tls, http, telegram, throttling, middlebox, protocols
@@ -72,98 +71,74 @@ class ProbeRunner:
     async def run_all(self, repeats: int = 3) -> list[TestResult]:
         """Run all measurement modules and return aggregated results.
 
-        Tracks per-module failures in ``self.module_failures`` so the report
-        summary can surface which phases produced no data — otherwise scoring
-        on partial results silently degrades to neutral 50% and the operator
-        has no signal that half the measurements are missing.
+        Module phases:
+
+          phase A (parallel, network I/O — each module has internal
+            semaphore throttling, so concurrent execution does not flood
+            the link): DNS, TCP, TLS, HTTP, Telegram, Protocol signatures.
+
+          phase B (serial, timing-sensitive — bandwidth and RTT
+            measurements must run on a quiet uplink to avoid biasing
+            the numbers): Throttling, then Middlebox.
+
+        Per-module failures are tracked in ``self.module_failures`` so the
+        report summary can surface which phases produced no data —
+        otherwise scoring on partial results silently degrades to neutral
+        50% and the operator has no signal that half the measurements are
+        missing.
         """
         results: list[TestResult] = []
         self.module_failures: list[str] = []
 
         logger.info("[%s] Starting probe run (mode=%s, repeats=%d)", self.test_id, self.mode, repeats)
 
-        # ── 1. DNS ────────────────────────────────────────────────────────────
-        logger.info("[%s] Running DNS tests...", self.test_id)
+        # ── Phase A: parallel network I/O ─────────────────────────────────────
         dns_domains = self._collect_dns_domains()
-        try:
-            dns_results = await dns.run_dns_tests(dns_domains, self.comparator, repeats)
-            results.extend(dns_results)
-            logger.info("[%s] DNS: %d results", self.test_id, len(dns_results))
-        except Exception:
-            logger.exception("[%s] DNS module failed", self.test_id)
-            self.module_failures.append("dns")
-
-        # ── 2. TCP ────────────────────────────────────────────────────────────
-        logger.info("[%s] Running TCP reachability tests...", self.test_id)
         tcp_targets = self._collect_tcp_targets()
-        try:
-            tcp_results = await tcp.run_tcp_tests(tcp_targets, repeats)
-            results.extend(tcp_results)
-            logger.info("[%s] TCP: %d results", self.test_id, len(tcp_results))
-        except Exception:
-            logger.exception("[%s] TCP module failed", self.test_id)
-            self.module_failures.append("tcp")
-
-        # ── 3. TLS/SNI ───────────────────────────────────────────────────────
-        logger.info("[%s] Running TLS/SNI tests...", self.test_id)
         tls_targets = self._collect_tls_targets()
-        try:
-            tls_results = await tls.run_tls_tests(tls_targets, repeats, self.comparator)
-            results.extend(tls_results)
-            logger.info("[%s] TLS: %d results", self.test_id, len(tls_results))
-        except Exception:
-            logger.exception("[%s] TLS module failed", self.test_id)
-            self.module_failures.append("tls")
-
-        # ── 4. HTTP/HTTPS ─────────────────────────────────────────────────────
-        logger.info("[%s] Running HTTP tests...", self.test_id)
         http_targets = self._collect_http_targets()
-        try:
-            http_results = await http.run_http_tests(http_targets, self.comparator, repeats)
-            results.extend(http_results)
-            logger.info("[%s] HTTP: %d results", self.test_id, len(http_results))
-        except Exception:
-            logger.exception("[%s] HTTP module failed", self.test_id)
-            self.module_failures.append("http")
 
-        # ── 5. Telegram ───────────────────────────────────────────────────────
-        logger.info("[%s] Running Telegram tests...", self.test_id)
-        try:
-            tg_results = await telegram.run_telegram_tests(self.comparator)
-            results.extend(tg_results)
-            logger.info("[%s] Telegram: %d results", self.test_id, len(tg_results))
-        except Exception:
-            logger.exception("[%s] Telegram module failed", self.test_id)
-            self.module_failures.append("telegram")
+        async def _run_module(name: str, coro):
+            try:
+                return name, await coro, None
+            except Exception as e:
+                return name, None, e
 
-        # ── 6. Throttling (Method A + B) ──────────────────────────────────────
-        logger.info("[%s] Running throttling tests...", self.test_id)
+        logger.info("[%s] Phase A: running 6 modules in parallel...", self.test_id)
+        phase_a = await asyncio.gather(
+            _run_module("dns", dns.run_dns_tests(dns_domains, self.comparator, repeats)),
+            _run_module("tcp", tcp.run_tcp_tests(tcp_targets, repeats)),
+            _run_module("tls", tls.run_tls_tests(tls_targets, repeats, self.comparator)),
+            _run_module("http", http.run_http_tests(http_targets, self.comparator, repeats)),
+            _run_module("telegram", telegram.run_telegram_tests(self.comparator)),
+            _run_module("protocols", protocols.run_protocol_tests(control_endpoints=None)),
+        )
+        for name, mod_results, err in phase_a:
+            if err is not None:
+                logger.error("[%s] %s module failed: %s", self.test_id, name, err, exc_info=err)
+                self.module_failures.append(name)
+            else:
+                results.extend(mod_results)
+                logger.info("[%s] %s: %d results", self.test_id, name, len(mod_results))
+
+        # ── Phase B: timing-sensitive, serial ─────────────────────────────────
+        logger.info("[%s] Phase B: running throttling tests...", self.test_id)
         try:
             thr_results = await throttling.run_throttling_tests(self.comparator)
             results.extend(thr_results)
-            logger.info("[%s] Throttling: %d results", self.test_id, len(thr_results))
+            logger.info("[%s] throttling: %d results", self.test_id, len(thr_results))
         except Exception:
-            logger.exception("[%s] Throttling module failed", self.test_id)
+            logger.exception("[%s] throttling module failed", self.test_id)
             self.module_failures.append("throttling")
 
-        # ── 7. Middlebox ──────────────────────────────────────────────────────
-        logger.info("[%s] Running middlebox tests...", self.test_id)
+        logger.info("[%s] Phase B: running middlebox tests...", self.test_id)
         try:
             mb_results = await middlebox.run_middlebox_tests()
             results.extend(mb_results)
-            logger.info("[%s] Middlebox: %d results", self.test_id, len(mb_results))
+            logger.info("[%s] middlebox: %d results", self.test_id, len(mb_results))
         except Exception:
-            logger.exception("[%s] Middlebox module failed", self.test_id)
+            logger.exception("[%s] middlebox module failed", self.test_id)
             self.module_failures.append("middlebox")
-
-        # ── 8. Protocol signatures (solo-only, no listener needed) ────────────
-        logger.info("[%s] Protocol signature tests...", self.test_id)
-        try:
-            proto_results = await protocols.run_protocol_tests(control_endpoints=None)
-            results.extend(proto_results)
-        except Exception:
-            logger.exception("[%s] Protocol module failed", self.test_id)
-            self.module_failures.append("protocols")
 
         if self.module_failures:
             logger.warning(
@@ -262,11 +237,16 @@ class ProbeRunner:
         self,
         results: list[TestResult],
         server_meta: Optional[ServerMeta] = None,
-        scores: Optional[ServerScores] = None,
         output_path: Optional[Path] = None,
     ) -> Path:
         """
         Serialize results as pretty JSON and save.
+
+        The report intentionally carries only raw measurement data — no
+        ``scores`` field. Solo runs BEFORE listener, so any scores baked
+        in here would freeze protocol-reachability at its neutral default
+        and mislead every downstream reader. Sync-api and reporter recompute
+        scores on demand from raw results + listener data.
 
         Reports are plain .json: git's pack format already deflates textual
         blobs with zlib and computes delta chains across revisions, so
@@ -290,7 +270,6 @@ class ProbeRunner:
             "probe_core_version": "0.1.0",
             "baseline_version": self.baseline.version,
             "server_meta": server_meta.model_dump() if server_meta else None,
-            "scores": scores.model_dump() if scores else None,
             "results": [r.model_dump(mode="json") for r in results],
             "summary": _summarize(results, module_failures=list(self.module_failures)),
         }

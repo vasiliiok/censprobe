@@ -25,8 +25,24 @@ import ssl
 import time
 from typing import Optional
 
+import httpx
+
 from censprobe_core.baseline import BaselineComparator
 from censprobe_core.models import TestResult, Verdict, BlockingMethod
+
+# Process-wide DoH client. Instantiating httpx.AsyncClient per resolve()
+# call meant a fresh TLS handshake to 1.1.1.1 every time, which inflated
+# both the DoH RTT and the wall-clock cost of TLS phase. Reusing one
+# client across the whole probe run lets the TCP/TLS connection to
+# Cloudflare stay warm.
+_DOH_CLIENT: Optional[httpx.AsyncClient] = None
+
+
+def _get_doh_client() -> httpx.AsyncClient:
+    global _DOH_CLIENT
+    if _DOH_CLIENT is None:
+        _DOH_CLIENT = httpx.AsyncClient(timeout=httpx.Timeout(5.0))
+    return _DOH_CLIENT
 
 logger = logging.getLogger(__name__)
 
@@ -441,18 +457,17 @@ async def _resolve_ip(domain: str) -> Optional[str]:
     """
     # 1) DoH (Cloudflare) — cleartext-immune to local DNS poisoning.
     try:
-        import httpx
-        async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as client:
-            r = await client.get(
-                "https://cloudflare-dns.com/dns-query",
-                params={"name": domain, "type": "A"},
-                headers={"Accept": "application/dns-json"},
-            )
-            if r.status_code == 200:
-                data = r.json()
-                for ans in data.get("Answer", []):
-                    if ans.get("type") == 1 and ans.get("data"):
-                        return ans["data"]
+        client = _get_doh_client()
+        r = await client.get(
+            "https://cloudflare-dns.com/dns-query",
+            params={"name": domain, "type": "A"},
+            headers={"Accept": "application/dns-json"},
+        )
+        if r.status_code == 200:
+            data = r.json()
+            for ans in data.get("Answer", []):
+                if ans.get("type") == 1 and ans.get("data"):
+                    return ans["data"]
     except Exception:
         pass
 

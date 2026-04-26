@@ -11,17 +11,6 @@ version = "0.1.0"
 description = "Censorship Probe — distributed VPN censorship measurement system"
 requires-python = ">=3.11"
 
-[tool.uv.workspace]
-members = [
-    "packages/probe-core",
-    "packages/solo",
-    "packages/listener",
-    "packages/client",
-    "packages/control",
-    "packages/dashboard/sync-api",
-    "packages/reporter",
-]
-
 [tool.ruff]
 line-length = 100
 target-version = "py311"

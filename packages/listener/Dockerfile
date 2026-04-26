@@ -83,8 +83,10 @@ RUN pip install --no-cache-dir /tmp/probe-core /tmp/listener
 # safe.directory '*' is required because /workspace is bind-mounted from
 # the host with different ownership; git 2.35+ aborts with "detected
 # dubious ownership" otherwise.
-RUN git config --global user.email "starvasyaa@gmail.com" && \
-    git config --global user.name "censprobe-bot" && \
+ARG CENSPROBE_GIT_EMAIL=noreply@censprobe.local
+ARG CENSPROBE_GIT_NAME=censprobe-bot
+RUN git config --global user.email "${CENSPROBE_GIT_EMAIL}" && \
+    git config --global user.name "${CENSPROBE_GIT_NAME}" && \
     git config --global pull.rebase true && \
     git config --global --add safe.directory '*' && \
     mkdir -p /root/.ssh && \
