@@ -11,12 +11,25 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import tempfile
 from pathlib import Path
 
 from censprobe_listener.echo_server import ECHO_PORTS
 
 logger = logging.getLogger(__name__)
+
+
+def _write_secret(path: Path, content: str) -> None:
+    """Create `path` mode 0o600 — config holds the Reality server private key."""
+    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        fh = os.fdopen(fd, "w", encoding="utf-8")
+    except BaseException:
+        os.close(fd)
+        raise
+    with fh:
+        fh.write(content)
 
 
 class VlessRealityResponder:
@@ -106,7 +119,7 @@ class VlessRealityResponder:
         }
 
         conf_path = tmpdir / "config.json"
-        conf_path.write_text(json.dumps(config, indent=2))
+        _write_secret(conf_path, json.dumps(config, indent=2))
 
         self._proc = await asyncio.create_subprocess_exec(
             "xray", "run", "-c", str(conf_path),

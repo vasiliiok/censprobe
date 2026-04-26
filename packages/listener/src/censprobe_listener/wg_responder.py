@@ -13,11 +13,31 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import subprocess
 import tempfile
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+def _write_secret(path: Path, content: str) -> None:
+    """Atomically create `path` with mode 0o600 and write `content`.
+
+    Using `Path.write_text` + `Path.chmod` opens a TOCTOU window during
+    which the freshly-created file inherits the process umask (typically
+    0o022 → world-readable). The contents here include WG/AWG server
+    private keys and pre-shared keys; writing them to a world-readable
+    path on a multi-tenant host even briefly is a real exposure.
+    """
+    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        fh = os.fdopen(fd, "w", encoding="utf-8")
+    except BaseException:
+        os.close(fd)
+        raise
+    with fh:
+        fh.write(content)
 
 _WG_INTERFACE = "censwg0"
 
@@ -33,11 +53,19 @@ def _rm_awg_socket(iface: str) -> None:
     except OSError:
         pass
 
-# A pure WireGuard handshake (initiation 148 + response 92 bytes) already
-# pushes rx well above any small constant. To distinguish "handshake only"
-# from "handshake + real data", require rx to exceed the worst-case
-# handshake-plus-keepalive budget (~148 + a few 32-byte keepalives).
-_MIN_ECHO_BYTES = 250
+# `wg show <iface> transfer` reports the kernel's `peer->rx_bytes` counter,
+# which (linux drivers/net/wireguard/receive.c) is incremented only for
+# *transport* messages (type 4). Handshake messages are accounted
+# separately via `latest-handshakes` and DO NOT contribute to rx_bytes.
+#
+#   - empty keepalive  → message_data_len(0) = 32 bytes
+#   - one IPv4 ping    → message_data_len(padded(84)) ≈ 128 bytes
+#
+# So the threshold must sit above a single keepalive (32) but below a
+# single ping (~128) to register a single-shot `ping -c 1` probe as
+# "data ok". 250 — the previous value — required ≥2 pings and caused
+# false HANDSHAKE_ONLY verdicts on otherwise-working tunnels.
+_MIN_ECHO_BYTES = 64
 
 
 def _read_wg_transfer(interface: str, tool: str = "wg") -> tuple[int, int, int]:
@@ -100,14 +128,16 @@ class WireGuardResponder:
         self._tmpdir: tempfile.TemporaryDirectory | None = None
         self._final_hs_count: int = 0
         self._final_rx_bytes: int = 0
+        self._snapshot_taken: bool = False
 
     async def start(self) -> None:
         self._tmpdir = tempfile.TemporaryDirectory(prefix="censprobe_wg_")
         tmpdir = Path(self._tmpdir.name)
 
+        # `0o600` on creation, not after — write_text(...)+chmod is a TOCTOU
+        # window during which the privatekey is world-readable.
         pk_path = tmpdir / "privatekey"
-        pk_path.write_text(self.server_private_key)
-        pk_path.chmod(0o600)
+        _write_secret(pk_path, self.server_private_key)
 
         # The kernel `wg setconf` parser rejects `Address =` — that's a
         # wg-quick bash-wrapper directive, not a kernel-interface key. The
@@ -126,9 +156,10 @@ PublicKey = {self.client_public_key}
 PresharedKey = {self.preshared_key}
 AllowedIPs = 10.202.0.2/32
 """
+        # Config has the server PrivateKey + PSK inline → must be 0o600
+        # from the moment it touches disk.
         conf_path = tmpdir / f"{self.interface}.conf"
-        conf_path.write_text(config)
-        conf_path.chmod(0o600)
+        _write_secret(conf_path, config)
 
         loop = asyncio.get_running_loop()
 
@@ -167,9 +198,10 @@ AllowedIPs = 10.202.0.2/32
 
     async def stop(self) -> None:
         # Snapshot peer stats BEFORE tearing the interface down.
-        hs, rx, _ = _read_wg_transfer(self.interface)
+        hs, rx, _ = _read_wg_transfer(self.interface, tool="wg")
         self._final_hs_count = hs
         self._final_rx_bytes = rx
+        self._snapshot_taken = True
 
         loop = asyncio.get_running_loop()
 
@@ -198,14 +230,17 @@ AllowedIPs = 10.202.0.2/32
 
     @property
     def connection_count(self) -> int:
-        if self._final_hs_count:
+        # After stop() the snapshot is canonical even when zero — falling
+        # through to a live `wg show` of a torn-down interface returns 0
+        # AND emits a noisy stderr error.
+        if self._snapshot_taken:
             return self._final_hs_count
         hs, _, _ = _read_wg_transfer(self.interface, tool="wg")
         return hs
 
     @property
     def data_transfer_ok(self) -> bool:
-        if self._final_rx_bytes:
+        if self._snapshot_taken:
             return self._final_rx_bytes > _MIN_ECHO_BYTES
         _, rx, _ = _read_wg_transfer(self.interface, tool="wg")
         return rx > _MIN_ECHO_BYTES
@@ -243,6 +278,7 @@ class AmneziaWGResponder:
         self._conf_path: Path | None = None
         self._final_hs_count: int = 0
         self._final_rx_bytes: int = 0
+        self._snapshot_taken: bool = False
 
     async def start(self) -> None:
         self._tmpdir = tempfile.TemporaryDirectory(prefix="censprobe_awg_")
@@ -267,9 +303,9 @@ PublicKey = {self.client_public_key}
 PresharedKey = {self.preshared_key}
 AllowedIPs = 10.201.0.2/32
 """
+        # Inline server PrivateKey / PSK → write 0o600 from the start.
         self._conf_path = tmpdir / f"{self.interface}.conf"
-        self._conf_path.write_text(config)
-        self._conf_path.chmod(0o600)
+        _write_secret(self._conf_path, config)
 
         loop = asyncio.get_running_loop()
 
@@ -302,6 +338,7 @@ AllowedIPs = 10.201.0.2/32
         hs, rx, _ = _read_wg_transfer(self.interface, tool="awg")
         self._final_hs_count = hs
         self._final_rx_bytes = rx
+        self._snapshot_taken = True
 
         if self._tmpdir and self._conf_path:
             loop = asyncio.get_running_loop()
@@ -337,14 +374,14 @@ AllowedIPs = 10.201.0.2/32
 
     @property
     def connection_count(self) -> int:
-        if self._final_hs_count:
+        if self._snapshot_taken:
             return self._final_hs_count
         hs, _, _ = _read_wg_transfer(self.interface, tool="awg")
         return hs
 
     @property
     def data_transfer_ok(self) -> bool:
-        if self._final_rx_bytes:
+        if self._snapshot_taken:
             return self._final_rx_bytes > _MIN_ECHO_BYTES
         _, rx, _ = _read_wg_transfer(self.interface, tool="awg")
         return rx > _MIN_ECHO_BYTES
