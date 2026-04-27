@@ -1,0 +1,170 @@
+{
+  "title": "05 — Technique Attribution",
+  "uid": "censprobe-05",
+  "tags": [
+    "censprobe"
+  ],
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "templating": {
+    "list": [
+      {
+        "name": "test_id",
+        "label": "Test ID",
+        "type": "query",
+        "datasource": {
+          "type": "postgres",
+          "uid": "DS_CENSPROBE_PG"
+        },
+        "query": "SELECT test_id FROM test_runs ORDER BY created_at DESC",
+        "refresh": 2
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Censorship Techniques — Count by Type",
+      "type": "barchart",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 9
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "DS_CENSPROBE_PG"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT method, COUNT(*) AS detections FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND method IS NOT NULL GROUP BY method ORDER BY detections DESC",
+          "format": "table",
+          "refId": "A",
+          "editorMode": "code",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "DS_CENSPROBE_PG"
+          }
+        }
+      ],
+      "options": {
+        "xField": "method"
+      }
+    },
+    {
+      "id": 2,
+      "title": "Technique × Category Matrix",
+      "type": "table",
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 9
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "DS_CENSPROBE_PG"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT method, category, COUNT(*) AS affected FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND method IS NOT NULL GROUP BY method, category ORDER BY method, affected DESC",
+          "format": "table",
+          "refId": "A",
+          "editorMode": "code",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "DS_CENSPROBE_PG"
+          }
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "DNS Poisoning Details",
+      "type": "table",
+      "gridPos": {
+        "x": 0,
+        "y": 9,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "DS_CENSPROBE_PG"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT target, verdict, method, notes FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND category = 'dns' AND verdict NOT IN ('OK','INCONCLUSIVE') ORDER BY target",
+          "format": "table",
+          "refId": "A",
+          "editorMode": "code",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "DS_CENSPROBE_PG"
+          }
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Throttling Evidence",
+      "type": "table",
+      "gridPos": {
+        "x": 12,
+        "y": 9,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "DS_CENSPROBE_PG"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT test, target, verdict, method, rtt_ms FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND category = 'throttling' ORDER BY verdict DESC",
+          "format": "table",
+          "refId": "A",
+          "editorMode": "code",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "DS_CENSPROBE_PG"
+          }
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Middlebox Detection",
+      "type": "table",
+      "gridPos": {
+        "x": 0,
+        "y": 17,
+        "w": 24,
+        "h": 6
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "DS_CENSPROBE_PG"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT test, target, verdict, method, notes FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND category = 'middlebox' ORDER BY verdict DESC",
+          "format": "table",
+          "refId": "A",
+          "editorMode": "code",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "DS_CENSPROBE_PG"
+          }
+        }
+      ]
+    }
+  ]
+}

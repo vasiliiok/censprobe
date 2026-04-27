@@ -1,0 +1,80 @@
+# Telegram endpoints — April 2026
+# Source: official Telegram documentation + community verification
+
+api_datacenters:
+  - id: 1
+    name: pluto
+    location: Miami
+    ipv4: 149.154.175.53
+    ipv6: "2001:b28:f23d:f001::a"
+    ports: [443, 80, 5222, 2001]
+
+  - id: 2
+    name: venus
+    location: Amsterdam
+    ipv4: 149.154.167.51
+    ipv6: "2001:67c:4e8:f002::a"
+    ports: [443, 80, 5222, 2001]
+
+  - id: 3
+    name: aurora
+    location: Miami
+    ipv4: 149.154.175.100
+    ipv6: "2001:b28:f23d:f003::a"
+    ports: [443, 80, 5222, 2001]
+
+  - id: 4
+    name: vesta
+    location: Amsterdam
+    ipv4: 149.154.167.91
+    ipv6: "2001:67c:4e8:f004::a"
+    ports: [443, 80, 5222, 2001]
+
+  - id: 5
+    name: flora
+    location: Singapore
+    ipv4: 91.108.56.130
+    ipv6: "2001:b28:f23f:f005::a"
+    ports: [443, 80, 5222, 2001]
+
+web:
+  - web.telegram.org
+  - webk.telegram.org
+  - weba.telegram.org
+
+auxiliary:
+  - core.telegram.org
+  - my.telegram.org
+  - translations.telegram.org
+  - t.me
+  - telegram.org
+  - desktop.telegram.org
+  - macos.telegram.org
+
+cdn:
+  # cdn.telegram.org — main CDN (149.154.167.99, cert OK)
+  - cdn.telegram.org
+  # cdn1/cdn5 resolve via telesco.pe but serve *.t.me cert → HTTPS fails;
+  # reconciled to INCONCLUSIVE because control baseline also fails.
+  # Kept here so that a sudden cert-swap in Russia would be detectable.
+  - cdn1.cdn-telegram.org
+  - cdn4.cdn-telegram.org
+  - cdn5.cdn-telegram.org
+  # cdn2 and cdn3 are NXDOMAIN everywhere — removed.
+
+# MTProto ports to test (besides DC ports above)
+mtproto_ports: [443, 80, 5222, 2001]
+
+asn: AS62041
+ip_ranges_v4:
+  - 149.154.160.0/20
+  - 91.108.4.0/22
+  - 91.108.56.0/22
+
+# Scoring weights for telegram_health (Часть 2.5.7)
+health_weights:
+  dc_reachability: 0.40
+  web_access: 0.20
+  cdn_access: 0.15
+  voice_health: 0.15
+  throttling_absence: 0.10

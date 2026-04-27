@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "censprobe-core"
+version = "0.1.0"
+description = "Censprobe shared measurement library"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx[http2]>=0.27",
+    "dnspython[doh]>=2.6",
+    "aiodns>=3.2",
+    "cryptography>=42",
+    "pydantic>=2.7",
+    "pyyaml>=6.0",
+    "click>=8.1",
+    "rich>=13.7",
+    "tenacity>=8.3",
+    "psutil>=5.9",
+    "aiofiles>=23.2",
+    "anyio>=4.4",
+]
+
+[project.optional-dependencies]
+control = []
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/censprobe_core"]
