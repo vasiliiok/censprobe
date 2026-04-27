@@ -6,10 +6,13 @@
 # into the final image.
 
 # ── Stage 1: build AmneziaWG tools and userspace implementation ──────────────
-FROM golang:1.22-bookworm AS awg-builder
+FROM golang:1.24-bookworm AS awg-builder
+
+# GOTOOLCHAIN=auto: if amneziawg-go's go.mod requires a newer patch than the
+# base image ships, Go downloads it automatically instead of aborting.
+ENV GOTOOLCHAIN=auto
 
 # build-essential: C compiler for amneziawg-tools (awg.c + libmnl).
-# golang-go from apt is too old (1.19); the golang: base image provides 1.22.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     build-essential libmnl-dev pkg-config \
