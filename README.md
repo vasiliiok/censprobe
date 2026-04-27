@@ -1,8 +1,8 @@
 # Censprobe
 
-Censprobe — инструмент оценки качества и устойчивости серверов к сетевым блокировкам в России. Инструмент автоматически проверяет достижимость серверов по VPN-протоколам (с учётом DPI) и оценивает качество аплинка сервера (отсутствие BGP-блэкхолов, SNI-блокировок и троттлинга).
+Censprobe — инструмент оценки качества и устойчивости серверов к сетевым блокировкам в России. Автоматически проверяет достижимость публичных ресурсов с аплинка сервера, тестирует VPN-протоколы через DPI и оценивает наличие троттлинга и SNI-блокировок.
 
-Все тесты работают автономно через Docker Compose, а результаты агрегируются в локальный репозиторий для визуализации в Grafana.
+Все тесты работают автономно через Docker Compose, а результаты агрегируются в git-репозиторий для визуализации в Grafana.
 
 ## Архитектура развертывания
 
@@ -10,12 +10,36 @@ Censprobe — инструмент оценки качества и устойч
 
 | Профиль | Где запускается | Назначение |
 |-----------|-----------------|------------|
-| `solo` | RU-сервер | Тестирует видимость публичных ресурсов из аплинка сервера |
+| `solo` | RU-сервер | Тестирует видимость публичных ресурсов с аплинка сервера |
 | `listener` | RU-сервер | Запускает dummy-респондеры 6 VPN-протоколов для приёма handshake от клиента |
-| `client` | Клиентское устройство | Пытается подключиться к listener по VPN-протоколам |
+| `client` | Клиентское устройство | Пытается подключиться к listener по 6 VPN-протоколам |
 | `control` | Чистый EU-сервер | Генерирует эталонный baseline |
 | `dashboard` | Любая машина | Локальная аналитика в Grafana |
 | `reporter` | Любая машина | Генерация HTML/PDF-отчётов |
+
+---
+
+## Первоначальная настройка
+
+Выполните один раз на каждой машине перед первым запуском:
+
+```bash
+git clone https://github.com/<YOUR_GITHUB_USERNAME>/censprobe.git
+cd censprobe
+
+cp .env.example .env
+# Отредактируйте .env: задайте GHCR_OWNER, DB_PASSWORD, GRAFANA_PASSWORD
+```
+
+Минимально необходимые переменные в `.env`:
+
+```bash
+GHCR_OWNER=your-github-username   # ваш username на GitHub (откуда берутся образы ghcr.io)
+DB_PASSWORD=<strong-password>      # пароль PostgreSQL (используется dashboard)
+GRAFANA_PASSWORD=<strong-password> # пароль admin в Grafana
+```
+
+Для генерации паролей: `openssl rand -base64 32`
 
 ---
 
@@ -28,10 +52,7 @@ Censprobe — инструмент оценки качества и устойч
 Запускается на тестируемом RU-сервере. Отвечает на вопрос: *«Заблокировано ли что-то на аплинке провайдера сервера?»*
 
 ```bash
-git clone git@github.com:vasiliiok/censprobe.git
-cd censprobe
-
-TEST_ID=selectel-spb-001 docker compose --profile solo up --build
+TEST_ID=selectel-spb-001 docker compose --profile solo up
 ```
 
 > Дождитесь завершения. Отчёт загрузится в репозиторий автоматически.
@@ -42,25 +63,22 @@ TEST_ID=selectel-spb-001 docker compose --profile solo up --build
 
 ```bash
 TEST_ID=selectel-spb-001 SESSION_ID=client-home-rt-spb \
-  docker compose --profile listener up --build
+  docker compose --profile listener up
 ```
 
-> Listener генерирует credentials и ожидает подключений от Client. После того как Client отработал, нажмите `Ctrl+C` — Listener сохранит и запушит результаты тестирования с этой сессии.
+> Listener генерирует credentials и ожидает подключений от Client. После того как Client отработал, нажмите `Ctrl+C` — Listener сохранит и запушит результаты.
 
 ### Шаг 3. Имитация подключения (Client)
 
 Запускается на клиентской машине (ноутбук, мобильный интернет).
 
 ```bash
-git clone git@github.com:vasiliiok/censprobe.git
-cd censprobe
-
 TEST_ID=selectel-spb-001 SESSION_ID=client-home-rt-spb \
   SERVER_HOST=1.2.3.4 \
-  docker compose --profile client up --build
+  docker compose --profile client up
 ```
 
-> **SERVER_HOST** — IP-адрес тестируемого RU-сервера. Client попробует подключиться по 6 протоколам. После его завершения перейдите в терминал сервера и нажмите `Ctrl+C` в процессе Listener.
+> **SERVER_HOST** — IP-адрес тестируемого RU-сервера. Client попробует подключиться по 6 протоколам. После завершения перейдите в терминал сервера и нажмите `Ctrl+C` в процессе Listener.
 
 ### Шаг 4 (опционально). Тестирование другой клиентской сети
 
@@ -94,6 +112,7 @@ TEST_ID=selectel-spb-001 SESSION_ID=client-mob-mts-msk \
 - `targets/vpn.yaml` — VPN-сервисы
 - `targets/telegram.yaml` — дата-центры Telegram
 - `targets/neutral.yaml` — нейтральные ресурсы (VK, Yandex, Wikipedia)
+- `targets/cloudflare.yaml` — инфраструктура Cloudflare (используется модулем cloudflare)
 
 **Как добавить новый сайт:**
 
@@ -102,7 +121,7 @@ TEST_ID=selectel-spb-001 SESSION_ID=client-mob-mts-msk \
 3. Сделайте `git commit` и `git push`.
 4. Запустите `control` для обновления эталонного baseline.
 
-Порты протоколов настраиваются в `protocols/default.yaml`, отпечатки блокировок — в `signatures/`.
+Порты протоколов по умолчанию задаются в `protocols/default.yaml`, отпечатки блок-страниц — в `signatures/blockpages.yaml`.
 
 ---
 
@@ -110,28 +129,23 @@ TEST_ID=selectel-spb-001 SESSION_ID=client-mob-mts-msk \
 
 ### Локальная аналитика (Grafana)
 
-Запускается на любой машине с SSH-доступом к репозиторию:
+Запускается на любой машине с доступом к репозиторию:
 
 ```bash
-git clone git@github.com:vasiliiok/censprobe.git
-cd censprobe
-
-docker compose --profile dashboard up --build -d
+docker compose --profile dashboard up -d
 ```
 
-1. Откройте `http://localhost:3000` (логин: `admin`, пароль: `admin`).
-2. Чтобы подтянуть новые отчёты, выполните `git pull` в каталоге репозитория на хосте — sync-api сканирует `reports/` в фоне (`CENSPROBE_IMPORT_INTERVAL_SEC`, по умолчанию 60s) и импортирует новые `.json` в Postgres автоматически.
-3. Дашборд **01 — Test Overview** показывает свежие данные после импорта. **07 — Server Suitability** — результаты одного сервера. **06 — Compare Tests** — сравнение двух серверов.
+1. Откройте `http://localhost:3000` — логин `admin`, пароль из `GRAFANA_PASSWORD` в `.env`.
+2. Чтобы подтянуть новые отчёты, выполните `git pull` — sync-api сканирует `reports/` в фоне (`CENSPROBE_IMPORT_INTERVAL_SEC`, по умолчанию 60 с) и импортирует новые `.json` в Postgres автоматически.
+3. Дашборд **01 — Test Overview** показывает свежие данные. **07 — Server Suitability** — результаты одного сервера. **06 — Compare Tests** — сравнение двух серверов.
 
 ### Экспорт в HTML/PDF
-
-Статичный отчёт для конкретного тестирования:
 
 ```bash
 # HTML (по умолчанию)
 TEST_ID=selectel-spb-001 docker compose --profile reporter run --rm reporter
 
-# HTML + PDF (требует WeasyPrint, уже установленного в образе)
+# HTML + PDF (WeasyPrint уже установлен в образе)
 TEST_ID=selectel-spb-001 docker compose --profile reporter run --rm reporter --pdf
 ```
 
@@ -141,26 +155,24 @@ TEST_ID=selectel-spb-001 docker compose --profile reporter run --rm reporter --p
 
 ## Эталонный Baseline (Control)
 
-Для того чтобы отличить блокировку ТСПУ от реальной недоступности сайта (например, 403 от самого ресурса), Censprobe сравнивает результаты с эталонным *baseline*.
+Чтобы отличить блокировку ТСПУ от реальной недоступности сайта (например, 403 от самого ресурса), Censprobe сравнивает результаты с эталонным *baseline* — снимком, сделанным с чистого зарубежного сервера.
 
-Baseline генерируется профилем **control**, который нужно периодически запускать на чистом зарубежном сервере (например, в Германии).
+Baseline генерируется профилем **control** на чистом EU/DE-сервере:
 
 ```bash
-# Выполнять на DE/NL сервере, минимум раз в 1-2 недели
-git clone git@github.com:vasiliiok/censprobe.git
-cd censprobe
-
-RUNS_COUNT=5 CONTROL_ID=control-de-01 \
-  docker compose --profile control up --build
+# Выполнять на DE/NL сервере, минимум раз в 1–2 недели
+docker compose --profile control up
 ```
 
-Эталон сохранится в `baseline/latest.json`. Рекомендуется обновлять его перед проведением серии тестов новых серверов.
+`CONTROL_ID` и `CONTROL_COUNTRY` задаются в `.env` (по умолчанию: `control-de-01` и `DE`). Количество повторных замеров — `RUNS_COUNT` (по умолчанию: 5).
+
+Эталон сохранится в `baseline/latest.json`. Рекомендуется обновлять его перед серией тестов новых серверов.
 
 ---
 
 ## Ручная публикация результатов (при недоступности GitHub)
 
-Если `git push` не удаётся (GitHub заблокирован из текущей сети, сетевые ограничения), система уведомит вас об этом и предложит действия. Все результаты всегда сохраняются локально.
+Если `git push` не удаётся (GitHub заблокирован из текущей сети), система уведомит вас и предложит действия. Все результаты всегда сохраняются локально.
 
 ### Вариант 1: Повторный push
 
@@ -172,8 +184,6 @@ git push
 ```
 
 ### Вариант 2: Ручное копирование файлов
-
-Если доступ к GitHub невозможен на данной машине, скопируйте файлы отчётов вручную:
 
 ```bash
 # С тестового сервера (solo/listener):
@@ -200,16 +210,24 @@ scp /workspace/reports/<TEST_ID>/protocols.yaml \
 
 ## Переменные окружения
 
+Все переменные задаются в `.env` (скопируйте из `.env.example`). Переменные с пометкой **required** обязательны — без них контейнеры не запустятся.
+
 | Переменная | Профили | Описание |
 |------------|---------|----------|
+| `GHCR_OWNER` | все | **required** — GitHub username/org, из которого берутся образы `ghcr.io` |
+| `DB_PASSWORD` | dashboard | **required** — пароль PostgreSQL |
+| `GRAFANA_PASSWORD` | dashboard | **required** — пароль admin Grafana |
 | `TEST_ID` | solo, listener, client, reporter | Идентификатор сервера (например, `selectel-spb-001`) |
-| `SESSION_ID` | listener, client | Идентификатор сети клиента (например, `client-home-rt-spb`) |
+| `SESSION_ID` | listener, client | Идентификатор клиентской сети (например, `client-home-rt-spb`) |
 | `SERVER_HOST` | client | IPv4-адрес сервера с Listener |
-| `RUNS_COUNT` | solo, control | Количество повторных замеров (Solo: 3, Control: 5) |
+| `RUNS_COUNT` | solo, control | Количество повторных замеров (solo: 3, control: 5) |
+| `GHCR_TAG` | все | Тег образа (по умолчанию: `main`) |
 | `CONTROL_ID` | control | Идентификатор эталонного сервера (по умолчанию: `control-de-01`) |
 | `CONTROL_COUNTRY` | control | Страна эталонного сервера (по умолчанию: `DE`) |
-| `DB_PASSWORD` | dashboard | Пароль PostgreSQL (по умолчанию: `censprobe`) |
-| `GRAFANA_PASSWORD` | dashboard | Пароль администратора Grafana (по умолчанию: `admin`) |
+| `IPAPI_IS_KEY` | solo, listener, client, control | API-ключ ipapi.is для ASN/geo (без ключа — бесплатный tier) |
+| `CENSPROBE_GIT_EMAIL` | solo, listener, client, control | Email git-коммитов внутри контейнеров (по умолчанию: `noreply@censprobe.local`) |
+| `CENSPROBE_GIT_NAME` | solo, listener, client, control | Имя автора git-коммитов (по умолчанию: `censprobe-bot`) |
+| `CENSPROBE_IMPORT_INTERVAL_SEC` | dashboard | Интервал импорта отчётов в Postgres (по умолчанию: 60 с) |
 
 SSH-ключи монтируются через volume: `~/.ssh:/root/.ssh:ro`.
 
@@ -219,25 +237,27 @@ SSH-ключи монтируются через volume: `~/.ssh:/root/.ssh:ro`.
 
 ```
 censprobe/
+├── .env.example                # шаблон для .env
 ├── docker-compose.yml          # профили: solo, listener, client, control, dashboard, reporter
-├── packages/                   # код всех контейнеров
-│   ├── probe-core/             # общая библиотека измерений
-│   ├── solo/
-│   ├── listener/
-│   ├── client/
-│   ├── control/
-│   ├── reporter/
-│   └── dashboard/
+├── packages/                   # исходный код всех контейнеров
+│   ├── probe-core/             # общая библиотека измерений (censprobe_core)
+│   ├── solo/                   # запуск solo-тестирования
+│   ├── listener/               # VPN-респондеры + listener
+│   ├── client/                 # VPN-клиентские пробы
+│   ├── control/                # генератор baseline
+│   ├── reporter/               # генератор HTML/PDF-отчётов
+│   └── dashboard/              # Grafana + sync-api + PostgreSQL
 ├── targets/                    # что тестировать (YAML)
-├── signatures/                 # отпечатки блокировок
-├── protocols/                  # конфигурация VPN-протоколов
+├── signatures/                 # отпечатки блок-страниц
+│   └── blockpages.yaml
+├── protocols/                  # конфигурация VPN-протоколов по умолчанию
 │   └── default.yaml
 ├── baseline/                   # эталон от control-контейнера
 │   ├── latest.json
 │   └── archive/
-├── reports/                    # отчёты испытаний
+├── reports/                    # результаты тестирований
 │   └── <test_id>/
 │       ├── meta.yaml
-│       ├── protocols.yaml
-│       └── *.json
+│       ├── protocols.yaml      # credentials (генерируется listener)
+│       └── *.json              # результаты тестов
 ```
