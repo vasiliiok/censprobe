@@ -25,7 +25,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # would be silently non-functional while reporting success.
 RUN git clone --depth 1 https://github.com/amnezia-vpn/amneziawg-tools.git /tmp/awg-tools && \
     make -C /tmp/awg-tools/src -j"$(nproc)" && \
-    make -C /tmp/awg-tools/src install && \
+    install -m 0755 /tmp/awg-tools/src/awg /usr/local/bin/awg && \
+    install -m 0755 /tmp/awg-tools/src/wg-quick/linux.bash /usr/local/bin/awg-quick && \
     rm -rf /tmp/awg-tools
 
 # Build amneziawg-go → /usr/local/bin/amneziawg-go.
