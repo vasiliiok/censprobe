@@ -1,0 +1,166 @@
+{
+  "title": "04 — VPN Reachability",
+  "uid": "censprobe-04",
+  "tags": [
+    "censprobe"
+  ],
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "templating": {
+    "list": [
+      {
+        "name": "test_id",
+        "label": "Test ID",
+        "type": "query",
+        "datasource": {
+          "type": "postgres",
+          "uid": "DS_CENSPROBE_PG"
+        },
+        "query": "SELECT test_id FROM test_runs ORDER BY created_at DESC",
+        "refresh": 2
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Protocol × Session Reachability Matrix",
+      "description": "Rows = client sessions, Cols = protocols",
+      "type": "table",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 12
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "DS_CENSPROBE_PG"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT ls.session_id, pr.protocol, pr.verdict, pr.handshake_count, pr.data_transfer_ok, pr.avg_rtt_ms, pr.from_asn FROM protocol_results pr JOIN listener_sessions ls ON ls.id = pr.session_id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE tr.test_id = ${test_id:sqlstring} ORDER BY ls.session_id, pr.protocol",
+          "format": "table",
+          "refId": "A",
+          "editorMode": "code",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "DS_CENSPROBE_PG"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "verdict"
+            },
+            "properties": [
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "OK": {
+                        "color": "green",
+                        "text": "✓ CONNECTED"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "BLOCKED": {
+                        "color": "red",
+                        "text": "✗ BLOCKED"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "HANDSHAKE_ONLY": {
+                        "color": "yellow",
+                        "text": "~ HS ONLY"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "title": "Protocol Success Rate (across all sessions)",
+      "type": "barchart",
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "DS_CENSPROBE_PG"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT pr.protocol, COUNT(*) FILTER (WHERE pr.verdict = 'OK') AS connected, COUNT(*) FILTER (WHERE pr.verdict = 'HANDSHAKE_ONLY') AS handshake_only, COUNT(*) FILTER (WHERE pr.verdict = 'BLOCKED') AS blocked FROM protocol_results pr JOIN listener_sessions ls ON ls.id = pr.session_id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE tr.test_id = ${test_id:sqlstring} GROUP BY pr.protocol ORDER BY connected DESC",
+          "format": "table",
+          "refId": "A",
+          "editorMode": "code",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "DS_CENSPROBE_PG"
+          }
+        }
+      ],
+      "options": {
+        "xField": "protocol",
+        "stacking": {
+          "mode": "normal"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Listener Sessions",
+      "type": "table",
+      "gridPos": {
+        "x": 12,
+        "y": 12,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "DS_CENSPROBE_PG"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT ls.session_id, ls.started_at, ls.duration_sec, COUNT(pr.id) AS protocols FROM listener_sessions ls LEFT JOIN protocol_results pr ON pr.session_id = ls.id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE tr.test_id = ${test_id:sqlstring} GROUP BY ls.session_id, ls.started_at, ls.duration_sec ORDER BY ls.started_at DESC",
+          "format": "table",
+          "refId": "A",
+          "editorMode": "code",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "DS_CENSPROBE_PG"
+          }
+        }
+      ]
+    }
+  ]
+}

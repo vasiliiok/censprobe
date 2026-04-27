@@ -1,0 +1,460 @@
+"""
+baseline_builder.py — Aggregates N probe runs into baseline/latest.json.
+
+Takes raw TestResult lists from multiple runs and computes:
+  - DNS: union of ASNs across runs, union of observed IPs
+  - TLS: cert chain from first successful run (cert chains don't rotate often)
+  - HTTP: status mode, body_length_range (min-max across runs)
+  - Telegram: reachability (True if reachable in >50% runs), rtt range
+  - Throttling: bandwidth p10/p50/p90 from all window samples
+  - SNI throttling: p50 per SNI label across runs
+
+Output: BaselineData model → written as baseline/latest.json
+        Previous latest.json moved to baseline/archive/<date>.json
+"""
+from __future__ import annotations
+
+import json
+import logging
+import statistics
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, Optional
+
+# Tests that record bandwidth in the *top-level* `bandwidth_mbps` evidence
+# key — Method-A throttling targets, in other words. The Method-B SNI probe
+# nests its per-SNI bandwidths under `evidence.runs[*].bandwidth_mbps` and
+# is aggregated separately by `_aggregate_sni_throttling`; mixing the two
+# would dump pseudo-domains like "speedtest.selectel.ru (SNI=...)" into
+# the throttling map.
+_THROTTLING_METHOD_A_TESTS = {
+    "throttling_cloudflare_baseline",
+    "throttling_selectel_baseline",
+    "throttling_youtube_method_a",
+}
+
+# Special telegram aggregator-meta tests that should NOT be folded into the
+# per-endpoint reachability map; substring matching ("if 'health' in ...")
+# would silently swallow any future test like `telegram_dc1_health_check`.
+_TELEGRAM_AGGREGATE_TESTS = {
+    "telegram_health_score",
+}
+
+from censprobe_core.models import (
+    BaselineControlPoint,
+    BaselineData,
+    BaselineDnsEntry,
+    BaselineHttpEntry,
+    BaselineSniThrottling,
+    BaselineSniThrottlingRun,
+    BaselineTelegramEntry,
+    BaselineTlsEntry,
+    BaselineThrottlingEntry,
+    TestResult,
+    Verdict,
+)
+
+logger = logging.getLogger(__name__)
+
+_WORKSPACE = Path("/workspace")
+_BASELINE_LATEST = _WORKSPACE / "baseline" / "latest.json"
+_BASELINE_ARCHIVE = _WORKSPACE / "baseline" / "archive"
+
+
+def build_baseline(
+    runs: list[list[TestResult]],
+    control_point: BaselineControlPoint,
+    probe_core_version: str = "0.3.0",
+    targets_version: str = "unknown",
+    validity_days: int = 7,
+) -> BaselineData:
+    """
+    Aggregate N probe runs into a BaselineData object.
+
+    Args:
+        runs: list of N probe runs, each a list of TestResult
+        control_point: metadata about the control VPS
+        probe_core_version: version string of probe-core
+        targets_version: version/hash of targets/*.yaml
+        validity_days: how many days until baseline expires
+
+    Returns:
+        BaselineData ready to be saved as latest.json
+    """
+    now = datetime.now(tz=timezone.utc)
+    version = now.strftime("%Y-%m-%d") + f"-control-{control_point.control_id}-01"
+
+    baseline = BaselineData(
+        version=version,
+        generated_at=now,
+        generated_from=control_point,
+        probe_core_version=probe_core_version,
+        targets_version=targets_version,
+        validity_until=now + timedelta(days=validity_days),
+        runs_count=len(runs),
+    )
+
+    # Flatten all results by category for aggregation
+    all_results: list[TestResult] = [r for run in runs for r in run]
+
+    baseline.dns = _aggregate_dns(all_results)
+    baseline.tls = _aggregate_tls(all_results)
+    baseline.http = _aggregate_http(all_results)
+    baseline.telegram = _aggregate_telegram(all_results)
+    baseline.throttling = _aggregate_throttling(all_results)
+    baseline.sni_throttling = _aggregate_sni_throttling(all_results)
+
+    logger.info(
+        "Built baseline %s: dns=%d tls=%d http=%d telegram=%d throttling=%d",
+        version,
+        len(baseline.dns),
+        len(baseline.tls),
+        len(baseline.http),
+        len(baseline.telegram),
+        len(baseline.throttling),
+    )
+    return baseline
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Per-category aggregation
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _aggregate_dns(results: list[TestResult]) -> dict[str, BaselineDnsEntry]:
+    """Union of ASNs / observed IPs and min-max TTL per domain across all runs."""
+    by_domain: dict[str, dict[str, Any]] = {}
+
+    for r in results:
+        if r.category != "dns" or not r.evidence:
+            continue
+        domain = _domain_from_dns_test(r.test, r.target)
+        if not domain:
+            continue
+
+        bucket = by_domain.setdefault(
+            domain, {"a_records_asn": set(), "observed_ips": set(), "ttls": []}
+        )
+
+        ev = r.evidence
+        if asn := ev.get("resolved_asn"):
+            bucket["a_records_asn"].add(asn)
+        for ip in ev.get("system_ips", []):
+            bucket["observed_ips"].add(ip)
+        for ip in ev.get("doh_ips", []):
+            bucket["observed_ips"].add(ip)
+        if (ttl := ev.get("system_ttl")) and isinstance(ttl, (int, float)) and ttl > 0:
+            bucket["ttls"].append(int(ttl))
+
+    out: dict[str, BaselineDnsEntry] = {}
+    for domain, data in by_domain.items():
+        if not data["a_records_asn"]:
+            continue
+        ttls = data["ttls"]
+        # Default range if we never captured a TTL.
+        ttl_range = [min(ttls), max(ttls)] if ttls else [60, 300]
+        out[domain] = BaselineDnsEntry(
+            a_records_asn=sorted(data["a_records_asn"]),
+            observed_ips_v4=sorted(data["observed_ips"]),
+            ttl_range=ttl_range,
+        )
+    return out
+
+
+def _aggregate_tls(results: list[TestResult]) -> dict[str, BaselineTlsEntry]:
+    """Take TLS cert chain + CN from first successful run per domain.
+
+    Entries without any concrete evidence (cert hash / CN) are skipped so the
+    baseline doesn't bloat with empty placeholders.
+    """
+    seen: dict[str, BaselineTlsEntry] = {}
+
+    for r in results:
+        if r.category != "tls" or r.verdict != Verdict.OK or not r.evidence:
+            continue
+
+        domain = _domain_from_tls_target(r.target)
+        if not domain or domain in seen:
+            continue
+
+        cert_chain = r.evidence.get("cert_chain_sha256") or []
+        subject_cn = r.evidence.get("cert_subject_cn")
+        issuer_cn = r.evidence.get("cert_issuer_cn")
+        alpn_raw = r.evidence.get("alpn")
+        alpn = [alpn_raw] if alpn_raw else []
+
+        if not (cert_chain or subject_cn or issuer_cn):
+            # Nothing useful for later comparison — don't waste baseline space.
+            continue
+
+        seen[domain] = BaselineTlsEntry(
+            cert_chain_sha256=cert_chain,
+            cert_subject_cn=subject_cn,
+            cert_issuer_cn=issuer_cn,
+            alpn=alpn,
+        )
+
+    return seen
+
+
+def _aggregate_http(results: list[TestResult]) -> dict[str, BaselineHttpEntry]:
+    """Mode status, min-max body length range per URL."""
+    by_url: dict[str, dict[str, Any]] = {}
+
+    for r in results:
+        if r.category != "http" or not r.evidence:
+            continue
+        url = r.target
+        if url not in by_url:
+            by_url[url] = {"statuses": [], "body_lengths": []}
+
+        if status := r.evidence.get("status"):
+            by_url[url]["statuses"].append(status)
+        if length := r.evidence.get("body_length"):
+            by_url[url]["body_lengths"].append(length)
+
+    baseline_http: dict[str, BaselineHttpEntry] = {}
+    for url, data in by_url.items():
+        statuses = data["statuses"]
+        lengths = data["body_lengths"]
+        if not statuses:
+            continue
+
+        # Mode status
+        mode_status = _mode(statuses) or 200
+        # Body length range: 10% below min to 10% above max for tolerance
+        if lengths:
+            lo = int(min(lengths) * 0.9)
+            hi = int(max(lengths) * 1.1)
+        else:
+            lo, hi = 0, 999999999
+
+        baseline_http[url] = BaselineHttpEntry(
+            status=mode_status,
+            body_length_range=[lo, hi],
+        )
+
+    return baseline_http
+
+
+def _aggregate_telegram(results: list[TestResult]) -> dict[str, BaselineTelegramEntry]:
+    """Telegram endpoint: reachable if >50% runs succeeded, rtt from successful runs."""
+    by_endpoint: dict[str, dict[str, Any]] = {}
+
+    for r in results:
+        if r.category != "telegram" or r.test in _TELEGRAM_AGGREGATE_TESTS:
+            continue
+        key = r.test  # e.g. "telegram_dc1_v4_443"
+        if key not in by_endpoint:
+            by_endpoint[key] = {"total": 0, "ok": 0, "rtts": []}
+
+        by_endpoint[key]["total"] += 1
+        if r.verdict == Verdict.OK:
+            by_endpoint[key]["ok"] += 1
+        if r.rtt_ms is not None and r.verdict == Verdict.OK:
+            by_endpoint[key]["rtts"].append(r.rtt_ms)
+
+    baseline_tg: dict[str, BaselineTelegramEntry] = {}
+    for key, data in by_endpoint.items():
+        if data["total"] == 0:
+            continue
+        reachable = (data["ok"] / data["total"]) > 0.5
+        rtts = data["rtts"]
+        rtt_range = [min(rtts) * 0.8, max(rtts) * 1.2] if rtts else [0.0, 9999.0]
+        baseline_tg[key] = BaselineTelegramEntry(
+            reachable=reachable,
+            rtt_range_ms=rtt_range,
+        )
+
+    return baseline_tg
+
+
+def _aggregate_throttling(results: list[TestResult]) -> dict[str, BaselineThrottlingEntry]:
+    """Bandwidth percentiles (p10/p50) per domain from all Method-A runs.
+
+    Only the Method-A throttling tests have a top-level ``bandwidth_mbps``
+    in evidence; Method-B (SNI probe) nests its per-SNI bandwidths under
+    ``evidence.runs[label].bandwidth_mbps`` and is handled by
+    ``_aggregate_sni_throttling``. Filter by the explicit Method-A test set
+    so we don't accidentally fold in unrelated category="throttling" entries.
+    """
+    by_domain: dict[str, list[float]] = {}
+
+    for r in results:
+        if r.category != "throttling" or not r.evidence:
+            continue
+        if r.test not in _THROTTLING_METHOD_A_TESTS:
+            continue
+        bw = r.evidence.get("bandwidth_mbps")
+        if bw is None or bw <= 0:
+            continue
+        # Domain from target. Strip URL scheme / path, drop any annotation
+        # in parentheses (some tests label the target "<host> (SNI=<sni>)").
+        domain = r.target.replace("https://", "").split("/")[0].split(" (")[0].strip()
+        if not domain:
+            continue
+        by_domain.setdefault(domain, []).append(float(bw))
+
+    baseline_thr: dict[str, BaselineThrottlingEntry] = {}
+    for domain, bw_samples in by_domain.items():
+        if len(bw_samples) < 2:
+            continue
+        # statistics.quantiles(method="inclusive") uses linear interpolation
+        # between order statistics, matching numpy.percentile's default.
+        # n=10 gives the nine deciles [p10, p20, ..., p90]; we want p10 and p50.
+        deciles = statistics.quantiles(bw_samples, n=10, method="inclusive")
+        p10 = deciles[0]
+        p50 = deciles[4]
+        baseline_thr[domain] = BaselineThrottlingEntry(
+            bandwidth_mbps_p10=round(p10, 2),
+            bandwidth_mbps_p50=round(p50, 2),
+        )
+
+    return baseline_thr
+
+
+def _aggregate_sni_throttling(results: list[TestResult]) -> Optional[BaselineSniThrottling]:
+    """Aggregate Method B SNI throttling probe results."""
+    sni_results = [r for r in results if r.test == "throttling_youtube_sni_probe_method_b"]
+    if not sni_results:
+        return None
+
+    # Collect bandwidth per label across all runs
+    by_label: dict[str, list[float]] = {}
+    for r in sni_results:
+        if not r.evidence:
+            continue
+        for label in ("correct_sni", "googlevideo_sni", "typo_sni"):
+            run_data = r.evidence.get("runs", {}).get(label, {})
+            bw = run_data.get("bandwidth_mbps", 0.0)
+            if bw > 0:
+                if label not in by_label:
+                    by_label[label] = []
+                by_label[label].append(float(bw))
+
+    if not by_label:
+        return None
+
+    runs: dict[str, BaselineSniThrottlingRun] = {}
+    sni_map = {
+        "correct_sni": "speedtest.selectel.ru",
+        "googlevideo_sni": "googlevideo.com",
+        "typo_sni": "googleviideo.com",
+    }
+    for label, samples in by_label.items():
+        p50 = statistics.median(samples)
+        runs[label] = BaselineSniThrottlingRun(
+            sni=sni_map.get(label, label),
+            bandwidth_mbps_p50=round(p50, 2),
+            drop_pattern="none",  # on clean uplink all should be consistent
+        )
+
+    return BaselineSniThrottling(
+        target_ip_host="speedtest.selectel.ru",
+        runs=runs,
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Save / archive helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def save_baseline(baseline: BaselineData, workspace: Path = _WORKSPACE) -> Path:
+    """
+    Write baseline to baseline/latest.json.
+    Archive previous latest.json to baseline/archive/<version>.json.
+    """
+    latest = workspace / "baseline" / "latest.json"
+    archive_dir = workspace / "baseline" / "archive"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+
+    # Archive previous if it exists and is not a stub.
+    #
+    # The old logic keyed the archive by `<version>.json` and bailed via
+    # `if not archive_path.exists(): write_text(...)`, which silently
+    # *discarded* the previous baseline whenever two runs landed on the
+    # same version string (version embeds only the date + control_id, so
+    # any two runs on the same control point in one day collide). Append
+    # an archived-at timestamp suffix so subsequent runs always land on a
+    # fresh path; if the timestamp itself collides (unlikely; same UTC
+    # second), fall back to a numeric counter.
+    if latest.exists():
+        try:
+            old_text = latest.read_text()
+            old = json.loads(old_text)
+            old_version = old.get("version", "unknown")
+            if not str(old_version).startswith("stub"):
+                archived_at = datetime.now(tz=timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+                base_name = f"{old_version}-archived-{archived_at}"
+                archive_path = archive_dir / f"{base_name}.json"
+                seq = 1
+                while archive_path.exists():
+                    archive_path = archive_dir / f"{base_name}.{seq}.json"
+                    seq += 1
+                archive_path.write_text(old_text)
+                logger.info("Archived previous baseline → %s", archive_path.name)
+        except Exception as e:
+            logger.warning("Could not archive previous baseline: %s", e)
+
+    # Write new baseline
+    data = json.dumps(
+        baseline.model_dump(mode="json"),
+        ensure_ascii=False,
+        indent=2,
+        default=str,
+    )
+    latest.write_text(data, encoding="utf-8")
+    logger.info("Saved baseline → %s (%d bytes)", latest, len(data))
+    return latest
+
+
+def load_run_from_report(path: Path) -> list[TestResult]:
+    """Load TestResult list from a .json report file."""
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        return [TestResult.model_validate(r) for r in raw.get("results", [])]
+    except Exception as e:
+        logger.error("Failed to load run from %s: %s", path, e)
+        return []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Utilities
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _domain_from_dns_test(test_name: str, target: str) -> Optional[str]:
+    """Extract domain from DNS test name or target."""
+    # test_name like "dns_meduza_io_system" → "meduza.io"
+    # Or just use target directly
+    if "." in target:
+        return target
+    # Try to reconstruct from test name: dns_meduza_io_system
+    parts = test_name.replace("dns_", "").split("_")
+    # Remove trailing "system", "public", etc.
+    trailing = {"system", "public", "doh", "dot", "access"}
+    while parts and parts[-1] in trailing:
+        parts.pop()
+    if parts:
+        return ".".join(parts)
+    return None
+
+
+def _domain_from_tls_target(target: str) -> Optional[str]:
+    """Extract SNI domain from TLS target like '1.2.3.4:meduza.io'.
+
+    IPv6 targets look like '2001:b28:f23d::1:meduza.io' — split(":", 1)
+    would return 'b28:f23d::1:meduza.io'. Use rsplit to take the last
+    colon-delimited segment, which is always the SNI domain.
+    """
+    if ":" in target:
+        return target.rsplit(":", 1)[1]
+    return target if "." in target else None
+
+
+def _mode(values: list) -> Any:
+    """Return most common value in a list."""
+    if not values:
+        return None
+    counts: dict = {}
+    for v in values:
+        counts[v] = counts.get(v, 0) + 1
+    return max(counts, key=counts.get)  # type: ignore[arg-type]

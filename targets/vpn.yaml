@@ -1,0 +1,94 @@
+# VPN & Tor targets — connectivity indicators
+
+# Public VPN services — blocked/not blocked
+vpn_services:
+  - domain: nordvpn.com
+    urls:
+      - https://nordvpn.com/
+    expected_status: 200
+    notes: "NordVPN website"
+
+  - domain: protonvpn.com
+    urls:
+      - https://protonvpn.com/
+    expected_status: 200
+    notes: "Proton VPN website"
+
+  - domain: expressvpn.com
+    urls:
+      - https://www.expressvpn.com/
+    expected_status: 200
+
+  - domain: mullvad.net
+    urls:
+      - https://mullvad.net/
+    expected_status: 200
+
+# Tor directory authorities (9 hardcoded DAs)
+tor_directory_authorities:
+  - name: maatuska
+    ipv4: 171.25.193.9
+    port: 80
+    fingerprint: "BD6A829255CB08E66FBE7D3748363586E46B3810"
+
+  - name: tor26
+    ipv4: 86.59.21.38
+    port: 80
+    fingerprint: "847B1F850344D7876491A54892F904934E4EB85D"
+
+  - name: dizum
+    ipv4: 194.109.206.212
+    port: 80
+    fingerprint: "7EA6EAD6FD83083C538F44038BBFA077587DD755"
+
+  - name: Faravahar
+    ipv4: 154.35.175.225
+    port: 80
+    fingerprint: "CF6D0AAFB385BE71B8E111FC5CFF4B47923733BC"
+
+  - name: gabelmoo
+    ipv4: 131.188.40.189
+    port: 80
+    fingerprint: "F2044413DAC2E02E3D6BCF4735A19BCA1DE97281"
+
+  - name: dannenberg
+    ipv4: 193.23.244.244
+    port: 80
+    fingerprint: "7BE683E65D48141321C5ED92F075C55364AC7123"
+
+  - name: moria1
+    ipv4: 128.31.0.34
+    port: 9131
+    fingerprint: "9695DFC35FFEB861329B9F1AB04C46397020CE31"
+
+  - name: longclaw
+    ipv4: 199.58.81.140
+    port: 80
+    fingerprint: "74A910646BCEEFBCD2E874FC1DC997430F968145"
+
+  - name: bastet
+    ipv4: 204.13.164.118
+    port: 80
+    fingerprint: "24E2F139121D4394C54B5BCC368B3B411857C413"
+
+# Tor public obfs4 bridges (sample — update regularly)
+tor_bridges_obfs4:
+  - "obfs4 209.148.46.65:443 74FAD13168806246602538555B5521A0383A1875 cert=ssH+9rP8dG2NLDN2XuFw63hIO/9MNNinLmxQDpVa+2318LWhbl+Vex1uFH58TimS0LMKiA iat-mode=0"
+  - "obfs4 38.229.1.78:80 C8CBDB2464FC9804A69531437BCF2BE31FDD2EE4 cert=Hmyfd2ev46gGY7NoVxA9ngrPF2zCZtzskRTzoWXbxNkzeVnGFPWmrTtILRyqCTjHR+s8fQ iat-mode=1"
+
+# SNI throttling test targets (Method B)
+throttling_sni:
+  # Primary: YouTube SNI via selectel.ru IP
+  - trigger_sni: googlevideo.com
+    control_ip_host: speedtest.selectel.ru
+    typo_sni: googleviideo.com
+    notes: "Classic ТСПУ YouTube SNI throttling probe"
+
+  # Secondary candidates (if throttling expands)
+  - trigger_sni: instagram.com
+    control_ip_host: speedtest.selectel.ru
+    typo_sni: instaagram.com
+
+  - trigger_sni: fastly.net
+    control_ip_host: speedtest.selectel.ru
+    typo_sni: fastlly.net

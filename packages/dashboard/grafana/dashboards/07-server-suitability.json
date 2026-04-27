@@ -1,0 +1,392 @@
+{
+  "title": "07 — Server Suitability",
+  "uid": "censprobe-07",
+  "tags": [
+    "censprobe"
+  ],
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "test_id",
+        "label": "Test ID",
+        "type": "query",
+        "datasource": {
+          "type": "postgres",
+          "uid": "DS_CENSPROBE_PG"
+        },
+        "query": "SELECT test_id FROM test_runs ORDER BY created_at DESC",
+        "refresh": 2,
+        "multi": false,
+        "includeAll": false
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "VPN Suitability — Overall",
+      "type": "gauge",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 10
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "DS_CENSPROBE_PG"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT overall_score AS \"Score\" FROM test_runs WHERE test_id = ${test_id:sqlstring} LIMIT 1",
+          "format": "table",
+          "refId": "A",
+          "editorMode": "code",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "DS_CENSPROBE_PG"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "max": 100,
+          "unit": "short",
+          "displayName": "Overall",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "orange",
+                "value": 30
+              },
+              {
+                "color": "yellow",
+                "value": 55
+              },
+              {
+                "color": "green",
+                "value": 75
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "As VPN Entry",
+      "type": "gauge",
+      "gridPos": {
+        "x": 6,
+        "y": 0,
+        "w": 6,
+        "h": 5
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "DS_CENSPROBE_PG"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT entry_score AS \"Entry Score\" FROM test_runs WHERE test_id = ${test_id:sqlstring} LIMIT 1",
+          "format": "table",
+          "refId": "A",
+          "editorMode": "code",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "DS_CENSPROBE_PG"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "max": 100,
+          "unit": "short",
+          "displayName": "Entry"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "As VPN Exit",
+      "type": "gauge",
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 6,
+        "h": 5
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "DS_CENSPROBE_PG"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT exit_score AS \"Exit Score\" FROM test_runs WHERE test_id = ${test_id:sqlstring} LIMIT 1",
+          "format": "table",
+          "refId": "A",
+          "editorMode": "code",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "DS_CENSPROBE_PG"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "max": 100,
+          "unit": "short",
+          "displayName": "Exit"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "As Relay Node",
+      "type": "gauge",
+      "gridPos": {
+        "x": 18,
+        "y": 0,
+        "w": 6,
+        "h": 5
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "DS_CENSPROBE_PG"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT relay_score AS \"Relay Score\" FROM test_runs WHERE test_id = ${test_id:sqlstring} LIMIT 1",
+          "format": "table",
+          "refId": "A",
+          "editorMode": "code",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "DS_CENSPROBE_PG"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "max": 100,
+          "unit": "short",
+          "displayName": "Relay"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Protocol Reachability Matrix (by client session)",
+      "type": "table",
+      "gridPos": {
+        "x": 0,
+        "y": 10,
+        "w": 24,
+        "h": 8
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "DS_CENSPROBE_PG"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT ls.session_id, pr.protocol, pr.verdict, pr.handshake_count, pr.data_transfer_ok, pr.avg_rtt_ms, pr.from_asn FROM protocol_results pr JOIN listener_sessions ls ON ls.id = pr.session_id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE tr.test_id = ${test_id:sqlstring} ORDER BY ls.session_id, pr.protocol",
+          "format": "table",
+          "refId": "A",
+          "editorMode": "code",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "DS_CENSPROBE_PG"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "verdict"
+            },
+            "properties": [
+              {
+                "id": "custom.displayMode",
+                "value": "color-text"
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "OK": {
+                        "color": "green",
+                        "text": "✓ OK"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "BLOCKED": {
+                        "color": "red",
+                        "text": "✗ BLOCKED"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "HANDSHAKE_ONLY": {
+                        "color": "yellow",
+                        "text": "~ HANDSHAKE_ONLY"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 6,
+      "title": "Server Uplink — Censorship Techniques",
+      "type": "table",
+      "gridPos": {
+        "x": 0,
+        "y": 18,
+        "w": 12,
+        "h": 7
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "DS_CENSPROBE_PG"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT category, method, COUNT(*) AS affected_tests FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND method IS NOT NULL AND verdict NOT IN ('OK','INCONCLUSIVE') GROUP BY category, method ORDER BY affected_tests DESC",
+          "format": "table",
+          "refId": "A",
+          "editorMode": "code",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "DS_CENSPROBE_PG"
+          }
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Uplink Quality Breakdown",
+      "type": "barchart",
+      "gridPos": {
+        "x": 12,
+        "y": 18,
+        "w": 12,
+        "h": 7
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "DS_CENSPROBE_PG"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT category, COUNT(*) FILTER (WHERE verdict = 'OK') AS ok, COUNT(*) FILTER (WHERE verdict NOT IN ('OK','INCONCLUSIVE','ERROR')) AS blocked FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} GROUP BY category ORDER BY category",
+          "format": "table",
+          "refId": "A",
+          "editorMode": "code",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "DS_CENSPROBE_PG"
+          }
+        }
+      ],
+      "options": {
+        "xField": "category",
+        "stacking": {
+          "mode": "normal"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "title": "Recommended Protocols",
+      "type": "stat",
+      "gridPos": {
+        "x": 0,
+        "y": 25,
+        "w": 12,
+        "h": 4
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "DS_CENSPROBE_PG"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT recommended_protocols FROM test_runs WHERE test_id = ${test_id:sqlstring} LIMIT 1",
+          "format": "table",
+          "refId": "A",
+          "editorMode": "code",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "DS_CENSPROBE_PG"
+          }
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Listener Sessions Summary",
+      "type": "table",
+      "gridPos": {
+        "x": 12,
+        "y": 25,
+        "w": 12,
+        "h": 4
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "DS_CENSPROBE_PG"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT ls.session_id, ls.started_at, ls.duration_sec, COUNT(pr.id) AS protocols_tested FROM listener_sessions ls LEFT JOIN protocol_results pr ON pr.session_id = ls.id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE tr.test_id = ${test_id:sqlstring} GROUP BY ls.session_id, ls.started_at, ls.duration_sec ORDER BY ls.started_at DESC",
+          "format": "table",
+          "refId": "A",
+          "editorMode": "code",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "DS_CENSPROBE_PG"
+          }
+        }
+      ]
+    }
+  ]
+}

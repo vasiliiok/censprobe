@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "censprobe-listener"
+version = "0.1.0"
+description = "Censprobe listener container — VPN protocol responder (M5)"
+requires-python = ">=3.11"
+dependencies = [
+    "censprobe-core",
+    "click>=8.1",
+    "rich>=13.7",
+    "pyyaml>=6.0",
+    "cryptography>=42",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/censprobe_listener"]

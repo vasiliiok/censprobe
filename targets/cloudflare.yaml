@@ -1,0 +1,64 @@
+# Cloudflare infrastructure blocking probes
+#
+# These targets are used ONLY by modules/cloudflare.py and produce results
+# in category="cloudflare". They are NOT fed to the generic HTTP/TLS/DNS
+# modules (those already handle cloudflare.com via neutral.yaml).
+#
+# Key censorship signals for Russia:
+#   1. QUIC/HTTP3 (UDP 443) — TSPU has blocked UDP 443 since 2022, breaking HTTP3
+#   2. Cloudflare WARP — WireGuard VPN (UDP 2408 / TCP 443)
+#   3. workers.dev / pages.dev — Cloudflare-hosted content sometimes blocked by RKN
+#   4. ECH — summarized from tls module; crypto.cloudflare.com tests it directly
+
+# UDP 443 / QUIC probe targets
+# We send a QUIC Version Negotiation trigger and wait for any server response.
+# Timeout → TSPU is dropping UDP 443 (QUIC_DROPPED).
+quic_targets:
+  - host: "1.1.1.1"
+    port: 443
+    name: "cloudflare_quic_1111"
+    notes: "Cloudflare 1.1.1.1 — primary anycast; UDP 443 blocked by RU TSPU since ~2022"
+
+  - host: "1.0.0.1"
+    port: 443
+    name: "cloudflare_quic_1001"
+    notes: "Cloudflare 1.0.0.1 — secondary anycast"
+
+# Cloudflare WARP endpoints
+# WARP uses WireGuard over UDP 2408 and HTTPS (TCP 443) for registration.
+warp_targets:
+  - host: "engage.cloudflareclient.com"
+    port_tcp: 443
+    name: "cloudflare_warp_api"
+    notes: "WARP registration API — HTTPS; blocked = WARP setup impossible"
+
+  - host: "162.159.193.1"
+    port_tcp: 443
+    name: "cloudflare_warp_anycast_tcp"
+    notes: "Cloudflare WARP anycast IP, TCP 443 — tests IP-level blocking"
+
+# Cloudflare platform HTTP targets (workers.dev, pages.dev)
+# RKN has blocked specific workers.dev/pages.dev subdomains hosting banned content.
+# The platform roots are a canary — if pages.dev itself is blocked, all Cloudflare-
+# hosted sites behind it are unreachable.
+http_targets:
+  - domain: workers.dev
+    urls:
+      - https://workers.dev/
+    expected_status: 200
+    category: cloudflare
+    notes: "Cloudflare Workers landing page — platform root canary"
+
+  - domain: pages.dev
+    urls:
+      - https://pages.dev/
+    expected_status: 200
+    category: cloudflare
+    notes: "Cloudflare Pages landing page — platform root canary"
+
+  - domain: cloudflare-dns.com
+    urls:
+      - https://cloudflare-dns.com/cdn-cgi/trace
+    expected_status: 200
+    category: cloudflare
+    notes: "Cloudflare DoH hostname — blocked = DoH via cloudflare-dns.com unusable"

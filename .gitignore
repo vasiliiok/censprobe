@@ -1,0 +1,32 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+.env
+*.env
+*.log
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Docker volumes (local dev)
+pgdata/
+
+# SSH keys — never commit
+*.pem
+*.key
+id_rsa
+id_ed25519
+
+# Listener server-only secret sidecar (WG/AWG server private keys,
+# Reality server private key). Sits next to the committed protocols.yaml
+# in reports/<test_id>/ but must NEVER enter git history.
+*.secret.yaml
+
+# Reports are tracked (they're the product)
+# baseline is tracked
+# targets/ and signatures/ are tracked
