@@ -134,8 +134,11 @@ def _build_context(test_id: str, reports_dir: Path) -> dict[str, Any]:
 
     # Sort: blocked first within each category
     verdict_order = {
-        "BLOCKED": 0, "DNS_POISONING": 1, "RST_INJECTED": 2,
-        "THROTTLED": 3, "ANOMALY": 4, "INCONCLUSIVE": 5, "OK": 6, "ERROR": 7,
+        "BLOCKED": 0, "DNS_BLOCKED": 0, "IP_DROPPED": 1, "RST_INJECTED": 1,
+        "REFUSED": 2, "DOH_BLOCKED": 2, "DNS_POISONING": 3,
+        "THROTTLED": 4, "YOUTUBE_SNI_THROTTLED": 4,
+        "ANOMALY": 5, "HANDSHAKE_ONLY": 6,
+        "GEOBLOCK_NOT_CENSORSHIP": 7, "INCONCLUSIVE": 8, "OK": 9, "ERROR": 10,
     }
     for cat in by_category:
         by_category[cat].sort(key=lambda r: verdict_order.get(r.get("verdict", ""), 5))

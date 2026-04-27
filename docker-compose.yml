@@ -1,3 +1,14 @@
+## Pre-built images are pulled from ghcr.io when available.
+## pull_policy: missing — uses local cache if present, pulls from registry
+## if not, falls back to local build if the pull fails (e.g. no auth).
+##
+## To authenticate on each machine:
+##   echo $GHCR_PAT | docker login ghcr.io -u GITHUB_USERNAME --password-stdin
+##
+## Override defaults via .env or environment:
+##   GHCR_OWNER  — GitHub username/org (default: vasiliiok)
+##   GHCR_TAG    — image tag to pull   (default: main)
+
 services:
 
   # ─────────────────────────────────────────────────────────────────
@@ -6,6 +17,8 @@ services:
   # ─────────────────────────────────────────────────────────────────
   solo:
     profiles: [solo]
+    image: ghcr.io/${GHCR_OWNER:-vasiliiok}/censprobe-solo:${GHCR_TAG:-main}
+    pull_policy: missing
     build:
       context: .
       dockerfile: packages/solo/Dockerfile
@@ -26,6 +39,8 @@ services:
   # ─────────────────────────────────────────────────────────────────
   listener:
     profiles: [listener]
+    image: ghcr.io/${GHCR_OWNER:-vasiliiok}/censprobe-listener:${GHCR_TAG:-main}
+    pull_policy: missing
     build:
       context: .
       dockerfile: packages/listener/Dockerfile
@@ -50,6 +65,8 @@ services:
   # ─────────────────────────────────────────────────────────────────
   client:
     profiles: [client]
+    image: ghcr.io/${GHCR_OWNER:-vasiliiok}/censprobe-client:${GHCR_TAG:-main}
+    pull_policy: missing
     build:
       context: .
       dockerfile: packages/client/Dockerfile
@@ -75,6 +92,8 @@ services:
   # ─────────────────────────────────────────────────────────────────
   control:
     profiles: [control]
+    image: ghcr.io/${GHCR_OWNER:-vasiliiok}/censprobe-control:${GHCR_TAG:-main}
+    pull_policy: missing
     build:
       context: .
       dockerfile: packages/control/Dockerfile
@@ -115,6 +134,8 @@ services:
 
   sync-api:
     profiles: [dashboard]
+    image: ghcr.io/${GHCR_OWNER:-vasiliiok}/censprobe-sync-api:${GHCR_TAG:-main}
+    pull_policy: missing
     build:
       context: .
       dockerfile: packages/dashboard/sync-api/Dockerfile
@@ -176,6 +197,8 @@ services:
   # ─────────────────────────────────────────────────────────────────
   reporter:
     profiles: [reporter]
+    image: ghcr.io/${GHCR_OWNER:-vasiliiok}/censprobe-reporter:${GHCR_TAG:-main}
+    pull_policy: missing
     build:
       context: .
       dockerfile: packages/reporter/Dockerfile

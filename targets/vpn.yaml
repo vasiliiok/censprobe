@@ -1,7 +1,7 @@
 # VPN & Tor targets — connectivity indicators
 
 # Public VPN services — blocked/not blocked
-vpn_services:
+targets:
   - domain: nordvpn.com
     urls:
       - https://nordvpn.com/

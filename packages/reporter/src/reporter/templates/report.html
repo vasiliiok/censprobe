@@ -276,7 +276,7 @@
         </td>
         <td style="color: var(--text-dim); font-size: 12px;">{{ r.method or "—" }}</td>
         <td style="font-family: monospace;">{{ ("%.0f ms"|format(r.rtt_ms)) if r.rtt_ms else "—" }}</td>
-        <td style="color: var(--text-dim);">{{ ("%.0f%%"|format(r.confidence * 100)) if r.confidence else "—" }}</td>
+        <td style="color: var(--text-dim);">{{ ("%.0f%%"|format(r.confidence * 100)) if r.confidence is not none else "—" }}</td>
       </tr>
       {% endfor %}
     </tbody>

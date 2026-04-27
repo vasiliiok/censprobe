@@ -1,13 +1,46 @@
-# Censprobe Client — Dockerfile (M6)
+# Censprobe Client — Dockerfile
+#
+# Multi-stage build: Stage 1 compiles amneziawg-tools (awg, awg-quick) and
+# amneziawg-go using Go + build-essential. Those toolchains are ~600 MB and
+# serve no runtime purpose, so only the three resulting binaries are copied
+# into the final image.
+
+# ── Stage 1: build AmneziaWG tools and userspace implementation ──────────────
+FROM debian:bookworm-slim AS awg-builder
+
+# build-essential: C compiler for amneziawg-tools (awg.c + libmnl).
+# golang-go:       Go compiler for amneziawg-go userspace implementation.
+# git:             needed to clone both repos (no release tarballs).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git ca-certificates \
+    build-essential libmnl-dev pkg-config \
+    golang-go \
+    && rm -rf /var/lib/apt/lists/*
+
+# Build amneziawg-tools → /usr/local/bin/awg + awg-quick.
+# A wg-quick fallback is NOT acceptable: vanilla wg rejects the obfuscation
+# directives (Jc/Jmin/Jmax/S1/S2/H1-H4) with "Line unrecognized", so AWG
+# would be silently non-functional while reporting success.
+RUN git clone --depth 1 https://github.com/amnezia-vpn/amneziawg-tools.git /tmp/awg-tools && \
+    make -C /tmp/awg-tools/src -j"$(nproc)" && \
+    make -C /tmp/awg-tools/src install && \
+    rm -rf /tmp/awg-tools
+
+# Build amneziawg-go → /usr/local/bin/amneziawg-go.
+RUN git clone --depth 1 https://github.com/amnezia-vpn/amneziawg-go.git /tmp/awg-go && \
+    cd /tmp/awg-go && make && \
+    install -m 0755 amneziawg-go /usr/local/bin/amneziawg-go && \
+    rm -rf /tmp/awg-go /root/.cache/go-build /root/go
+
+# ── Stage 2: runtime image ───────────────────────────────────────────────────
 FROM python:3.12-slim
-# iputils-ping needed for WG/OpenVPN tunnel data-phase verification.
-# build-essential + golang-go required to compile amneziawg-tools and
-# amneziawg-go (see listener Dockerfile for rationale).
+
+# Runtime tools only — no Go, no build-essential.
+# iputils-ping: needed for WG/OpenVPN tunnel data-phase verification.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git openssh-client curl wget iproute2 net-tools iputils-ping \
     wireguard-tools iptables openssl openvpn \
     ca-certificates unzip \
-    build-essential libmnl-dev pkg-config golang-go \
     && rm -rf /var/lib/apt/lists/*
 
 # ── sing-box (Shadowsocks 2022 inbound) ──────────────────────────────────────
@@ -46,18 +79,7 @@ RUN ARCH=$(dpkg --print-architecture) && \
       "https://github.com/apernet/hysteria/releases/download/app%2Fv${HYSTERIA_VERSION}/hysteria-linux-${HY_ARCH}" && \
     chmod +x /usr/local/bin/hysteria
 
-# ── AmneziaWG (userspace, amneziawg-go) ──────────────────────────────────────
-# See listener Dockerfile for rationale: wg-quick fallback silently
-# breaks AWG because vanilla wg rejects Jc/Jmin/Jmax/S1/S2/H1-H4.
-RUN git clone --depth 1 https://github.com/amnezia-vpn/amneziawg-tools.git /tmp/awg-tools && \
-    make -C /tmp/awg-tools/src -j"$(nproc)" && \
-    make -C /tmp/awg-tools/src install && \
-    rm -rf /tmp/awg-tools && \
-    git clone --depth 1 https://github.com/amnezia-vpn/amneziawg-go.git /tmp/awg-go && \
-    cd /tmp/awg-go && make && \
-    install -m 0755 amneziawg-go /usr/local/bin/amneziawg-go && \
-    rm -rf /tmp/awg-go /root/.cache/go-build /root/go
-
+# ── AmneziaWG — compiled in Stage 1, only binaries copied ────────────────────
 # awg-quick first attempts kernel mode and only on failure falls back to
 # ${WG_QUICK_USERSPACE_IMPLEMENTATION:-amneziawg-go}. We pin it explicitly
 # so the fallback is deterministic and resilient to a future rename of
@@ -66,12 +88,19 @@ RUN git clone --depth 1 https://github.com/amnezia-vpn/amneziawg-tools.git /tmp/
 # Note: vanilla wg-quick (used by probe_wireguard) reads the same env var,
 # but our WG path goes through the kernel module on the host (network_mode:
 # host), so this override never affects vanilla WireGuard probes.
+COPY --from=awg-builder \
+    /usr/local/bin/awg \
+    /usr/local/bin/awg-quick \
+    /usr/local/bin/amneziawg-go \
+    /usr/local/bin/
+
 ENV WG_QUICK_USERSPACE_IMPLEMENTATION=amneziawg-go
 
 WORKDIR /workspace
 COPY packages/probe-core /tmp/probe-core
 COPY packages/client /tmp/client
 RUN pip install --no-cache-dir /tmp/probe-core /tmp/client
+
 ARG CENSPROBE_GIT_EMAIL=noreply@censprobe.local
 ARG CENSPROBE_GIT_NAME=censprobe-bot
 RUN git config --global user.email "${CENSPROBE_GIT_EMAIL}" && \
@@ -82,4 +111,5 @@ RUN git config --global user.email "${CENSPROBE_GIT_EMAIL}" && \
     ssh-keyscan github.com >> /root/.ssh/known_hosts 2>/dev/null && \
     ssh-keyscan github.com > /tmp/censprobe_known_hosts 2>/dev/null && \
     chmod 0644 /tmp/censprobe_known_hosts
+
 ENTRYPOINT ["python", "-m", "censprobe_client.main"]
