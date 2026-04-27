@@ -10,7 +10,6 @@ Schema:
 from __future__ import annotations
 
 import os
-from datetime import datetime
 from typing import AsyncGenerator
 
 from sqlalchemy import (
@@ -30,12 +29,20 @@ from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, relationship
 
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "postgresql+asyncpg://censprobe:censprobe@postgres/censprobe",
-)
+DATABASE_URL = os.environ.get("DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError(
+        "DATABASE_URL environment variable is required. "
+        "Example: postgresql+asyncpg://censprobe:PASSWORD@postgres/censprobe"
+    )
 
-engine = create_async_engine(DATABASE_URL, echo=False)
+engine = create_async_engine(
+    DATABASE_URL,
+    echo=False,
+    pool_size=5,
+    max_overflow=10,
+    pool_pre_ping=True,
+)
 async_session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
 

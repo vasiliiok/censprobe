@@ -82,10 +82,12 @@ def _read_wg_transfer(interface: str, tool: str = "wg") -> tuple[int, int, int]:
     """
     try:
         out_tr = subprocess.check_output(
-            [tool, "show", interface, "transfer"], text=True, stderr=subprocess.DEVNULL
+            [tool, "show", interface, "transfer"], text=True, stderr=subprocess.DEVNULL,
+            timeout=5,
         )
         out_hs = subprocess.check_output(
-            [tool, "show", interface, "latest-handshakes"], text=True, stderr=subprocess.DEVNULL
+            [tool, "show", interface, "latest-handshakes"], text=True, stderr=subprocess.DEVNULL,
+            timeout=5,
         )
     except Exception:
         return 0, 0, 0

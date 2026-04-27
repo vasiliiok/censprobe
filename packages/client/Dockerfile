@@ -6,7 +6,7 @@
 # into the final image.
 
 # ── Stage 1: build AmneziaWG tools and userspace implementation ──────────────
-FROM golang:1.24-bookworm AS awg-builder
+FROM golang:1.24-bookworm@sha256:1a6d4452c65dea36aac2e2d606b01b4a029ec90cc1ae53890540ce6173ea77ac AS awg-builder
 
 # GOTOOLCHAIN=auto: if amneziawg-go's go.mod requires a newer patch than the
 # base image ships, Go downloads it automatically instead of aborting.
@@ -35,7 +35,7 @@ RUN git clone --depth 1 https://github.com/amnezia-vpn/amneziawg-go.git /tmp/awg
     rm -rf /tmp/awg-go /root/.cache/go-build /root/go
 
 # ── Stage 2: runtime image ───────────────────────────────────────────────────
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:46cb7cc2877e60fbd5e21a9ae6115c30ace7a077b9f8772da879e4590c18c2e3
 
 # Runtime tools only — no Go, no build-essential.
 # iputils-ping: needed for WG/OpenVPN tunnel data-phase verification.
@@ -47,12 +47,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # ── sing-box (Shadowsocks 2022 inbound) ──────────────────────────────────────
 ARG SINGBOX_VERSION=1.9.4
+ARG SINGBOX_SHA256_AMD64=b2fac8322e036d81bf4e0a145987e02d8e0173a5249c0c51a3cde0d33f78c76c
+ARG SINGBOX_SHA256_ARM64=9e9a07643e479961e34909ed6d73010eb9e657f3163369e5bc87b2d18f0a034e
 RUN ARCH=$(dpkg --print-architecture) && \
-    if [ "$ARCH" = "amd64" ]; then SINGBOX_ARCH=amd64; \
-    elif [ "$ARCH" = "arm64" ]; then SINGBOX_ARCH=arm64; \
-    else SINGBOX_ARCH=amd64; fi && \
+    if [ "$ARCH" = "amd64" ]; then SINGBOX_ARCH=amd64; SHA256="${SINGBOX_SHA256_AMD64}"; \
+    elif [ "$ARCH" = "arm64" ]; then SINGBOX_ARCH=arm64; SHA256="${SINGBOX_SHA256_ARM64}"; \
+    else SINGBOX_ARCH=amd64; SHA256="${SINGBOX_SHA256_AMD64}"; fi && \
     curl -fsSL -o /tmp/sing-box.tar.gz \
       "https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VERSION}/sing-box-${SINGBOX_VERSION}-linux-${SINGBOX_ARCH}.tar.gz" && \
+    echo "${SHA256}  /tmp/sing-box.tar.gz" | sha256sum -c - && \
     tar -xzf /tmp/sing-box.tar.gz -C /tmp && \
     mv /tmp/sing-box-${SINGBOX_VERSION}-linux-${SINGBOX_ARCH}/sing-box /usr/local/bin/sing-box && \
     chmod +x /usr/local/bin/sing-box && \
@@ -60,12 +63,15 @@ RUN ARCH=$(dpkg --print-architecture) && \
 
 # ── xray-core (VLESS+Reality inbound) ────────────────────────────────────────
 ARG XRAY_VERSION=1.8.13
+ARG XRAY_SHA256_AMD64=2e4514670c001380992cc8de351fd9c7c73c8040f4b789c0108645a7ce0ab0e6
+ARG XRAY_SHA256_ARM64=9249fe318fb6cc72d091abd773177e2e2c602be1828339d6b4e9183d2fc8ec49
 RUN ARCH=$(dpkg --print-architecture) && \
-    if [ "$ARCH" = "amd64" ]; then XRAY_ARCH=64; \
-    elif [ "$ARCH" = "arm64" ]; then XRAY_ARCH=arm64-v8a; \
-    else XRAY_ARCH=64; fi && \
+    if [ "$ARCH" = "amd64" ]; then XRAY_ARCH=64; SHA256="${XRAY_SHA256_AMD64}"; \
+    elif [ "$ARCH" = "arm64" ]; then XRAY_ARCH=arm64-v8a; SHA256="${XRAY_SHA256_ARM64}"; \
+    else XRAY_ARCH=64; SHA256="${XRAY_SHA256_AMD64}"; fi && \
     curl -fsSL -o /tmp/xray.zip \
       "https://github.com/XTLS/Xray-core/releases/download/v${XRAY_VERSION}/Xray-linux-${XRAY_ARCH}.zip" && \
+    echo "${SHA256}  /tmp/xray.zip" | sha256sum -c - && \
     unzip -q /tmp/xray.zip -d /tmp/xray && \
     mv /tmp/xray/xray /usr/local/bin/xray && \
     chmod +x /usr/local/bin/xray && \
@@ -73,12 +79,15 @@ RUN ARCH=$(dpkg --print-architecture) && \
 
 # ── hysteria 2 (QUIC/UDP inbound) ────────────────────────────────────────────
 ARG HYSTERIA_VERSION=2.5.2
+ARG HYSTERIA_SHA256_AMD64=3a1a9a46bfbcd2adfd0825dd59d51a26a884b9a9917a8e83a6161cb260bcaed9
+ARG HYSTERIA_SHA256_ARM64=917037c193281eff067d017ecc958bfeeb8f94673feae8fed122795a2400e0c4
 RUN ARCH=$(dpkg --print-architecture) && \
-    if [ "$ARCH" = "amd64" ]; then HY_ARCH=amd64; \
-    elif [ "$ARCH" = "arm64" ]; then HY_ARCH=arm64; \
-    else HY_ARCH=amd64; fi && \
+    if [ "$ARCH" = "amd64" ]; then HY_ARCH=amd64; SHA256="${HYSTERIA_SHA256_AMD64}"; \
+    elif [ "$ARCH" = "arm64" ]; then HY_ARCH=arm64; SHA256="${HYSTERIA_SHA256_ARM64}"; \
+    else HY_ARCH=amd64; SHA256="${HYSTERIA_SHA256_AMD64}"; fi && \
     curl -fsSL -o /usr/local/bin/hysteria \
       "https://github.com/apernet/hysteria/releases/download/app%2Fv${HYSTERIA_VERSION}/hysteria-linux-${HY_ARCH}" && \
+    echo "${SHA256}  /usr/local/bin/hysteria" | sha256sum -c - && \
     chmod +x /usr/local/bin/hysteria
 
 # ── AmneziaWG — compiled in Stage 1, only binaries copied ────────────────────

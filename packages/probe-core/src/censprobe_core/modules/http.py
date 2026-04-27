@@ -122,7 +122,6 @@ async def _test_url(
             tls_ok = url.startswith("https://")
             is_blockpage = _is_blockpage(body, status)
             cert_sha256_list = await _extract_cert_sha256(final_url, url)
-            stable_frags = _extract_stable_fragments(body, target.get("stable_selectors", []))
 
             verdict, method = comparator.compare_http(
                 url, status, body_length, tls_ok, is_blockpage,
@@ -149,7 +148,6 @@ async def _test_url(
                     "tls_ok": tls_ok,
                     "is_blockpage": is_blockpage,
                     "cert_chain_sha256": cert_sha256_list,
-                    "stable_frags_sha256": stable_frags,
                     "final_url": final_url,
                     "content_type": content_type,
                 },
@@ -300,18 +298,6 @@ async def _extract_cert_sha256(response_url: str, url: str) -> list[str]:
     return [hashlib.sha256(der).hexdigest()]
 
 
-def _extract_stable_fragments(body: bytes, selectors: list[str]) -> dict[str, str]:
-    """
-    Extract stable fragment SHA256 hashes.
-    Simple implementation: hash specific byte ranges or known strings.
-    """
-    # TODO: implement selector-based extraction (BeautifulSoup)
-    # For now: full body hash as single fragment
-    if body:
-        return {"body_sha256": hashlib.sha256(body).hexdigest()}
-    return {}
-
-
 def _timeout_result(test_name: str, url: str, attempts: int = 1) -> TestResult:
     return TestResult(
         test=test_name,
@@ -334,10 +320,3 @@ def _ua_chrome() -> str:
 
 def _slug(s: str) -> str:
     return s.replace(".", "_").replace("-", "_").replace("/", "_").lower()
-
-
-def _domain_of(url: str) -> Optional[str]:
-    try:
-        return urlparse(url).hostname
-    except Exception:
-        return None

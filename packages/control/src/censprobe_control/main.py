@@ -25,8 +25,9 @@ import click
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.panel import Panel
-from rich.progress import BarColumn, Progress, SpinnerColumn, TaskID, TextColumn
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 
+from censprobe_core import __version__ as PROBE_CORE_VERSION
 from censprobe_core.git_io import git_add_commit_push, git_pull_async
 from censprobe_core.models import BaselineControlPoint
 from censprobe_core.runner import ProbeRunner
@@ -163,7 +164,7 @@ async def _async_main(runs: int, skip_push: bool) -> None:
     baseline = build_baseline(
         runs=all_run_results,
         control_point=control_point,
-        probe_core_version="0.3.0",
+        probe_core_version=PROBE_CORE_VERSION,
         targets_version=targets_version,
         validity_days=7,
     )

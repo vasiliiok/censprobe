@@ -31,9 +31,7 @@ logger = logging.getLogger(__name__)
 # Timeout for external requests
 _TIMEOUT = httpx.Timeout(10.0)
 
-# ipapi.is — HTTPS, keyed. Hard-coded because this is the project's own
-# measurement-infra key, not an end-user secret.
-_IPAPI_IS_KEY = os.environ.get("IPAPI_IS_KEY", "a5277864b4dc5573e3fe")
+_IPAPI_IS_KEY = os.environ.get("IPAPI_IS_KEY", "")
 _IPAPI_IS_URL = "https://api.ipapi.is/"
 
 

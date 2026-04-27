@@ -4,7 +4,7 @@ censprobe-solo — Main entrypoint.
 Lifecycle:
   1. Read TEST_ID from env
   2. If reports/<TEST_ID>/meta.yaml missing → auto-detect server info, create it
-  3. Load baseline/latest.json + targets/*.yaml + signatures/*.yaml
+  3. Load baseline/latest.json + targets/*.yaml + signatures/blockpages.yaml
   4. Run full probe suite (runner.run_all())
   5. Compute scores (scoring.compute_scores())
   6. Save report as reports/<TEST_ID>/server-solo-<timestamp>.json
@@ -35,7 +35,7 @@ from rich.table import Table
 from censprobe_core.git_io import git_add_commit_push, git_pull_async
 from censprobe_core.models import ListenerReport, ReportMeta, ServerMeta
 from censprobe_core.runner import ProbeRunner
-from censprobe_core.scoring import compute_scores
+from censprobe_core.scoring import BLOCKING_VERDICTS, compute_scores
 from censprobe_core.server_meta import detect_distro, detect_kernel, detect_server_meta
 
 # Bootstrap logging (after imports to avoid E402)
@@ -220,6 +220,7 @@ def _print_summary(results, scores) -> None:
     table.add_column("Other", style="yellow", justify="right")
     table.add_column("Total", justify="right")
 
+    blocked_strs = {str(v) for v in BLOCKING_VERDICTS}
     by_cat: dict[str, dict[str, int]] = {}
     for r in results:
         cat = r.category
@@ -228,7 +229,7 @@ def _print_summary(results, scores) -> None:
         v = str(r.verdict)
         if v == "OK":
             by_cat[cat]["ok"] += 1
-        elif v in ("BLOCKED", "THROTTLED", "IP_DROPPED", "RST_INJECTED"):
+        elif v in blocked_strs:
             by_cat[cat]["blocked"] += 1
         else:
             by_cat[cat]["other"] += 1

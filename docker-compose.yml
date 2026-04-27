@@ -6,7 +6,7 @@
 ##   echo $GHCR_PAT | docker login ghcr.io -u GITHUB_USERNAME --password-stdin
 ##
 ## Override defaults via .env or environment:
-##   GHCR_OWNER  — GitHub username/org (default: vasiliiok)
+##   GHCR_OWNER  — GitHub username/org (required; set in .env)
 ##   GHCR_TAG    — image tag to pull   (default: main)
 
 services:
@@ -17,7 +17,7 @@ services:
   # ─────────────────────────────────────────────────────────────────
   solo:
     profiles: [solo]
-    image: ghcr.io/${GHCR_OWNER:-vasiliiok}/censprobe-solo:${GHCR_TAG:-main}
+    image: ghcr.io/${GHCR_OWNER:?GHCR_OWNER is required — copy .env.example to .env}/censprobe-solo:${GHCR_TAG:-main}
     pull_policy: missing
     build:
       context: .
@@ -27,6 +27,9 @@ services:
     environment:
       TEST_ID: ${TEST_ID:-}
       RUNS_COUNT: ${RUNS_COUNT:-3}
+      IPAPI_IS_KEY: ${IPAPI_IS_KEY:-}
+      CENSPROBE_GIT_EMAIL: ${CENSPROBE_GIT_EMAIL:-noreply@censprobe.local}
+      CENSPROBE_GIT_NAME: ${CENSPROBE_GIT_NAME:-censprobe-bot}
     volumes:
       - ./:/workspace
       - ~/.ssh:/root/.ssh:ro
@@ -39,7 +42,7 @@ services:
   # ─────────────────────────────────────────────────────────────────
   listener:
     profiles: [listener]
-    image: ghcr.io/${GHCR_OWNER:-vasiliiok}/censprobe-listener:${GHCR_TAG:-main}
+    image: ghcr.io/${GHCR_OWNER:?GHCR_OWNER is required — copy .env.example to .env}/censprobe-listener:${GHCR_TAG:-main}
     pull_policy: missing
     build:
       context: .
@@ -52,6 +55,9 @@ services:
     environment:
       TEST_ID: ${TEST_ID:-}
       SESSION_ID: ${SESSION_ID:-}
+      IPAPI_IS_KEY: ${IPAPI_IS_KEY:-}
+      CENSPROBE_GIT_EMAIL: ${CENSPROBE_GIT_EMAIL:-noreply@censprobe.local}
+      CENSPROBE_GIT_NAME: ${CENSPROBE_GIT_NAME:-censprobe-bot}
     volumes:
       - ./:/workspace
       - ~/.ssh:/root/.ssh:ro
@@ -65,7 +71,7 @@ services:
   # ─────────────────────────────────────────────────────────────────
   client:
     profiles: [client]
-    image: ghcr.io/${GHCR_OWNER:-vasiliiok}/censprobe-client:${GHCR_TAG:-main}
+    image: ghcr.io/${GHCR_OWNER:?GHCR_OWNER is required — copy .env.example to .env}/censprobe-client:${GHCR_TAG:-main}
     pull_policy: missing
     build:
       context: .
@@ -80,6 +86,9 @@ services:
       TEST_ID: ${TEST_ID:-}
       SESSION_ID: ${SESSION_ID:-}
       SERVER_HOST: ${SERVER_HOST:-}
+      IPAPI_IS_KEY: ${IPAPI_IS_KEY:-}
+      CENSPROBE_GIT_EMAIL: ${CENSPROBE_GIT_EMAIL:-noreply@censprobe.local}
+      CENSPROBE_GIT_NAME: ${CENSPROBE_GIT_NAME:-censprobe-bot}
     volumes:
       - ./:/workspace
       - ~/.ssh:/root/.ssh:ro
@@ -92,7 +101,7 @@ services:
   # ─────────────────────────────────────────────────────────────────
   control:
     profiles: [control]
-    image: ghcr.io/${GHCR_OWNER:-vasiliiok}/censprobe-control:${GHCR_TAG:-main}
+    image: ghcr.io/${GHCR_OWNER:?GHCR_OWNER is required — copy .env.example to .env}/censprobe-control:${GHCR_TAG:-main}
     pull_policy: missing
     build:
       context: .
@@ -101,6 +110,11 @@ services:
     cap_add: [NET_RAW, NET_ADMIN]
     environment:
       RUNS_COUNT: ${RUNS_COUNT:-5}
+      IPAPI_IS_KEY: ${IPAPI_IS_KEY:-}
+      CENSPROBE_GIT_EMAIL: ${CENSPROBE_GIT_EMAIL:-noreply@censprobe.local}
+      CENSPROBE_GIT_NAME: ${CENSPROBE_GIT_NAME:-censprobe-bot}
+      CONTROL_ID: ${CONTROL_ID:-control-de-01}
+      CONTROL_COUNTRY: ${CONTROL_COUNTRY:-}
     volumes:
       - ./:/workspace
       - ~/.ssh:/root/.ssh:ro
@@ -118,7 +132,7 @@ services:
     environment:
       POSTGRES_DB: censprobe
       POSTGRES_USER: censprobe
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-censprobe}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required — copy .env.example to .env}
     volumes:
       - db_data:/var/lib/postgresql/data
     healthcheck:
@@ -134,13 +148,13 @@ services:
 
   sync-api:
     profiles: [dashboard]
-    image: ghcr.io/${GHCR_OWNER:-vasiliiok}/censprobe-sync-api:${GHCR_TAG:-main}
+    image: ghcr.io/${GHCR_OWNER:?GHCR_OWNER is required — copy .env.example to .env}/censprobe-sync-api:${GHCR_TAG:-main}
     pull_policy: missing
     build:
       context: .
       dockerfile: packages/dashboard/sync-api/Dockerfile
     environment:
-      DATABASE_URL: postgresql+asyncpg://censprobe:${DB_PASSWORD:-censprobe}@postgres/censprobe
+      DATABASE_URL: postgresql+asyncpg://censprobe:${DB_PASSWORD:?DB_PASSWORD is required}@postgres/censprobe
       WORKSPACE: /workspace
     volumes:
       - ./:/workspace
@@ -171,7 +185,7 @@ services:
     # minor only keeps the schemaVersion: 39 dashboards compatible.
     image: grafana/grafana:11.5.4
     environment:
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?GRAFANA_PASSWORD is required — copy .env.example to .env}
       GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s:%(http_port)s/"
       DB_PASSWORD: ${DB_PASSWORD:-censprobe}
     volumes:
@@ -197,7 +211,7 @@ services:
   # ─────────────────────────────────────────────────────────────────
   reporter:
     profiles: [reporter]
-    image: ghcr.io/${GHCR_OWNER:-vasiliiok}/censprobe-reporter:${GHCR_TAG:-main}
+    image: ghcr.io/${GHCR_OWNER:?GHCR_OWNER is required — copy .env.example to .env}/censprobe-reporter:${GHCR_TAG:-main}
     pull_policy: missing
     build:
       context: .

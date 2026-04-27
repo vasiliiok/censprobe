@@ -128,7 +128,7 @@ async def _async_main(
         console.print(f"[red]Failed to read protocols.yaml: {e}[/red]")
         sys.exit(1)
 
-    console.print(f"[green]Credentials loaded from protocols.yaml[/green]")
+    console.print("[green]Credentials loaded from protocols.yaml[/green]")
 
     # ── Step 3: Run probes in random order with jitter ────────────────────────
     protocols = [

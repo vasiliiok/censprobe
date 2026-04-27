@@ -137,7 +137,7 @@ async def _test_quic(host: str, port: int, name: str) -> TestResult:
 
     class _Proto(asyncio.DatagramProtocol):
         def __init__(self):
-            self.fut: asyncio.Future[bytes] = asyncio.get_event_loop().create_future()
+            self.fut: asyncio.Future[bytes] = asyncio.get_running_loop().create_future()
 
         def connection_made(self, transport):
             transport.sendto(probe)
@@ -157,7 +157,7 @@ async def _test_quic(host: str, port: int, name: str) -> TestResult:
     t0 = time.monotonic()
     transport = None
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         transport, proto = await loop.create_datagram_endpoint(
             _Proto,
             remote_addr=(host, port),

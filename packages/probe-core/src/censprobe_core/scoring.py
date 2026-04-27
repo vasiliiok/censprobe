@@ -25,13 +25,29 @@ from typing import Optional
 
 from censprobe_core.models import (
     ListenerReport,
-    ProtocolResult,
     ServerScores,
     TestResult,
     Verdict,
 )
 
 logger = logging.getLogger(__name__)
+
+
+# Verdicts that represent actual blocking / unreachable targets.
+# Single source of truth — runner._summarize and the dashboard "blocked"
+# filter import this so the three views (CLI summary, saved JSON summary,
+# Grafana) never disagree on what counts as blocked.
+BLOCKING_VERDICTS: frozenset[Verdict] = frozenset({
+    Verdict.BLOCKED,
+    Verdict.DNS_BLOCKED,
+    Verdict.DOH_BLOCKED,
+    Verdict.DNS_POISONING,
+    Verdict.IP_DROPPED,
+    Verdict.RST_INJECTED,
+    Verdict.REFUSED,
+    Verdict.THROTTLED,
+    Verdict.YOUTUBE_SNI_THROTTLED,
+})
 
 
 def compute_scores(
@@ -75,13 +91,9 @@ def compute_scores(
     # Only collect from verdicts that represent actual blocking — INCONCLUSIVE
     # and GEOBLOCK_NOT_CENSORSHIP results often have a method set (for context)
     # but should not contribute to the detected-techniques list.
-    _blocking_verdicts = {
-        Verdict.BLOCKED, Verdict.DNS_BLOCKED, Verdict.DNS_POISONING,
-        Verdict.IP_DROPPED, Verdict.RST_INJECTED, Verdict.THROTTLED,
-    }
     techniques: set[str] = set()
     for r in solo_results:
-        if r.method and r.verdict in _blocking_verdicts:
+        if r.method and r.verdict in BLOCKING_VERDICTS:
             techniques.add(str(r.method))
     scores.detected_techniques = sorted(techniques)
 

@@ -15,6 +15,7 @@ from typing import Any, Optional
 
 import yaml
 
+from censprobe_core import __version__ as PROBE_CORE_VERSION
 from censprobe_core.baseline import BaselineComparator, load_baseline
 from censprobe_core.models import (
     BaselineData,
@@ -22,6 +23,7 @@ from censprobe_core.models import (
     TestResult,
 )
 from censprobe_core.modules import dns, tcp, tls, http, telegram, throttling, middlebox, protocols, cloudflare
+from censprobe_core.scoring import BLOCKING_VERDICTS
 
 logger = logging.getLogger(__name__)
 
@@ -273,7 +275,7 @@ class ProbeRunner:
             "test_id": self.test_id,
             "report_type": self.mode,
             "generated_at": datetime.now(tz=timezone.utc).isoformat(),
-            "probe_core_version": "0.1.0",
+            "probe_core_version": PROBE_CORE_VERSION,
             "baseline_version": self.baseline.version,
             "server_meta": server_meta.model_dump() if server_meta else None,
             "results": [r.model_dump(mode="json") for r in results],
@@ -297,20 +299,10 @@ def _summarize(results: list[TestResult], module_failures: Optional[list[str]] =
     dashboard can flag scoring done on partial data instead of treating
     a half-empty run as legitimate "neutral 50%".
     """
-    # Verdicts that mean "this target was actually censored / unreachable",
-    # not just "we didn't get a clean OK". Keep this in sync with the
-    # dashboard's "blocked" filter (packages/dashboard/grafana/dashboards).
-    BLOCKED_VERDICTS = {
-        "BLOCKED",
-        "DNS_BLOCKED",
-        "DOH_BLOCKED",
-        "DNS_POISONING",
-        "IP_DROPPED",
-        "RST_INJECTED",
-        "REFUSED",
-        "THROTTLED",
-        "YOUTUBE_SNI_THROTTLED",
-    }
+    # Verdicts that mean "this target was actually censored / unreachable".
+    # Imported from scoring so the CLI summary, saved JSON summary, and
+    # Grafana dashboards never disagree on what counts as blocked.
+    BLOCKED_VERDICTS = {str(v) for v in BLOCKING_VERDICTS}
 
     total = len(results)
     by_verdict: dict[str, int] = {}

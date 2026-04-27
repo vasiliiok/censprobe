@@ -5,7 +5,7 @@
 # generation. See packages/solo/Dockerfile for the full rationale.
 
 # ── Stage 1: curl-ech ────────────────────────────────────────────────────────
-FROM debian:bookworm-slim AS curl-ech-builder
+FROM debian:bookworm-slim@sha256:f9c6a2fd2ddbc23e336b6257a5245e31f996953ef06cd13a59fa0a1df2d5c252 AS curl-ech-builder
 
 ARG BORINGSSL_COMMIT=151cf73e7e8f939424d19b2a5b0575787c721297
 ARG CURL_VERSION=8.12.0
@@ -63,7 +63,7 @@ RUN /opt/curl-ech/bin/curl -V \
     && /opt/curl-ech/bin/curl -V | grep -i "Features:" | grep -iq " ECH "
 
 # ── Stage 2: runtime image ───────────────────────────────────────────────────
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:46cb7cc2877e60fbd5e21a9ae6115c30ace7a077b9f8772da879e4590c18c2e3
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git openssh-client curl wget net-tools ca-certificates \

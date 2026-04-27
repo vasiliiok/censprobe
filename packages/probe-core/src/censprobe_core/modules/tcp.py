@@ -61,16 +61,13 @@ async def _test_tcp(ip: str, port: int, repeats: int) -> TestResult:
     target = f"{ip}:{port}"
     verdicts = []
     rtts = []
-    rst_ttls = []
 
     for _ in range(repeats):
         t0 = time.monotonic()
-        verdict, rst_ttl = await _single_tcp_attempt(ip, port)
+        verdict = await _single_tcp_attempt(ip, port)
         rtt_ms = (time.monotonic() - t0) * 1000
         verdicts.append(verdict)
         rtts.append(rtt_ms)
-        if rst_ttl is not None:
-            rst_ttls.append(rst_ttl)
         await asyncio.sleep(0.5)  # small jitter between repeats
 
     # Aggregate: majority wins
@@ -103,16 +100,13 @@ async def _test_tcp(ip: str, port: int, repeats: int) -> TestResult:
         evidence={
             "all_verdicts": verdicts,
             "rtts_ms": rtts,
-            "rst_ttls": rst_ttls,
             "rst_detection": "rtt_heuristic_no_scapy",
         },
     )
 
 
-async def _single_tcp_attempt(ip: str, port: int) -> tuple[Verdict, Optional[int]]:
-    """
-    Attempt a single TCP connect. Returns (verdict, rst_ttl_if_applicable).
-    """
+async def _single_tcp_attempt(ip: str, port: int) -> Verdict:
+    """Attempt a single TCP connect and return the verdict."""
     try:
         t0 = time.monotonic()
         _, writer = await asyncio.wait_for(
@@ -124,18 +118,18 @@ async def _single_tcp_attempt(ip: str, port: int) -> tuple[Verdict, Optional[int
             await writer.wait_closed()
         except Exception:
             pass
-        return Verdict.OK, None
+        return Verdict.OK
 
     except asyncio.TimeoutError:
-        return Verdict.IP_DROPPED, None
+        return Verdict.IP_DROPPED
 
     except ConnectionRefusedError:
         # Real RST from the host — port closed but host is alive
         elapsed_ms = (time.monotonic() - t0) * 1000
         if elapsed_ms < _SYN_FAST_RST_MS:
             # Very fast RST — might be injected
-            return Verdict.RST_INJECTED, None
-        return Verdict.REFUSED, None
+            return Verdict.RST_INJECTED
+        return Verdict.REFUSED
 
     except OSError as e:
         # Could be ECONNRESET (RST) or other socket error
@@ -143,12 +137,12 @@ async def _single_tcp_attempt(ip: str, port: int) -> tuple[Verdict, Optional[int
         err_str = str(e).lower()
         if "reset" in err_str or "refused" in err_str:
             if elapsed_ms < _SYN_FAST_RST_MS:
-                return Verdict.RST_INJECTED, None
-            return Verdict.REFUSED, None
-        return Verdict.ERROR, None  # type: ignore[return-value]
+                return Verdict.RST_INJECTED
+            return Verdict.REFUSED
+        return Verdict.ERROR  # type: ignore[return-value]
 
     except Exception:
-        return Verdict.ERROR, None  # type: ignore[return-value]
+        return Verdict.ERROR  # type: ignore[return-value]
 
 
 def _majority(verdicts: list[Verdict]) -> Verdict:

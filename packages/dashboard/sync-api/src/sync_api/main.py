@@ -47,9 +47,9 @@ from sync_api.db import (
     init_db,
 )
 from sync_api.parser import (
-    _load_json,
     is_listener_report,
     is_solo_report,
+    load_json,
     parse_listener_report,
     parse_solo_report,
 )
@@ -90,8 +90,8 @@ app = FastAPI(
 )
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_methods=["GET"],
     allow_headers=["*"],
 )
 
@@ -250,7 +250,7 @@ def _load_reports_for_scoring(
 
     solo_results: list[CoreTestResult] = []
     if solo_files:
-        raw = _load_json(solo_files[-1])
+        raw = load_json(solo_files[-1])
         if isinstance(raw, dict):
             raw_results = raw.get("results", []) or []
             if isinstance(raw_results, list):
@@ -262,7 +262,7 @@ def _load_reports_for_scoring(
 
     listener_reports: list[CoreListenerReport] = []
     for path in listener_files:
-        raw = _load_json(path)
+        raw = load_json(path)
         if not isinstance(raw, dict):
             continue
         try:

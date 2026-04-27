@@ -17,9 +17,7 @@ When listener is running, control_endpoints comes from protocols.yaml.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
-from typing import Optional
 
 from censprobe_core.models import BlockingMethod, TestResult, Verdict
 from censprobe_core.protocol_probes import (

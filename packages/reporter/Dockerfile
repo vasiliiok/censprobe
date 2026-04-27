@@ -3,7 +3,7 @@
 # so the unpinned `python:3.12-slim` tag (which now points at trixie) breaks
 # this apt-get with "Package 'libgdk-pixbuf2.0-0' has no installation
 # candidate". Pinning keeps the WeasyPrint dep set stable across releases.
-FROM python:3.12-slim-bookworm
+FROM python:3.12-slim-bookworm@sha256:58525e1a8dada8e72d6f8a11a0ddff8d981fd888549108db52455d577f927f77
 
 # WeasyPrint deps (Pango + Cairo for PDF rendering).
 # fonts-dejavu-core covers Cyrillic (the report is in Russian — without

@@ -43,7 +43,7 @@ def parse_solo_report(
     Returns:
         (meta_dict, list_of_result_dicts)
     """
-    raw = _load_json(path)
+    raw = load_json(path)
     if not raw or not isinstance(raw, dict):
         return {}, []
 
@@ -85,7 +85,7 @@ def parse_listener_report(
     Returns:
         (session_dict, list_of_protocol_result_dicts)
     """
-    raw = _load_json(path)
+    raw = load_json(path)
     if not raw or not isinstance(raw, dict):
         return {}, []
 
@@ -133,7 +133,7 @@ def is_listener_report(filename: str) -> bool:
     return filename.startswith("server-listener-") and filename.endswith(".json")
 
 
-def _load_json(path: Path) -> Optional[dict]:
+def load_json(path: Path) -> Optional[dict]:
     """Load a .json file into a dict.
 
     Returns None on any I/O / decode failure so callers can short-circuit

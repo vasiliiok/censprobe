@@ -40,6 +40,7 @@ _TELEGRAM_AGGREGATE_TESTS = {
     "telegram_health_score",
 }
 
+from censprobe_core import __version__ as PROBE_CORE_VERSION
 from censprobe_core.models import (
     BaselineControlPoint,
     BaselineData,
@@ -64,7 +65,7 @@ _BASELINE_ARCHIVE = _WORKSPACE / "baseline" / "archive"
 def build_baseline(
     runs: list[list[TestResult]],
     control_point: BaselineControlPoint,
-    probe_core_version: str = "0.3.0",
+    probe_core_version: str = PROBE_CORE_VERSION,
     targets_version: str = "unknown",
     validity_days: int = 7,
 ) -> BaselineData:

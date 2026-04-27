@@ -70,13 +70,6 @@ class BlockingMethod(StrEnum):
 # Core result model
 # ─────────────────────────────────────────────────────────────────────────────
 
-class ControlComparison(BaseModel):
-    """Comparison with baseline/control results."""
-    control_verdict: Optional[Verdict] = None
-    control_rtt_ms: Optional[float] = None
-    baseline_version: Optional[str] = None
-
-
 class TestResult(BaseModel):
     """Single test result — one measurement of one target."""
     test: str = Field(description="Test name, e.g. 'dns_meduza_io_system'")
@@ -88,7 +81,6 @@ class TestResult(BaseModel):
     evidence: dict[str, Any] = Field(default_factory=dict)
     rtt_ms: Optional[float] = None
     attempts: int = 1
-    control_comparison: Optional[ControlComparison] = None
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     notes: Optional[str] = None
 
@@ -116,7 +108,6 @@ class BaselineHttpEntry(BaseModel):
     status: int = 200
     title_regex: Optional[str] = None
     body_length_range: list[int] = Field(default_factory=lambda: [0, 999999999])
-    stable_fragments_sha256: dict[str, str] = Field(default_factory=dict)
 
 
 class BaselineTelegramEntry(BaseModel):

@@ -22,13 +22,12 @@ import ssl
 import struct
 import time
 from pathlib import Path
-from typing import Optional
 
 import httpx
 import yaml
 
-from censprobe_core.models import TestResult, Verdict, BlockingMethod
 from censprobe_core.baseline import BaselineComparator
+from censprobe_core.models import BlockingMethod, TestResult, Verdict
 
 logger = logging.getLogger(__name__)
 

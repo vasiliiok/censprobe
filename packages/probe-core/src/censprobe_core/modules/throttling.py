@@ -272,7 +272,7 @@ async def _run_method_b_sni_probe(comparator: BaselineComparator) -> Optional[Te
     return TestResult(
         test="throttling_youtube_sni_probe_method_b",
         category="throttling",
-        target=f"speedtest.selectel.ru (SNI=googlevideo.com)",
+        target="speedtest.selectel.ru (SNI=googlevideo.com)",
         verdict=verdict,
         method=method,
         evidence={

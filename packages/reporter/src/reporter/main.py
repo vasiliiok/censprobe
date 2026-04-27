@@ -27,7 +27,6 @@ import logging
 import os
 import sys
 from collections import defaultdict
-from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -198,8 +197,8 @@ def _build_context(test_id: str, reports_dir: Path) -> dict[str, Any]:
             "ipv6_available": server.get("ipv6_available", False),
         },
         "scores": scores,
-        "techniques": techniques if isinstance(techniques, list) else [techniques],
-        "protocols": protocols if isinstance(protocols, list) else [protocols],
+        "techniques": techniques,
+        "protocols": protocols,
         "results_by_category": dict(by_category),
         "listener_sessions": listener_sessions,
         "generated_at": datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
