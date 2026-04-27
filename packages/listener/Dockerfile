@@ -7,15 +7,13 @@
 # into the final image.
 
 # ── Stage 1: build AmneziaWG tools and userspace implementation ──────────────
-FROM debian:bookworm-slim AS awg-builder
+FROM golang:1.22-bookworm AS awg-builder
 
 # build-essential: C compiler for amneziawg-tools (awg.c + libmnl).
-# golang-go:       Go compiler for amneziawg-go userspace implementation.
-# git:             needed to clone both repos (no release tarballs).
+# golang-go from apt is too old (1.19); the golang: base image provides 1.22.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git ca-certificates \
+    git \
     build-essential libmnl-dev pkg-config \
-    golang-go \
     && rm -rf /var/lib/apt/lists/*
 
 # Build amneziawg-tools → /usr/local/bin/awg + awg-quick.

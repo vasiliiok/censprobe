@@ -24,24 +24,42 @@ jobs:
         include:
           - name: solo
             dockerfile: packages/solo/Dockerfile
+            path: solo
           - name: control
             dockerfile: packages/control/Dockerfile
+            path: control
           - name: listener
             dockerfile: packages/listener/Dockerfile
+            path: listener
           - name: client
             dockerfile: packages/client/Dockerfile
+            path: client
           - name: sync-api
             dockerfile: packages/dashboard/sync-api/Dockerfile
+            path: dashboard/sync-api
           - name: reporter
             dockerfile: packages/reporter/Dockerfile
+            path: reporter
 
     steps:
       - uses: actions/checkout@v4
 
+      # Check which files changed. On tag pushes — always rebuild everything.
+      - uses: dorny/paths-filter@v3
+        id: changes
+        if: github.ref_type != 'tag'
+        with:
+          filters: |
+            rebuild:
+              - 'packages/${{ matrix.path }}/**'
+              - 'packages/probe-core/**'
+              - '.github/workflows/build.yml'
+
       - uses: docker/setup-buildx-action@v3
+        if: steps.changes.outputs.rebuild == 'true' || github.ref_type == 'tag'
 
       - uses: docker/login-action@v3
-        if: github.event_name != 'pull_request'
+        if: (steps.changes.outputs.rebuild == 'true' || github.ref_type == 'tag') && github.event_name != 'pull_request'
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -49,15 +67,16 @@ jobs:
 
       - uses: docker/metadata-action@v5
         id: meta
+        if: steps.changes.outputs.rebuild == 'true' || github.ref_type == 'tag'
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/censprobe-${{ matrix.name }}
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix=,format=short
 
       - uses: docker/build-push-action@v6
+        if: steps.changes.outputs.rebuild == 'true' || github.ref_type == 'tag'
         with:
           context: .
           file: ${{ matrix.dockerfile }}
@@ -66,3 +85,12 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+      # Delete old untagged digests so old builds don't accumulate.
+      - uses: actions/delete-package-versions@v5
+        if: (steps.changes.outputs.rebuild == 'true' || github.ref_type == 'tag') && github.event_name != 'pull_request'
+        with:
+          package-name: censprobe-${{ matrix.name }}
+          package-type: container
+          min-versions-to-keep: 0
+          delete-only-untagged-versions: true
