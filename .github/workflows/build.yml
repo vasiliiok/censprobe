@@ -64,7 +64,7 @@ jobs:
         id: meta
         if: steps.changes.outputs.rebuild == 'true' || github.ref_type == 'tag'
         with:
-          images: vasiliiok/censprobe-${{ matrix.name }}
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/censprobe-${{ matrix.name }}
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
