@@ -13,6 +13,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # paths-filter calls GET /repos/:owner/:repo/pulls/:n/files on PR runs.
+      # Without an explicit grant, the workflow-level permissions block
+      # restricts GITHUB_TOKEN and the API call returns 403.
+      pull-requests: read
 
     strategy:
       fail-fast: false
