@@ -1,13 +1,12 @@
-## Pre-built images are pulled from ghcr.io when available.
+## Pre-built images are pulled from Docker Hub when available.
 ## pull_policy: missing — uses local cache if present, pulls from registry
-## if not, falls back to local build if the pull fails (e.g. no auth).
+## if not, falls back to local build if the pull fails.
 ##
-## To authenticate on each machine:
-##   echo $GHCR_PAT | docker login ghcr.io -u GITHUB_USERNAME --password-stdin
+## Docker Hub images are public — no `docker login` required to pull.
 ##
 ## Override defaults via .env or environment:
-##   GHCR_OWNER  — GitHub username/org (required; set in .env)
-##   GHCR_TAG    — image tag to pull   (default: main)
+##   DOCKERHUB_USERNAME — Docker Hub username (required; set in .env)
+##   DOCKERHUB_TAG      — image tag to pull   (default: main)
 
 services:
 
@@ -17,7 +16,7 @@ services:
   # ─────────────────────────────────────────────────────────────────
   solo:
     profiles: [solo]
-    image: ghcr.io/${GHCR_OWNER:?GHCR_OWNER is required — copy .env.example to .env}/censprobe-solo:${GHCR_TAG:-main}
+    image: ${DOCKERHUB_USERNAME:?DOCKERHUB_USERNAME is required — copy .env.example to .env}/censprobe-solo:${DOCKERHUB_TAG:-main}
     pull_policy: missing
     build:
       context: .
@@ -42,7 +41,7 @@ services:
   # ─────────────────────────────────────────────────────────────────
   listener:
     profiles: [listener]
-    image: ghcr.io/${GHCR_OWNER:?GHCR_OWNER is required — copy .env.example to .env}/censprobe-listener:${GHCR_TAG:-main}
+    image: ${DOCKERHUB_USERNAME:?DOCKERHUB_USERNAME is required — copy .env.example to .env}/censprobe-listener:${DOCKERHUB_TAG:-main}
     pull_policy: missing
     build:
       context: .
@@ -71,7 +70,7 @@ services:
   # ─────────────────────────────────────────────────────────────────
   client:
     profiles: [client]
-    image: ghcr.io/${GHCR_OWNER:?GHCR_OWNER is required — copy .env.example to .env}/censprobe-client:${GHCR_TAG:-main}
+    image: ${DOCKERHUB_USERNAME:?DOCKERHUB_USERNAME is required — copy .env.example to .env}/censprobe-client:${DOCKERHUB_TAG:-main}
     pull_policy: missing
     build:
       context: .
@@ -101,7 +100,7 @@ services:
   # ─────────────────────────────────────────────────────────────────
   control:
     profiles: [control]
-    image: ghcr.io/${GHCR_OWNER:?GHCR_OWNER is required — copy .env.example to .env}/censprobe-control:${GHCR_TAG:-main}
+    image: ${DOCKERHUB_USERNAME:?DOCKERHUB_USERNAME is required — copy .env.example to .env}/censprobe-control:${DOCKERHUB_TAG:-main}
     pull_policy: missing
     build:
       context: .
@@ -148,7 +147,7 @@ services:
 
   sync-api:
     profiles: [dashboard]
-    image: ghcr.io/${GHCR_OWNER:?GHCR_OWNER is required — copy .env.example to .env}/censprobe-sync-api:${GHCR_TAG:-main}
+    image: ${DOCKERHUB_USERNAME:?DOCKERHUB_USERNAME is required — copy .env.example to .env}/censprobe-sync-api:${DOCKERHUB_TAG:-main}
     pull_policy: missing
     build:
       context: .
@@ -211,7 +210,7 @@ services:
   # ─────────────────────────────────────────────────────────────────
   reporter:
     profiles: [reporter]
-    image: ghcr.io/${GHCR_OWNER:?GHCR_OWNER is required — copy .env.example to .env}/censprobe-reporter:${GHCR_TAG:-main}
+    image: ${DOCKERHUB_USERNAME:?DOCKERHUB_USERNAME is required — copy .env.example to .env}/censprobe-reporter:${DOCKERHUB_TAG:-main}
     pull_policy: missing
     build:
       context: .

@@ -28,16 +28,18 @@ git clone https://github.com/<YOUR_GITHUB_USERNAME>/censprobe.git
 cd censprobe
 
 cp .env.example .env
-# Отредактируйте .env: задайте GHCR_OWNER, DB_PASSWORD, GRAFANA_PASSWORD
+# Отредактируйте .env: задайте DOCKERHUB_USERNAME, DB_PASSWORD, GRAFANA_PASSWORD
 ```
 
 Минимально необходимые переменные в `.env`:
 
 ```bash
-GHCR_OWNER=your-github-username   # ваш username на GitHub (откуда берутся образы ghcr.io)
-DB_PASSWORD=<strong-password>      # пароль PostgreSQL (используется dashboard)
-GRAFANA_PASSWORD=<strong-password> # пароль admin в Grafana
+DOCKERHUB_USERNAME=your-dockerhub-username  # username на Docker Hub (откуда берутся образы)
+DB_PASSWORD=<strong-password>               # пароль PostgreSQL (используется dashboard)
+GRAFANA_PASSWORD=<strong-password>          # пароль admin в Grafana
 ```
+
+> Образы публикуются в публичный репозиторий Docker Hub — `docker login` для pull не требуется.
 
 Для генерации паролей: `openssl rand -base64 32`
 
@@ -214,14 +216,14 @@ scp /workspace/reports/<TEST_ID>/protocols.yaml \
 
 | Переменная | Профили | Описание |
 |------------|---------|----------|
-| `GHCR_OWNER` | все | **required** — GitHub username/org, из которого берутся образы `ghcr.io` |
+| `DOCKERHUB_USERNAME` | все | **required** — Docker Hub username, из которого берутся образы |
 | `DB_PASSWORD` | dashboard | **required** — пароль PostgreSQL |
 | `GRAFANA_PASSWORD` | dashboard | **required** — пароль admin Grafana |
 | `TEST_ID` | solo, listener, client, reporter | Идентификатор сервера (например, `selectel-spb-001`) |
 | `SESSION_ID` | listener, client | Идентификатор клиентской сети (например, `client-home-rt-spb`) |
 | `SERVER_HOST` | client | IPv4-адрес сервера с Listener |
 | `RUNS_COUNT` | solo, control | Количество повторных замеров (solo: 3, control: 5) |
-| `GHCR_TAG` | все | Тег образа (по умолчанию: `main`) |
+| `DOCKERHUB_TAG` | все | Тег образа (по умолчанию: `main`) |
 | `CONTROL_ID` | control | Идентификатор эталонного сервера (по умолчанию: `control-de-01`) |
 | `CONTROL_COUNTRY` | control | Страна эталонного сервера (по умолчанию: `DE`) |
 | `IPAPI_IS_KEY` | solo, listener, client, control | API-ключ ipapi.is для ASN/geo (без ключа — бесплатный tier) |
