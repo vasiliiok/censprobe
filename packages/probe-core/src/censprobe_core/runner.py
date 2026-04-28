@@ -108,10 +108,10 @@ class ProbeRunner:
 
         logger.info("[%s] Phase A: running 7 modules in parallel...", self.test_id)
         phase_a = await asyncio.gather(
-            _run_module("dns", dns.run_dns_tests(dns_domains, self.comparator, repeats)),
+            _run_module("dns", dns.run_dns_tests(dns_domains, repeats)),
             _run_module("tcp", tcp.run_tcp_tests(tcp_targets, repeats)),
-            _run_module("tls", tls.run_tls_tests(tls_targets, repeats, self.comparator)),
-            _run_module("http", http.run_http_tests(http_targets, self.comparator, repeats)),
+            _run_module("tls", tls.run_tls_tests(tls_targets, repeats)),
+            _run_module("http", http.run_http_tests(http_targets, repeats)),
             _run_module("telegram", telegram.run_telegram_tests(self.comparator)),
             _run_module("protocols", protocols.run_protocol_tests(control_endpoints=None)),
             _run_module("cloudflare", cloudflare.run_cloudflare_tests()),

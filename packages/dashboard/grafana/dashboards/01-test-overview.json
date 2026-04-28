@@ -293,7 +293,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT DISTINCT category, verdict, method, COUNT(*) AS count FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND verdict NOT IN ('OK','INCONCLUSIVE') GROUP BY category, verdict, method ORDER BY count DESC LIMIT 50",
+          "rawSql": "SELECT DISTINCT category, verdict, method, COUNT(*) AS count FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND verdict IN ('BLOCKED','DNS_BLOCKED','DOH_BLOCKED','DNS_POISONING','IP_DROPPED','RST_INJECTED','REFUSED','THROTTLED','YOUTUBE_SNI_THROTTLED') GROUP BY category, verdict, method ORDER BY count DESC LIMIT 50",
           "format": "table",
           "refId": "A",
           "editorMode": "code",

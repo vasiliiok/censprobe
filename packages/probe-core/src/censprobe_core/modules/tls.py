@@ -27,7 +27,6 @@ from typing import Optional
 
 import httpx
 
-from censprobe_core.baseline import BaselineComparator
 from censprobe_core.models import TestResult, Verdict, BlockingMethod
 
 # Process-wide DoH client. Instantiating httpx.AsyncClient per resolve()
@@ -53,7 +52,6 @@ _MAX_PARALLEL = 6    # concurrency cap for TLS handshakes
 async def run_tls_tests(
     targets: list[dict],  # {"domain": ..., "ip": ..., "blocked_sni": ...}
     repeats: int = 2,
-    comparator: Optional[BaselineComparator] = None,
 ) -> list[TestResult]:
     """Run TLS/SNI tests for each target in parallel (bounded)."""
     sem = asyncio.Semaphore(_MAX_PARALLEL)
@@ -75,7 +73,7 @@ async def run_tls_tests(
                     evidence={"reason": "could_not_resolve_ip"},
                 )]
 
-            return await _test_sni_scenarios(domain, ip, blocked_sni, repeats, comparator)
+            return await _test_sni_scenarios(domain, ip, blocked_sni, repeats)
 
     grouped = await asyncio.gather(*[_one(t) for t in targets])
     results: list[TestResult] = []
@@ -114,33 +112,23 @@ async def _test_sni_scenarios(
     ip: str,
     blocked_sni: str,
     repeats: int,
-    comparator: Optional[BaselineComparator],
 ) -> list[TestResult]:
     """Test multiple SNI scenarios against one IP."""
     results = []
 
-    # Scenario 1: correct/blocked SNI (with retries)
+    # Scenario 1: correct/blocked SNI (with retries). verify=True means the
+    # system trust store validates the chain — a real ТСПУ MITM substitutes
+    # a cert with no path to a trusted root and surfaces here as
+    # ssl.SSLCertVerificationError → Verdict.ANOMALY with TLS_HANDSHAKE_FAILURE.
+    # Baseline cert-chain hash comparison was removed: CDN edges rotate
+    # leaf certs continuously and within seconds, so any control-vs-solo
+    # hash diff is overwhelmingly cert rotation, not MITM.
     v_blocked, ev_blocked, attempts_blocked = await _tls_connect_with_repeats(
         ip, blocked_sni, verify=True, repeats=repeats,
     )
 
-    # Baseline cert-chain comparison — previously this module collected the
-    # leaf cert SHA but never compared it against baseline, silently
-    # disabling MITM detection. Run the comparison only if the handshake
-    # succeeded; a failed handshake has no chain to compare.
-    cert_chain = ev_blocked.get("cert_chain_sha256") or []
     base_verdict = v_blocked
     base_method = _attribute_tls_failure(v_blocked, ev_blocked)
-    if comparator is not None and v_blocked == Verdict.OK and cert_chain:
-        cmp_verdict, cmp_method = comparator.compare_tls(
-            domain, cert_chain,
-            cert_issuer_cn=ev_blocked.get("cert_issuer_cn"),
-        )
-        if cmp_verdict == Verdict.ANOMALY:
-            # Cert-chain mismatch — possible MITM / cert rotation.
-            base_verdict = Verdict.ANOMALY
-            base_method = cmp_method
-            ev_blocked = {**ev_blocked, "baseline_cert_mismatch": True}
 
     results.append(TestResult(
         test=f"tls_{_slug(domain)}_sni_blocked",

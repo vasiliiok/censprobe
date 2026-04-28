@@ -23,7 +23,6 @@ import httpx
 import yaml
 
 from censprobe_core.models import TestResult, Verdict, BlockingMethod
-from censprobe_core.baseline import BaselineComparator
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +53,6 @@ def _get_blockpage_sigs() -> dict:
 
 async def run_http_tests(
     targets: list[dict],  # from targets/*.yaml
-    comparator: BaselineComparator,
     repeats: int = 3,
 ) -> list[TestResult]:
     """Run HTTP/HTTPS tests for all targets."""
@@ -70,7 +68,7 @@ async def run_http_tests(
     ) as client:
         async def _bounded(url: str, target: dict) -> TestResult:
             async with sem:
-                return await _test_url(url, target, client, comparator, repeats)
+                return await _test_url(url, target, client, repeats)
 
         tasks = [
             _bounded(url, target)
@@ -82,11 +80,40 @@ async def run_http_tests(
     return results
 
 
+def _verdict_from_response(
+    *,
+    status: int,
+    tls_ok: bool,
+    is_blockpage: bool,
+    expected_status: Optional[int],
+) -> tuple[Verdict, Optional[BlockingMethod]]:
+    """Decide the HTTP verdict from response signals alone.
+
+    Order matters:
+      1. Blockpage signature → BLOCKED, regardless of status code
+         (Roskomnadzor stub pages are commonly served with 200 or 302).
+      2. 403/451 with valid TLS and no blockpage → server-side geoblock,
+         not network censorship.
+      3. expected_status from targets/*.yaml → OK on match, ANOMALY otherwise.
+      4. No expected_status: status==200 is OK, anything else is ANOMALY.
+
+    Static body-length-range comparison from the control baseline was
+    removed — modern sites (news, social) drift in body size between
+    edges and revisions, producing false ANOMALY verdicts.
+    """
+    if is_blockpage:
+        return Verdict.BLOCKED, BlockingMethod.BLOCKPAGE_RETURNED
+    if status in (403, 451) and tls_ok:
+        return Verdict.GEOBLOCK_NOT_CENSORSHIP, None
+    if expected_status is not None:
+        return (Verdict.OK, None) if status == expected_status else (Verdict.ANOMALY, None)
+    return (Verdict.OK, None) if status == 200 else (Verdict.ANOMALY, None)
+
+
 async def _test_url(
     url: str,
     target: dict,
     client: httpx.AsyncClient,
-    comparator: BaselineComparator,
     repeats: int,
 ) -> TestResult:
     """Fetch a URL and analyze the response. Retries on transient failures."""
@@ -102,7 +129,7 @@ async def _test_url(
             # image would OOM the probe process. We cap at _MAX_BODY_READ
             # (enough for fingerprinting) and discard the rest.
             async with client.stream(
-                "GET", url, headers={"User-Agent": _ua_chrome()}
+                "GET", url, headers={"User-Agent": _ua_probe()}
             ) as r:
                 buf = bytearray()
                 async for chunk in r.aiter_bytes():
@@ -123,17 +150,17 @@ async def _test_url(
             is_blockpage = _is_blockpage(body, status)
             cert_sha256_list = await _extract_cert_sha256(final_url, url)
 
-            verdict, method = comparator.compare_http(
-                url, status, body_length, tls_ok, is_blockpage,
+            verdict, method = _verdict_from_response(
+                status=status,
+                tls_ok=tls_ok,
+                is_blockpage=is_blockpage,
                 expected_status=target.get("expected_status"),
             )
 
-            # NOTE: cert SHA is collected for forensics but NOT compared against the
-            # baseline here. CDN leaf certs rotate continuously and vary by edge node —
-            # a mismatch between control and solo runs (seconds to minutes apart) is
-            # normal, not a MITM signal. tls_ok=True already means the cert is valid
-            # and chain-trusted for this domain. Cert-hash comparison is done only in
-            # the dedicated TLS module where it is limited to non-CDN targets.
+            # cert SHA is collected for forensics but never compared. CDN
+            # leaf certs rotate per edge — any control-vs-solo mismatch is
+            # normal, not MITM. tls_ok=True already means the system trust
+            # store accepted the chain.
 
             return TestResult(
                 test=test_name,
@@ -250,11 +277,11 @@ async def _extract_cert_sha256(response_url: str, url: str) -> list[str]:
     """
     Extract leaf-cert SHA-256 for a response's TLS endpoint.
 
-    httpx doesn't expose the peer cert directly, so we run a separate,
-    minimal TLS handshake to the same host:port and hash the server cert
-    in DER form. That SHA is fed into BaselineComparator.compare_tls for
-    MITM / cert-rotation detection — an empty list there would silently
-    disable the check.
+    Recorded only as forensic evidence on the result — there is no
+    baseline cert-chain comparison anymore (CDN edges rotate certs too
+    fast for hash-equality to be a reliable MITM signal). httpx doesn't
+    expose the peer cert, so we run a minimal TLS handshake to the same
+    host:port and hash the server cert in DER form.
 
     Returns:
         [hex_sha256] on success, or [] on non-HTTPS / network failure.
@@ -310,12 +337,18 @@ def _timeout_result(test_name: str, url: str, attempts: int = 1) -> TestResult:
     )
 
 
-def _ua_chrome() -> str:
-    return (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    )
+def _ua_probe() -> str:
+    """
+    Honest User-Agent identifying the probe.
+
+    Spoofing a Chrome UA without sending matching client hints (sec-ch-ua,
+    sec-fetch-*) triggers anti-bot defenses on Meta sites — Facebook and
+    WhatsApp respond with HTTP 400 instead of the normal 200, which the
+    probe then misclassifies as ANOMALY. An honest UA bypasses that
+    inconsistency check; servers that block our UA return a recognisable
+    non-200 status that does reflect a real reachability issue.
+    """
+    return "Mozilla/5.0 (compatible; censprobe/0.1; +https://github.com/vasiliiok/censprobe)"
 
 
 def _slug(s: str) -> str:

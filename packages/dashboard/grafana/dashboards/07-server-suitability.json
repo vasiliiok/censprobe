@@ -314,7 +314,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT category, COUNT(*) FILTER (WHERE verdict = 'OK') AS ok, COUNT(*) FILTER (WHERE verdict NOT IN ('OK','INCONCLUSIVE','ERROR')) AS blocked FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} GROUP BY category ORDER BY category",
+          "rawSql": "SELECT category, COUNT(*) FILTER (WHERE verdict = 'OK') AS ok, COUNT(*) FILTER (WHERE verdict IN ('BLOCKED','DNS_BLOCKED','DOH_BLOCKED','DNS_POISONING','IP_DROPPED','RST_INJECTED','REFUSED','THROTTLED','YOUTUBE_SNI_THROTTLED')) AS blocked FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} GROUP BY category ORDER BY category",
           "format": "table",
           "refId": "A",
           "editorMode": "code",

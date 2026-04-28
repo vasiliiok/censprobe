@@ -32,7 +32,6 @@ import dns.resolver
 import httpx
 
 from censprobe_core.models import TestResult, Verdict, BlockingMethod
-from censprobe_core.baseline import BaselineComparator
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +81,6 @@ DOT_RESOLVERS = [
 
 async def run_dns_tests(
     domains: list[str],
-    comparator: BaselineComparator,
     repeats: int = 3,
 ) -> list[TestResult]:
     """Run all DNS tests for a list of domains."""
@@ -93,7 +91,7 @@ async def run_dns_tests(
 
     # Per domain tests
     for domain in domains:
-        results.extend(await _test_domain(domain, comparator, repeats))
+        results.extend(await _test_domain(domain, repeats))
 
     return results
 
@@ -133,7 +131,6 @@ async def _test_doh_accessibility() -> list[TestResult]:
 
 async def _test_domain(
     domain: str,
-    comparator: BaselineComparator,
     repeats: int,
 ) -> list[TestResult]:
     """Full DNS test suite for one domain."""
@@ -255,22 +252,64 @@ async def _test_domain(
         ))
         return results
 
-    # 7. ASN comparison
+    # 7. CERTainty-style verdict: cert validity + DoH consensus.
+    #    ASN is collected for forensics only — comparing against a static
+    #    baseline ASN list misclassifies CDN regional rotation as poisoning.
     resolved_asn = await _ip_to_asn(sys_ips[0]) if sys_ips else None
     cert_valid = await _validate_cert(domain, sys_ips[0]) if sys_ips else None
 
-    verdict, method = comparator.compare_dns(domain, resolved_asn, cert_valid)
+    sys_set = set(sys_ips)
+    doh_set = set(doh_ips)
+    ip_overlap = bool(sys_set & doh_set) if sys_set and doh_set else False
 
-    # Override INCONCLUSIVE with basic sanity if we have DoH data
-    if verdict == Verdict.INCONCLUSIVE and doh_ips and sys_ips:
-        # If system IPs don't overlap with DoH IPs — suspicious
-        sys_set = set(sys_ips)
-        doh_set = set(doh_ips)
-        if not sys_set.intersection(doh_set):
-            # Cert will tell us if it's poisoning
-            if cert_valid is False:
-                verdict = Verdict.DNS_POISONING
-                method = BlockingMethod.DNS_POISONING
+    verdict: Verdict
+    method: Optional[BlockingMethod] = None
+    confidence: float
+
+    if cert_valid is False:
+        # Cert from system-resolver IP doesn't validate as `domain`.
+        if ip_overlap:
+            # System and DoH agree on the IP but cert validation failed —
+            # ambiguous (could be expired root, broken chain, or a real
+            # server-side cert issue rather than DNS-level redirection).
+            verdict = Verdict.ANOMALY
+            confidence = 0.6
+        elif not doh_ips:
+            # DoH itself was unreachable / blocked, so we have no second
+            # source of truth. Cert-failure alone (without DoH consensus)
+            # cannot prove DNS poisoning per CERTainty PETS 2023 — the
+            # IP could be authentic but serving a broken cert. Downgrade
+            # to ANOMALY rather than overclaiming DNS_POISONING.
+            verdict = Verdict.ANOMALY
+            confidence = 0.4
+        else:
+            # System and DoH disagree on the IP, AND cert from the system
+            # IP doesn't validate as `domain` → poisoned.
+            verdict = Verdict.DNS_POISONING
+            method = BlockingMethod.DNS_POISONING
+            confidence = 0.9
+    elif cert_valid is True:
+        # System resolver returns an IP that serves a valid cert for the
+        # domain. Whether the ASN matches the baseline is irrelevant —
+        # the destination is authentically the domain.
+        verdict = Verdict.OK
+        confidence = 0.9
+    else:
+        # cert_valid is None — connection failed for non-cert reasons
+        # (TCP RST, timeout). Use DoH-overlap as the secondary signal.
+        if ip_overlap:
+            verdict = Verdict.OK
+            confidence = 0.5
+        elif doh_ips and sys_ips:
+            # System IPs disagree with DoH and we couldn't reach 443 to
+            # validate the cert. This is suspicious but not provable
+            # without a working TLS handshake — leave as INCONCLUSIVE
+            # rather than overclaim DNS_POISONING.
+            verdict = Verdict.INCONCLUSIVE
+            confidence = 0.3
+        else:
+            verdict = Verdict.INCONCLUSIVE
+            confidence = 0.2
 
     results.append(TestResult(
         test=f"dns_{_slug(domain)}_system",
@@ -285,16 +324,11 @@ async def _test_domain(
             "doh_ips": doh_ips,
             "resolved_asn": resolved_asn,
             "cert_valid": cert_valid,
+            "ip_overlap_with_doh": ip_overlap,
             "isp_resolver": isp_resolver,
             "public_resolver_ips": public_results,
         },
-        # ANOMALY with valid cert = ASN mismatch likely from CDN migration/geo-distribution,
-        # not DNS manipulation. Reduce confidence to avoid misleading scores.
-        confidence=(
-            0.55 if verdict == Verdict.ANOMALY and cert_valid
-            else 0.9 if verdict != Verdict.INCONCLUSIVE
-            else 0.3
-        ),
+        confidence=confidence,
     ))
 
     return results

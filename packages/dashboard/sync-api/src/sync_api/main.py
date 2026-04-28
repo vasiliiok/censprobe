@@ -369,6 +369,11 @@ async def get_baseline() -> dict:
         return {"status": "missing"}
     if not isinstance(raw, dict):
         return {"status": "error", "error": "baseline is not a JSON object"}
+    # Only `telegram` (reconcile) and `throttling` (Method A p10) sections
+    # are populated by the control container — dns/tls/http moved to inline
+    # verdicts in the probe modules. The legacy keys are retained on
+    # BaselineData for back-compat with old latest.json files but never
+    # populated, so reporting them here would always show "0".
     return {
         "status": "ok",
         "version": raw.get("version", "unknown"),
@@ -376,9 +381,8 @@ async def get_baseline() -> dict:
         "validity_until": raw.get("validity_until"),
         "runs_count": raw.get("runs_count", 0),
         "generated_from": raw.get("generated_from", {}),
-        "dns_count": len(raw.get("dns", {}) or {}),
-        "http_count": len(raw.get("http", {}) or {}),
         "telegram_count": len(raw.get("telegram", {}) or {}),
+        "throttling_count": len(raw.get("throttling", {}) or {}),
     }
 
 

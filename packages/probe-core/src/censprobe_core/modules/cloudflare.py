@@ -3,24 +3,51 @@ modules/cloudflare.py — Cloudflare infrastructure censorship probes.
 
 Category: "cloudflare"
 
-Tests (in order):
-  cloudflare_quic_*       — UDP 443 QUIC reachability
-                            Russia's TSPU drops UDP 443 since ~2022, breaking HTTP3
-                            and all QUIC-based protocols on Cloudflare.
-  cloudflare_warp_api     — HTTPS to engage.cloudflareclient.com (WARP registration).
-                            If blocked → Cloudflare WARP cannot be set up.
-  cloudflare_warp_*_tcp   — TCP 443 to Cloudflare WARP anycast IPs.
-                            Confirms IP-level reachability independent of hostname.
-  cloudflare_http_*       — HTTPS to workers.dev, pages.dev, cloudflare-dns.com.
-                            Platform-level blocking canaries.
+WARP context (Dec 2024+): Cloudflare made MASQUE (HTTP/3 over QUIC, UDP 443)
+the default WARP tunnel protocol, replacing WireGuard. WireGuard remains as
+a user-selectable fallback. Russia's TSPU has dropped UDP 443 since ~2022,
+which means the *primary* WARP path is broken on most RU uplinks — the
+control-plane TCP probes plus the QUIC/MASQUE UDP probe together tell the
+operator whether WARP can work at all from this server.
 
-Blocked vs INCONCLUSIVE for QUIC:
+Test families:
+  cloudflare_quic_*           — UDP 443 QUIC reachability (incl. WARP MASQUE
+                                 anycast at 162.159.197.x).
+  cloudflare_warp_*_tcp /
+  cloudflare_warp_engage_api,
+  cloudflare_warp_connectivity_check,
+  cloudflare_warp_zt_orchestration
+                              — TCP 443 to WARP control-plane hostnames and the
+                                 MASQUE / WireGuard anycast IP ranges; proves
+                                 IP-level reachability independent of DNS.
+  cloudflare_warp_masque_udp_*,
+  cloudflare_warp_wg_udp_*    — UDP probes to MASQUE fallback ports (4443/8443)
+                                 and WireGuard ports (2408/4500). All of these
+                                 protocols silently drop unauthenticated
+                                 datagrams, so timeout = INCONCLUSIVE; only
+                                 ICMP rejections surface as BLOCKED.
+  cloudflare_http_*           — HTTPS to workers.dev, pages.dev, cloudflare-dns.com
+                                 as platform-level censorship canaries.
+
+QUIC verdict:
   Cloudflare's QUIC stack responds to a valid Version Negotiation trigger with a
-  Version Negotiation packet (RFC 9000 §6.2).  We send a minimal QUIC Long Header
+  Version Negotiation packet (RFC 9000 §6.2). We send a minimal QUIC Long Header
   packet with an unrecognised (GREASE) version and wait up to 3 s:
     response received → OK   (UDP 443 passes TSPU)
-    timeout          → QUIC_DROPPED  (UDP 443 silently dropped by TSPU)
-    ICMP unreachable → INCONCLUSIVE  (source/routing issue, not TSPU)
+    timeout          → IP_DROPPED + QUIC_DROPPED method (UDP 443 silently dropped)
+    ICMP unreachable → INCONCLUSIVE (source/routing issue, not TSPU)
+
+WARP tunnel UDP verdict (both MASQUE-fallback and WireGuard ports):
+  Real servers silently drop packets that don't authenticate, so we cannot
+  expect a positive response. We surface:
+    EHOSTUNREACH / "no route" / EPERM → BLOCKED + IP_DROPPED (network
+                                          actively refuses the outbound path)
+    ICMP Port Unreachable             → INCONCLUSIVE (Cloudflare anycast
+                                          PoP doesn't bind this fallback
+                                          port; network path is open)
+    timeout                           → INCONCLUSIVE (server-silence is the
+                                          protocol's normal behaviour)
+    QUIC VN reply on a MASQUE port    → OK (port reachable + speaks HTTP/3)
 """
 from __future__ import annotations
 
@@ -42,6 +69,7 @@ logger = logging.getLogger(__name__)
 _WORKSPACE = Path("/workspace")
 _CONNECT_TIMEOUT = 10.0
 _QUIC_TIMEOUT    = 3.0   # seconds to wait for QUIC VN response
+_WG_UDP_TIMEOUT  = 2.0   # seconds — WG won't respond to invalid handshake anyway
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -67,6 +95,20 @@ async def run_cloudflare_tests() -> list[TestResult]:
             _test_warp_tcp(wt["host"], wt["port_tcp"], wt["name"])
         ))
 
+    # WARP tunnel UDP probes — covers both MASQUE fallback ports and
+    # WireGuard ports. The probe payload is shaped per the declared
+    # `protocol` so on-path fingerprinting hardware sees a plausible
+    # packet shape (matters in TSPU paths that classify by content).
+    for ut in cfg.get("warp_tunnel_udp_targets", []):
+        tasks.append(asyncio.create_task(
+            _test_warp_udp(
+                ut["host"],
+                ut["port_udp"],
+                ut.get("protocol", "wireguard"),
+                ut["name"],
+            )
+        ))
+
     # HTTP probes (parallel)
     for ht in cfg.get("http_targets", []):
         for url in ht.get("urls", []):
@@ -88,30 +130,23 @@ async def run_cloudflare_tests() -> list[TestResult]:
 # QUIC / UDP 443
 # ─────────────────────────────────────────────────────────────────────────────
 
+_QUIC_INITIAL_MIN_SIZE = 1200  # RFC 9000 §14.1 — anti-amplification floor
+
+
 def _build_quic_vn_trigger() -> bytes:
     """
-    Build a minimal QUIC Long Header packet with a GREASE (unknown) version.
+    Build a QUIC Long Header datagram with a GREASE (unknown) version.
 
     Per RFC 9000 §6.2, a QUIC v1 server MUST respond to a packet with an
-    unknown version with a Version Negotiation packet — provided it can parse
-    the DCID/SCID lengths.  A response proves UDP 443 is not dropped by TSPU.
-
-    Format (all big-endian):
-      1B  : 0xC0  Long Header + Fixed Bit
-      4B  : GREASE version 0x0a0a0a0a
-      1B  : DCID length (8)
-      8B  : random DCID
-      1B  : SCID length (4)
-      4B  : random SCID
-      1B  : Token Length = 0
-      2B  : Length varint = 0x4001 (2-byte form, value=1)
-      1B  : Packet Number = 0
-      1B  : Payload = 0x00
-    Total: 21 bytes
+    unknown version with a Version Negotiation packet — provided the datagram
+    is large enough. RFC 9000 §14.1 requires a client to expand any datagram
+    carrying an Initial packet to at least 1200 bytes; servers (Cloudflare,
+    Google) drop short datagrams as anti-amplification. So we pad with zeros
+    to 1200 bytes — the trailing zeros are valid PADDING frames.
     """
     dcid = os.urandom(8)
     scid = os.urandom(4)
-    return (
+    header = (
         b'\xc0'                     # Long Header + Fixed Bit
         b'\x0a\x0a\x0a\x0a'        # GREASE version
         + bytes([len(dcid)]) + dcid
@@ -121,6 +156,7 @@ def _build_quic_vn_trigger() -> bytes:
         + b'\x00'                   # Packet Number
         + b'\x00'                   # 1-byte payload
     )
+    return header + b'\x00' * (_QUIC_INITIAL_MIN_SIZE - len(header))
 
 
 async def _test_quic(host: str, port: int, name: str) -> TestResult:
@@ -296,6 +332,219 @@ async def _test_warp_tcp(host: str, port: int, name: str) -> TestResult:
                 await writer.wait_closed()
             except Exception:
                 pass
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WARP tunnel UDP reachability — MASQUE fallback ports + WireGuard ports
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _build_wg_handshake_init() -> bytes:
+    """
+    Build a WireGuard handshake-initiation packet (per wireguard.com whitepaper
+    §5.4.2). 148 bytes total.
+
+    Cloudflare WARP servers validate mac1 against their static public key and
+    silently drop anything that doesn't match — we don't expect a reply. The
+    well-formed shape just lowers the chance an intermediate device does
+    protocol-based dropping before our packet leaves the network.
+    """
+    return (
+        b'\x01'                         # message_type = handshake init
+        + b'\x00\x00\x00'               # reserved
+        + os.urandom(4)                 # sender_index
+        + os.urandom(32)                # unencrypted ephemeral
+        + os.urandom(48)                # encrypted static (32B + 16B Poly1305 tag)
+        + os.urandom(28)                # encrypted timestamp (12B TAI64N + 16B Poly1305 tag)
+        + os.urandom(16)                # mac1
+        + b'\x00' * 16                  # mac2
+    )
+
+
+def _build_masque_probe_packet() -> bytes:
+    """
+    Build a packet plausibly shaped like a QUIC Initial / Long Header datagram
+    used by MASQUE / HTTP-3 transport.
+
+    Reuses `_build_quic_vn_trigger`: the GREASE-version Long Header is what a
+    QUIC server expects on UDP 443 / MASQUE-fallback ports. A real Cloudflare
+    MASQUE server on these alt ports won't respond without proper TLS
+    encryption, but the packet shape passes through QUIC-aware classifiers
+    that would otherwise drop random UDP bytes.
+    """
+    return _build_quic_vn_trigger()
+
+
+async def _test_warp_udp(
+    host: str, port: int, protocol: str, name: str,
+) -> TestResult:
+    """
+    Probe a WARP tunnel UDP port (either MASQUE fallback port or WireGuard).
+
+    Payload is chosen by `protocol` so fingerprinting middleboxes see a
+    plausible packet for the port — random bytes would get dropped earlier.
+
+    Verdicts:
+      BLOCKED      — sendto raised (EHOSTUNREACH / "no route" / EPERM): the
+                     local network stack refuses the outbound path before the
+                     packet leaves the host.
+      OK           — got a datagram back. On a MASQUE port a QUIC VN reply
+                     to our GREASE-version trigger is the expected positive
+                     signal (HTTP/3 server is up); on a WG port any reply is
+                     unusual (we can't form a valid mac1 without the server
+                     pubkey) so confidence stays lower.
+      INCONCLUSIVE — silent timeout (MASQUE/WG silently drop unauthenticated
+                     handshakes, can't attribute to censorship), or ICMP
+                     Port Unreachable (Cloudflare anycast PoP doesn't bind
+                     this fallback port — network path is open, so this is
+                     not a censorship signal).
+    """
+    if protocol == "masque":
+        probe = _build_masque_probe_packet()
+    else:  # wireguard or unknown — fall back to WG shape
+        probe = _build_wg_handshake_init()
+
+    class _Proto(asyncio.DatagramProtocol):
+        def __init__(self):
+            self.fut: asyncio.Future[bytes] = asyncio.get_running_loop().create_future()
+
+        def connection_made(self, transport):
+            try:
+                transport.sendto(probe)
+            except OSError as e:
+                if not self.fut.done():
+                    self.fut.set_exception(e)
+
+        def datagram_received(self, data: bytes, addr):
+            if not self.fut.done():
+                self.fut.set_result(data)
+
+        def error_received(self, exc: Exception):
+            if not self.fut.done():
+                self.fut.set_exception(exc)
+
+        def connection_lost(self, exc):
+            if not self.fut.done():
+                self.fut.cancel()
+
+    target = f"udp://{host}:{port}"
+    t0 = time.monotonic()
+    transport = None
+    try:
+        loop = asyncio.get_running_loop()
+        transport, proto = await loop.create_datagram_endpoint(
+            _Proto,
+            remote_addr=(host, port),
+            family=socket.AF_INET,
+        )
+        data = await asyncio.wait_for(proto.fut, timeout=_WG_UDP_TIMEOUT)
+        rtt_ms = (time.monotonic() - t0) * 1000
+        # MASQUE fallback ports run a real QUIC server, so a Version
+        # Negotiation reply to our GREASE-version trigger is the expected
+        # positive signal. WireGuard would only reply to a packet with a
+        # correct mac1, which we can't compute without the server pubkey —
+        # any reply on a WG port is suspicious.
+        is_masque_vn = (
+            protocol == "masque"
+            and len(data) >= 5
+            and (data[0] & 0x80)
+            and data[1:5] == b'\x00\x00\x00\x00'
+        )
+        if is_masque_vn:
+            note = "QUIC VN reply — MASQUE port reachable and running HTTP/3"
+            confidence = 0.9
+        else:
+            note = (
+                "Got UDP reply (unexpected for unauthenticated probe; "
+                "on-path device may be answering)"
+            )
+            confidence = 0.6
+        return TestResult(
+            test=name,
+            category="cloudflare",
+            target=target,
+            verdict=Verdict.OK,
+            rtt_ms=rtt_ms,
+            evidence={
+                "protocol": protocol,
+                "response_bytes": len(data),
+                "note": note,
+            },
+            confidence=confidence,
+        )
+    except asyncio.TimeoutError:
+        return TestResult(
+            test=name,
+            category="cloudflare",
+            target=target,
+            verdict=Verdict.INCONCLUSIVE,
+            evidence={
+                "protocol": protocol,
+                "error": "udp_timeout",
+                "timeout_sec": _WG_UDP_TIMEOUT,
+                "reason": "tunnel_silently_drops_invalid",
+            },
+            notes=(
+                f"UDP timeout on a {protocol} port is the protocol's default "
+                "behaviour — cannot be attributed to censorship without a "
+                "positive control signal."
+            ),
+            confidence=0.1,
+        )
+    except ConnectionRefusedError:
+        # Linux surfaces ICMP Port Unreachable as ECONNREFUSED on connected UDP.
+        # Cloudflare's anycast members don't bind every advertised fallback
+        # port, so ICMP-unreachable here is NOT censorship — it's "this PoP
+        # doesn't speak this port". We use INCONCLUSIVE (not REFUSED) so the
+        # result doesn't inflate the dashboard "blocked" count, but record
+        # the ICMP signal in evidence as forensic data: it proves the network
+        # path is open, only the application-port mapping is missing.
+        return TestResult(
+            test=name,
+            category="cloudflare",
+            target=target,
+            verdict=Verdict.INCONCLUSIVE,
+            evidence={
+                "protocol": protocol,
+                "error": "icmp_unreachable",
+                "reason": "pop_doesnt_bind_fallback_port",
+            },
+            notes=(
+                "ICMP Port Unreachable. Network path open; this Cloudflare "
+                "anycast member is just not advertising this fallback port. "
+                "Not a censorship signal."
+            ),
+            confidence=0.3,
+        )
+    except OSError as e:
+        err = str(e).lower()
+        if "network is unreachable" in err or "no route" in err or "permission denied" in err:
+            return TestResult(
+                test=name,
+                category="cloudflare",
+                target=target,
+                verdict=Verdict.BLOCKED,
+                method=BlockingMethod.IP_DROPPED,
+                evidence={"protocol": protocol, "error": str(e)},
+                notes="Network rejection on outbound UDP — IP-level filter.",
+            )
+        return TestResult(
+            test=name,
+            category="cloudflare",
+            target=target,
+            verdict=Verdict.INCONCLUSIVE,
+            evidence={"protocol": protocol, "error": str(e)},
+        )
+    except Exception as e:
+        return TestResult(
+            test=name,
+            category="cloudflare",
+            target=target,
+            verdict=Verdict.INCONCLUSIVE,
+            evidence={"protocol": protocol, "error": str(e)},
+        )
+    finally:
+        if transport:
+            transport.close()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
