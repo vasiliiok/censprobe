@@ -1,0 +1,18 @@
+baseline_version: 2026-04-28-control-control-de-01-01
+created_at: '2026-04-28T20:51:03.652936Z'
+description: null
+planned_sessions: []
+probe_core_version: 0.1.0
+purpose: vpn-entry
+server:
+  as_name: The Constant Company, LLC
+  asn: AS20473
+  country: Germany
+  distro: Debian GNU/Linux 13 (trixie) 13
+  ipv4_masked: 80.240.17.0/24
+  ipv6_available: false
+  kernel: 6.8.0-110-generic
+  location: Frankfurt am Main
+  plan: null
+  provider: The Constant Company, LLC
+test_id: de-audit-1777409461
