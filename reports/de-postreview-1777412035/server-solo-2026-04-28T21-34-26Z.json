@@ -1,0 +1,6458 @@
+{
+  "test_id": "de-postreview-1777412035",
+  "report_type": "solo",
+  "generated_at": "2026-04-28T21:34:26.400091+00:00",
+  "probe_core_version": "0.1.0",
+  "baseline_version": "stub-0.0.0",
+  "server_meta": {
+    "provider": "The Constant Company, LLC",
+    "location": "Frankfurt am Main",
+    "country": "Germany",
+    "asn": "AS20473",
+    "as_name": "The Constant Company, LLC",
+    "ipv4_masked": "80.240.17.0/24",
+    "ipv6_available": false,
+    "plan": null,
+    "kernel": "6.8.0-110-generic",
+    "distro": "Debian GNU/Linux 13 (trixie) 13"
+  },
+  "results": [
+    {
+      "test": "doh_access_cloudflare",
+      "category": "dns",
+      "target": "https://cloudflare-dns.com/dns-query",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status_code": 200
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.943751Z",
+      "notes": null
+    },
+    {
+      "test": "doh_access_google",
+      "category": "dns",
+      "target": "https://dns.google/resolve",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status_code": 200
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:59.418014Z",
+      "notes": null
+    },
+    {
+      "test": "doh_access_mozilla",
+      "category": "dns",
+      "target": "https://mozilla.cloudflare-dns.com/dns-query",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status_code": 200
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:59.476057Z",
+      "notes": null
+    },
+    {
+      "test": "dns_bbc_com_system",
+      "category": "dns",
+      "target": "bbc.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "151.101.64.81",
+          "151.101.128.81",
+          "151.101.192.81",
+          "151.101.0.81"
+        ],
+        "system_ttl": 300,
+        "isp_ips": [
+          "151.101.0.81",
+          "151.101.64.81",
+          "151.101.128.81",
+          "151.101.192.81"
+        ],
+        "doh_ips": [
+          "151.101.64.81",
+          "151.101.0.81",
+          "151.101.128.81",
+          "151.101.192.81"
+        ],
+        "resolved_asn": "AS54113",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "151.101.128.81",
+            "151.101.0.81",
+            "151.101.64.81",
+            "151.101.192.81"
+          ],
+          "google_2": [
+            "151.101.64.81",
+            "151.101.0.81",
+            "151.101.128.81",
+            "151.101.192.81"
+          ],
+          "cloudflare_1": [
+            "151.101.192.81",
+            "151.101.64.81",
+            "151.101.128.81",
+            "151.101.0.81"
+          ],
+          "yandex": [
+            "151.101.64.81",
+            "151.101.128.81",
+            "151.101.192.81",
+            "151.101.0.81"
+          ],
+          "quad9": [
+            "151.101.0.81",
+            "151.101.64.81",
+            "151.101.128.81",
+            "151.101.192.81"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:00.051278Z",
+      "notes": null
+    },
+    {
+      "test": "dns_bellingcat_com_system",
+      "category": "dns",
+      "target": "bellingcat.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "104.20.30.192",
+          "172.66.172.84"
+        ],
+        "system_ttl": 300,
+        "isp_ips": [
+          "172.66.172.84",
+          "104.20.30.192"
+        ],
+        "doh_ips": [
+          "172.66.172.84",
+          "104.20.30.192"
+        ],
+        "resolved_asn": "AS13335",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "104.20.30.192",
+            "172.66.172.84"
+          ],
+          "google_2": [
+            "172.66.172.84",
+            "104.20.30.192"
+          ],
+          "cloudflare_1": [
+            "104.20.30.192",
+            "172.66.172.84"
+          ],
+          "yandex": [
+            "8.6.112.0",
+            "8.47.69.0"
+          ],
+          "quad9": [
+            "104.20.30.192",
+            "172.66.172.84"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:00.487377Z",
+      "notes": null
+    },
+    {
+      "test": "dns_cloudflare_com_system",
+      "category": "dns",
+      "target": "cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "104.16.133.229",
+          "104.16.132.229"
+        ],
+        "system_ttl": 61,
+        "isp_ips": [
+          "104.16.133.229",
+          "104.16.132.229"
+        ],
+        "doh_ips": [
+          "104.16.132.229",
+          "104.16.133.229"
+        ],
+        "resolved_asn": "AS13335",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "104.16.132.229",
+            "104.16.133.229"
+          ],
+          "google_2": [
+            "104.16.132.229",
+            "104.16.133.229"
+          ],
+          "cloudflare_1": [
+            "104.16.133.229",
+            "104.16.132.229"
+          ],
+          "yandex": [
+            "104.16.133.229",
+            "104.16.132.229"
+          ],
+          "quad9": [
+            "104.16.132.229",
+            "104.16.133.229"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:00.777044Z",
+      "notes": null
+    },
+    {
+      "test": "dns_crypto_cloudflare_com_system",
+      "category": "dns",
+      "target": "crypto.cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "162.159.136.79",
+          "162.159.135.79"
+        ],
+        "system_ttl": 299,
+        "isp_ips": [
+          "162.159.135.79",
+          "162.159.136.79"
+        ],
+        "doh_ips": [
+          "162.159.135.79",
+          "162.159.136.79"
+        ],
+        "resolved_asn": "AS13335",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "162.159.135.79",
+            "162.159.136.79"
+          ],
+          "google_2": [
+            "162.159.136.79",
+            "162.159.135.79"
+          ],
+          "cloudflare_1": [
+            "162.159.135.79",
+            "162.159.136.79"
+          ],
+          "yandex": [
+            "162.159.135.79",
+            "162.159.136.79"
+          ],
+          "quad9": [
+            "162.159.135.79",
+            "162.159.136.79"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:01.084134Z",
+      "notes": null
+    },
+    {
+      "test": "dns_currenttime_tv_system",
+      "category": "dns",
+      "target": "currenttime.tv",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "184.86.103.219",
+          "184.86.103.214"
+        ],
+        "system_ttl": 26,
+        "isp_ips": [
+          "104.126.37.168",
+          "104.126.37.154"
+        ],
+        "doh_ips": [
+          "104.126.37.168",
+          "23.36.162.220",
+          "23.36.162.204",
+          "104.126.37.154"
+        ],
+        "resolved_asn": "AS20940",
+        "cert_valid": true,
+        "ip_overlap_with_doh": false,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "23.36.162.204",
+            "23.36.162.220"
+          ],
+          "google_2": [
+            "23.36.162.204",
+            "23.36.162.220"
+          ],
+          "cloudflare_1": [
+            "184.86.103.214",
+            "184.86.103.219"
+          ],
+          "yandex": [
+            "23.36.79.154",
+            "23.36.79.138"
+          ],
+          "quad9": [
+            "23.36.162.220",
+            "23.36.162.204"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:01.335253Z",
+      "notes": null
+    },
+    {
+      "test": "dns_discord_com_system",
+      "category": "dns",
+      "target": "discord.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "162.159.135.232",
+          "162.159.136.232",
+          "162.159.137.232",
+          "162.159.138.232",
+          "162.159.128.233"
+        ],
+        "system_ttl": 201,
+        "isp_ips": [
+          "162.159.128.233",
+          "162.159.135.232",
+          "162.159.136.232",
+          "162.159.137.232",
+          "162.159.138.232"
+        ],
+        "doh_ips": [
+          "162.159.128.233",
+          "162.159.135.232",
+          "162.159.137.232",
+          "162.159.136.232",
+          "162.159.138.232"
+        ],
+        "resolved_asn": "AS13335",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "162.159.137.232",
+            "162.159.136.232",
+            "162.159.135.232",
+            "162.159.128.233",
+            "162.159.138.232"
+          ],
+          "google_2": [
+            "162.159.128.233",
+            "162.159.137.232",
+            "162.159.138.232",
+            "162.159.136.232",
+            "162.159.135.232"
+          ],
+          "cloudflare_1": [
+            "162.159.135.232",
+            "162.159.138.232",
+            "162.159.128.233",
+            "162.159.137.232",
+            "162.159.136.232"
+          ],
+          "yandex": [
+            "162.159.137.232",
+            "162.159.138.232",
+            "162.159.136.232",
+            "162.159.128.233",
+            "162.159.135.232"
+          ],
+          "quad9": [
+            "162.159.128.233",
+            "162.159.136.232",
+            "162.159.137.232",
+            "162.159.138.232",
+            "162.159.135.232"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:01.571436Z",
+      "notes": null
+    },
+    {
+      "test": "dns_dw_com_system",
+      "category": "dns",
+      "target": "dw.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "194.55.26.46",
+          "194.55.30.46"
+        ],
+        "system_ttl": 300,
+        "isp_ips": [
+          "194.55.26.46",
+          "194.55.30.46"
+        ],
+        "doh_ips": [
+          "194.55.30.46",
+          "194.55.26.46"
+        ],
+        "resolved_asn": "AS200777",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "194.55.26.46",
+            "194.55.30.46"
+          ],
+          "google_2": [
+            "194.55.26.46",
+            "194.55.30.46"
+          ],
+          "cloudflare_1": [
+            "194.55.26.46",
+            "194.55.30.46"
+          ],
+          "yandex": [
+            "194.55.30.46",
+            "194.55.26.46"
+          ],
+          "quad9": [
+            "194.55.30.46",
+            "194.55.26.46"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:01.924735Z",
+      "notes": null
+    },
+    {
+      "test": "dns_expressvpn_com_system",
+      "category": "dns",
+      "target": "expressvpn.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "18.66.112.8",
+          "18.66.112.100",
+          "18.66.112.113",
+          "18.66.112.127"
+        ],
+        "system_ttl": 60,
+        "isp_ips": [
+          "18.66.112.113",
+          "18.66.112.127",
+          "18.66.112.8",
+          "18.66.112.100"
+        ],
+        "doh_ips": [
+          "52.85.185.82",
+          "18.66.112.127",
+          "18.66.112.8",
+          "52.85.185.56",
+          "52.85.185.124",
+          "54.230.201.88",
+          "54.230.201.58",
+          "54.230.201.32",
+          "18.66.112.100",
+          "18.66.112.113",
+          "52.85.185.93",
+          "54.230.201.13"
+        ],
+        "resolved_asn": "AS16509",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "54.230.201.13",
+            "54.230.201.58",
+            "54.230.201.32",
+            "54.230.201.88"
+          ],
+          "google_2": [
+            "54.230.201.58",
+            "54.230.201.88",
+            "54.230.201.13",
+            "54.230.201.32"
+          ],
+          "cloudflare_1": [
+            "18.66.112.8",
+            "18.66.112.100",
+            "18.66.112.127",
+            "18.66.112.113"
+          ],
+          "yandex": [
+            "18.66.112.127",
+            "18.66.112.113",
+            "18.66.112.100",
+            "18.66.112.8"
+          ],
+          "quad9": [
+            "18.66.112.8",
+            "18.66.112.127",
+            "18.66.112.100",
+            "18.66.112.113"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:02.277456Z",
+      "notes": null
+    },
+    {
+      "test": "dns_facebook_com_system",
+      "category": "dns",
+      "target": "facebook.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "157.240.0.35"
+        ],
+        "system_ttl": 60,
+        "isp_ips": [
+          "157.240.200.35"
+        ],
+        "doh_ips": [
+          "57.144.248.1",
+          "157.240.253.35"
+        ],
+        "resolved_asn": "AS32934",
+        "cert_valid": true,
+        "ip_overlap_with_doh": false,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "57.144.248.1"
+          ],
+          "google_2": [
+            "57.144.248.1"
+          ],
+          "cloudflare_1": [
+            "57.144.244.1"
+          ],
+          "yandex": [
+            "157.240.253.35"
+          ],
+          "quad9": [
+            "157.240.203.35"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:02.505004Z",
+      "notes": null
+    },
+    {
+      "test": "dns_google_com_system",
+      "category": "dns",
+      "target": "google.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "142.250.109.138",
+          "142.250.109.139",
+          "142.250.109.100",
+          "142.250.109.101",
+          "142.250.109.102",
+          "142.250.109.113"
+        ],
+        "system_ttl": 31,
+        "isp_ips": [
+          "142.251.13.113",
+          "142.251.13.138",
+          "142.251.13.139",
+          "142.251.13.100",
+          "142.251.13.101",
+          "142.251.13.102"
+        ],
+        "doh_ips": [
+          "142.251.14.113",
+          "192.178.183.100",
+          "142.251.20.101",
+          "142.251.20.102",
+          "142.251.20.100",
+          "142.251.20.113",
+          "142.251.20.139",
+          "192.178.183.138",
+          "192.178.183.102",
+          "192.178.183.113",
+          "192.178.183.139",
+          "142.251.14.139",
+          "192.178.183.101",
+          "142.251.14.138",
+          "142.251.14.100",
+          "142.251.14.101",
+          "142.251.14.102",
+          "142.251.20.138"
+        ],
+        "resolved_asn": "AS15169",
+        "cert_valid": true,
+        "ip_overlap_with_doh": false,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "192.178.183.101",
+            "192.178.183.139",
+            "192.178.183.100",
+            "192.178.183.102",
+            "192.178.183.138",
+            "192.178.183.113"
+          ],
+          "google_2": [
+            "142.251.14.102",
+            "142.251.14.138",
+            "142.251.14.139",
+            "142.251.14.100",
+            "142.251.14.101",
+            "142.251.14.113"
+          ],
+          "cloudflare_1": [
+            "142.251.13.101",
+            "142.251.13.100",
+            "142.251.13.113",
+            "142.251.13.138",
+            "142.251.13.102",
+            "142.251.13.139"
+          ],
+          "yandex": [
+            "209.85.233.100",
+            "209.85.233.139",
+            "209.85.233.113",
+            "209.85.233.102",
+            "209.85.233.138",
+            "209.85.233.101"
+          ],
+          "quad9": [
+            "142.251.20.101",
+            "142.251.20.102",
+            "142.251.20.139",
+            "142.251.20.100",
+            "142.251.20.113",
+            "142.251.20.138"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:02.781231Z",
+      "notes": null
+    },
+    {
+      "test": "dns_inopressa_ru_system",
+      "category": "dns",
+      "target": "inopressa.ru",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "212.227.190.190"
+        ],
+        "system_ttl": 3600,
+        "isp_ips": [
+          "212.227.190.190"
+        ],
+        "doh_ips": [
+          "212.227.190.190"
+        ],
+        "resolved_asn": "AS8560",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "212.227.190.190"
+          ],
+          "google_2": [
+            "212.227.190.190"
+          ],
+          "cloudflare_1": [
+            "212.227.190.190"
+          ],
+          "yandex": [
+            "212.227.190.190"
+          ],
+          "quad9": [
+            "212.227.190.190"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:03.339586Z",
+      "notes": null
+    },
+    {
+      "test": "dns_instagram_com_system",
+      "category": "dns",
+      "target": "instagram.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "157.240.30.174"
+        ],
+        "system_ttl": 5,
+        "isp_ips": [
+          "157.240.200.174"
+        ],
+        "doh_ips": [
+          "57.144.248.34",
+          "157.240.253.174"
+        ],
+        "resolved_asn": "AS32934",
+        "cert_valid": true,
+        "ip_overlap_with_doh": false,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "57.144.248.34"
+          ],
+          "google_2": [
+            "57.144.248.34"
+          ],
+          "cloudflare_1": [
+            "57.144.248.34"
+          ],
+          "yandex": [
+            "157.240.253.174"
+          ],
+          "quad9": [
+            "157.240.203.174"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:03.588221Z",
+      "notes": null
+    },
+    {
+      "test": "dns_linkedin_com_system",
+      "category": "dns",
+      "target": "linkedin.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "150.171.22.12"
+        ],
+        "system_ttl": 300,
+        "isp_ips": [
+          "150.171.22.12"
+        ],
+        "doh_ips": [
+          "150.171.22.12"
+        ],
+        "resolved_asn": "AS8075",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "150.171.22.12"
+          ],
+          "google_2": [
+            "150.171.22.12"
+          ],
+          "cloudflare_1": [
+            "150.171.22.12"
+          ],
+          "yandex": [
+            "150.171.22.12"
+          ],
+          "quad9": [
+            "150.171.22.12"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:03.828293Z",
+      "notes": null
+    },
+    {
+      "test": "dns_mediazona_ca_system",
+      "category": "dns",
+      "target": "mediazona.ca",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "104.21.64.6",
+          "172.67.173.185"
+        ],
+        "system_ttl": 294,
+        "isp_ips": [
+          "172.67.173.185",
+          "104.21.64.6"
+        ],
+        "doh_ips": [
+          "104.21.64.6",
+          "172.67.173.185"
+        ],
+        "resolved_asn": "AS13335",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "172.67.173.185",
+            "104.21.64.6"
+          ],
+          "google_2": [
+            "104.21.64.6",
+            "172.67.173.185"
+          ],
+          "cloudflare_1": [
+            "172.67.173.185",
+            "104.21.64.6"
+          ],
+          "yandex": [
+            "104.21.64.6",
+            "172.67.173.185"
+          ],
+          "quad9": [
+            "104.21.64.6",
+            "172.67.173.185"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:04.141014Z",
+      "notes": null
+    },
+    {
+      "test": "dns_meduza_io_system",
+      "category": "dns",
+      "target": "meduza.io",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "104.18.0.79",
+          "104.18.1.79"
+        ],
+        "system_ttl": 293,
+        "isp_ips": [
+          "104.18.0.79",
+          "104.18.1.79"
+        ],
+        "doh_ips": [
+          "104.18.0.79",
+          "104.18.1.79"
+        ],
+        "resolved_asn": "AS13335",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "104.18.0.79",
+            "104.18.1.79"
+          ],
+          "google_2": [
+            "104.18.0.79",
+            "104.18.1.79"
+          ],
+          "cloudflare_1": [
+            "104.18.0.79",
+            "104.18.1.79"
+          ],
+          "yandex": [
+            "8.6.112.0",
+            "8.47.69.0"
+          ],
+          "quad9": [
+            "104.18.1.79",
+            "104.18.0.79"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:04.359879Z",
+      "notes": null
+    },
+    {
+      "test": "dns_mullvad_net_system",
+      "category": "dns",
+      "target": "mullvad.net",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "45.83.223.209"
+        ],
+        "system_ttl": 60,
+        "isp_ips": [
+          "45.83.223.209"
+        ],
+        "doh_ips": [
+          "45.83.223.209"
+        ],
+        "resolved_asn": "AS39351",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "45.83.223.209"
+          ],
+          "google_2": [
+            "45.83.223.209"
+          ],
+          "cloudflare_1": [
+            "45.83.223.209"
+          ],
+          "yandex": [
+            "45.83.223.209"
+          ],
+          "quad9": [
+            "45.83.223.209"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:04.637936Z",
+      "notes": null
+    },
+    {
+      "test": "dns_nordvpn_com_system",
+      "category": "dns",
+      "target": "nordvpn.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "104.19.159.190",
+          "104.16.208.203"
+        ],
+        "system_ttl": 300,
+        "isp_ips": [
+          "104.19.159.190",
+          "104.16.208.203"
+        ],
+        "doh_ips": [
+          "104.19.159.190",
+          "104.16.208.203"
+        ],
+        "resolved_asn": "AS13335",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "104.19.159.190",
+            "104.16.208.203"
+          ],
+          "google_2": [
+            "104.19.159.190",
+            "104.16.208.203"
+          ],
+          "cloudflare_1": [
+            "104.19.159.190",
+            "104.16.208.203"
+          ],
+          "yandex": [
+            "104.16.208.203",
+            "104.19.159.190"
+          ],
+          "quad9": [
+            "104.16.208.203",
+            "104.19.159.190"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:04.884846Z",
+      "notes": null
+    },
+    {
+      "test": "dns_novayagazeta_eu_system",
+      "category": "dns",
+      "target": "novayagazeta.eu",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "172.66.151.241",
+          "104.20.36.103"
+        ],
+        "system_ttl": 293,
+        "isp_ips": [
+          "104.20.36.103",
+          "172.66.151.241"
+        ],
+        "doh_ips": [
+          "172.66.151.241",
+          "104.20.36.103"
+        ],
+        "resolved_asn": "AS13335",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "104.20.36.103",
+            "172.66.151.241"
+          ],
+          "google_2": [
+            "104.20.36.103",
+            "172.66.151.241"
+          ],
+          "cloudflare_1": [
+            "104.20.36.103",
+            "172.66.151.241"
+          ],
+          "yandex": [
+            "8.47.69.0",
+            "8.6.112.0"
+          ],
+          "quad9": [
+            "172.66.151.241",
+            "104.20.36.103"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:05.293584Z",
+      "notes": null
+    },
+    {
+      "test": "dns_protonvpn_com_system",
+      "category": "dns",
+      "target": "protonvpn.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "185.159.159.140"
+        ],
+        "system_ttl": 300,
+        "isp_ips": [
+          "185.159.159.140"
+        ],
+        "doh_ips": [
+          "185.159.159.140"
+        ],
+        "resolved_asn": "AS209103",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "185.159.159.140"
+          ],
+          "google_2": [
+            "185.159.159.140"
+          ],
+          "cloudflare_1": [
+            "185.159.159.140"
+          ],
+          "yandex": [
+            "185.159.159.140"
+          ],
+          "quad9": [
+            "185.159.159.140"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:05.661660Z",
+      "notes": null
+    },
+    {
+      "test": "dns_rferl_org_system",
+      "category": "dns",
+      "target": "rferl.org",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "184.86.103.214",
+          "184.86.103.200"
+        ],
+        "system_ttl": 30,
+        "isp_ips": [
+          "184.86.103.200",
+          "184.86.103.214"
+        ],
+        "doh_ips": [
+          "184.86.103.214",
+          "23.36.162.223",
+          "184.86.103.200",
+          "23.36.162.197"
+        ],
+        "resolved_asn": "AS20940",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "184.86.103.214",
+            "184.86.103.200"
+          ],
+          "google_2": [
+            "184.86.103.214",
+            "184.86.103.200"
+          ],
+          "cloudflare_1": [
+            "23.36.162.223",
+            "23.36.162.197"
+          ],
+          "yandex": [
+            "23.36.79.138",
+            "23.36.77.226"
+          ],
+          "quad9": [
+            "23.200.24.106",
+            "23.200.24.85"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:05.931714Z",
+      "notes": null
+    },
+    {
+      "test": "dns_signal_org_system",
+      "category": "dns",
+      "target": "signal.org",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "104.18.11.47",
+          "104.18.10.47"
+        ],
+        "system_ttl": 294,
+        "isp_ips": [
+          "104.18.10.47",
+          "104.18.11.47"
+        ],
+        "doh_ips": [
+          "104.18.11.47",
+          "104.18.10.47"
+        ],
+        "resolved_asn": "AS13335",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "104.18.10.47",
+            "104.18.11.47"
+          ],
+          "google_2": [
+            "104.18.11.47",
+            "104.18.10.47"
+          ],
+          "cloudflare_1": [
+            "104.18.10.47",
+            "104.18.11.47"
+          ],
+          "yandex": [
+            "8.47.69.0",
+            "8.6.112.0"
+          ],
+          "quad9": [
+            "104.18.10.47",
+            "104.18.11.47"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:06.189708Z",
+      "notes": null
+    },
+    {
+      "test": "dns_tiktok_com_system",
+      "category": "dns",
+      "target": "tiktok.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "23.50.131.157",
+          "23.50.131.138"
+        ],
+        "system_ttl": 20,
+        "isp_ips": [
+          "23.50.131.157",
+          "23.50.131.138"
+        ],
+        "doh_ips": [
+          "23.36.162.219",
+          "23.36.162.207",
+          "23.50.131.138",
+          "23.36.162.214",
+          "23.36.162.221",
+          "23.36.162.199",
+          "23.36.162.215",
+          "23.50.131.157"
+        ],
+        "resolved_asn": "AS20940",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "23.50.131.138",
+            "23.50.131.157"
+          ],
+          "google_2": [
+            "23.50.131.157",
+            "23.50.131.138"
+          ],
+          "cloudflare_1": [
+            "23.36.162.199",
+            "23.36.162.219",
+            "23.36.162.207",
+            "23.36.162.214",
+            "23.36.162.221",
+            "23.36.162.215"
+          ],
+          "yandex": [
+            "104.94.100.160",
+            "104.94.100.170",
+            "104.94.100.162",
+            "104.94.100.177",
+            "104.94.100.176",
+            "104.94.100.163"
+          ],
+          "quad9": [
+            "23.50.131.138",
+            "23.50.131.157"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:06.434261Z",
+      "notes": null
+    },
+    {
+      "test": "dns_tvrain_ru_system",
+      "category": "dns",
+      "target": "tvrain.ru",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "109.234.211.253",
+          "109.234.211.254"
+        ],
+        "system_ttl": 300,
+        "isp_ips": [
+          "109.234.211.254",
+          "109.234.211.253"
+        ],
+        "doh_ips": [
+          "109.234.211.253",
+          "109.234.211.254"
+        ],
+        "resolved_asn": "AS13335",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "109.234.211.253",
+            "109.234.211.254"
+          ],
+          "google_2": [
+            "109.234.211.254",
+            "109.234.211.253"
+          ],
+          "cloudflare_1": [
+            "109.234.211.254",
+            "109.234.211.253"
+          ],
+          "yandex": [
+            "109.234.211.254",
+            "109.234.211.253"
+          ],
+          "quad9": [
+            "109.234.211.253",
+            "109.234.211.254"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:06.687251Z",
+      "notes": null
+    },
+    {
+      "test": "dns_twitter_com_system",
+      "category": "dns",
+      "target": "twitter.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "162.159.140.229"
+        ],
+        "system_ttl": 55,
+        "isp_ips": [
+          "162.159.140.229"
+        ],
+        "doh_ips": [
+          "172.66.0.227"
+        ],
+        "resolved_asn": "AS13335",
+        "cert_valid": true,
+        "ip_overlap_with_doh": false,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "162.159.140.229"
+          ],
+          "google_2": [
+            "172.66.0.227"
+          ],
+          "cloudflare_1": [
+            "172.66.0.227"
+          ],
+          "yandex": [
+            "172.66.0.227"
+          ],
+          "quad9": [
+            "151.101.66.146"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:06.904613Z",
+      "notes": null
+    },
+    {
+      "test": "dns_viber_com_system",
+      "category": "dns",
+      "target": "viber.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "34.226.73.109",
+          "44.207.86.245"
+        ],
+        "system_ttl": 60,
+        "isp_ips": [
+          "44.207.86.245",
+          "34.226.73.109"
+        ],
+        "doh_ips": [
+          "44.207.86.245",
+          "34.226.73.109"
+        ],
+        "resolved_asn": "AS14618",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "34.226.73.109",
+            "44.207.86.245"
+          ],
+          "google_2": [
+            "34.226.73.109",
+            "44.207.86.245"
+          ],
+          "cloudflare_1": [
+            "34.226.73.109",
+            "44.207.86.245"
+          ],
+          "yandex": [
+            "44.207.86.245",
+            "34.226.73.109"
+          ],
+          "quad9": [
+            "34.226.73.109",
+            "44.207.86.245"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:07.377317Z",
+      "notes": null
+    },
+    {
+      "test": "dns_vk_com_system",
+      "category": "dns",
+      "target": "vk.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "87.240.132.67",
+          "87.240.132.72",
+          "87.240.132.78",
+          "87.240.137.164",
+          "93.186.225.194",
+          "87.240.129.133"
+        ],
+        "system_ttl": 749,
+        "isp_ips": [
+          "87.240.132.72",
+          "87.240.132.78",
+          "87.240.137.164",
+          "93.186.225.194",
+          "87.240.129.133",
+          "87.240.132.67"
+        ],
+        "doh_ips": [
+          "87.240.129.133",
+          "87.240.137.164",
+          "87.240.132.78",
+          "87.240.132.72",
+          "87.240.132.67",
+          "93.186.225.194"
+        ],
+        "resolved_asn": "AS47541",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "93.186.225.194",
+            "87.240.129.133",
+            "87.240.132.72",
+            "87.240.132.78",
+            "87.240.132.67",
+            "87.240.137.164"
+          ],
+          "google_2": [
+            "87.240.132.78",
+            "87.240.132.72",
+            "87.240.129.133",
+            "87.240.132.67",
+            "87.240.137.164",
+            "93.186.225.194"
+          ],
+          "cloudflare_1": [
+            "87.240.129.133",
+            "87.240.137.164",
+            "87.240.132.67",
+            "93.186.225.194",
+            "87.240.132.78",
+            "87.240.132.72"
+          ],
+          "yandex": [
+            "87.240.129.133",
+            "87.240.132.72",
+            "87.240.132.78",
+            "87.240.137.164",
+            "93.186.225.194",
+            "87.240.132.67"
+          ],
+          "quad9": [
+            "87.240.132.67",
+            "87.240.129.133",
+            "87.240.132.72",
+            "93.186.225.194",
+            "87.240.132.78",
+            "87.240.137.164"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:07.661568Z",
+      "notes": null
+    },
+    {
+      "test": "dns_web_telegram_org_system",
+      "category": "dns",
+      "target": "web.telegram.org",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "149.154.167.99"
+        ],
+        "system_ttl": 679,
+        "isp_ips": [
+          "149.154.167.99"
+        ],
+        "doh_ips": [
+          "149.154.167.99"
+        ],
+        "resolved_asn": "AS62041",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "149.154.167.99"
+          ],
+          "google_2": [
+            "149.154.167.99"
+          ],
+          "cloudflare_1": [
+            "149.154.167.99"
+          ],
+          "yandex": [
+            "149.154.167.99"
+          ],
+          "quad9": [
+            "149.154.167.99"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:07.894048Z",
+      "notes": null
+    },
+    {
+      "test": "dns_web_whatsapp_com_system",
+      "category": "dns",
+      "target": "web.whatsapp.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "157.240.9.53"
+        ],
+        "system_ttl": 10,
+        "isp_ips": [
+          "157.240.0.60"
+        ],
+        "doh_ips": [
+          "157.240.210.60",
+          "57.144.245.32",
+          "157.240.0.60",
+          "57.144.249.32"
+        ],
+        "resolved_asn": "AS32934",
+        "cert_valid": true,
+        "ip_overlap_with_doh": false,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "57.144.249.32"
+          ],
+          "google_2": [
+            "57.144.249.32"
+          ],
+          "cloudflare_1": [
+            "57.144.249.32"
+          ],
+          "yandex": [
+            "157.240.253.60"
+          ],
+          "quad9": [
+            "157.240.203.60"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:08.176992Z",
+      "notes": null
+    },
+    {
+      "test": "dns_weba_telegram_org_system",
+      "category": "dns",
+      "target": "weba.telegram.org",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "149.154.167.99"
+        ],
+        "system_ttl": 697,
+        "isp_ips": [
+          "149.154.167.99"
+        ],
+        "doh_ips": [
+          "149.154.167.99"
+        ],
+        "resolved_asn": "AS62041",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "149.154.167.99"
+          ],
+          "google_2": [
+            "149.154.167.99"
+          ],
+          "cloudflare_1": [
+            "149.154.167.99"
+          ],
+          "yandex": [
+            "149.154.167.99"
+          ],
+          "quad9": [
+            "149.154.167.99"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:08.450646Z",
+      "notes": null
+    },
+    {
+      "test": "dns_webk_telegram_org_system",
+      "category": "dns",
+      "target": "webk.telegram.org",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "149.154.167.99"
+        ],
+        "system_ttl": 700,
+        "isp_ips": [
+          "149.154.167.99"
+        ],
+        "doh_ips": [
+          "149.154.167.99"
+        ],
+        "resolved_asn": "AS62041",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "149.154.167.99"
+          ],
+          "google_2": [
+            "149.154.167.99"
+          ],
+          "cloudflare_1": [
+            "149.154.167.99"
+          ],
+          "yandex": [
+            "149.154.167.99"
+          ],
+          "quad9": [
+            "149.154.167.99"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:08.714297Z",
+      "notes": null
+    },
+    {
+      "test": "dns_whatsapp_com_system",
+      "category": "dns",
+      "target": "whatsapp.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "157.240.9.53"
+        ],
+        "system_ttl": 17,
+        "isp_ips": [
+          "157.240.0.60"
+        ],
+        "doh_ips": [
+          "157.240.253.60",
+          "57.144.245.32",
+          "57.144.249.32"
+        ],
+        "resolved_asn": "AS32934",
+        "cert_valid": true,
+        "ip_overlap_with_doh": false,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "57.144.249.32"
+          ],
+          "google_2": [
+            "57.144.249.32"
+          ],
+          "cloudflare_1": [
+            "157.240.0.60"
+          ],
+          "yandex": [
+            "157.240.253.60"
+          ],
+          "quad9": [
+            "157.240.203.60"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:08.960621Z",
+      "notes": null
+    },
+    {
+      "test": "dns_wikipedia_org_system",
+      "category": "dns",
+      "target": "wikipedia.org",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "185.15.59.224"
+        ],
+        "system_ttl": 180,
+        "isp_ips": [
+          "185.15.59.224"
+        ],
+        "doh_ips": [
+          "185.15.59.224"
+        ],
+        "resolved_asn": "AS14907",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "185.15.59.224"
+          ],
+          "google_2": [
+            "185.15.59.224"
+          ],
+          "cloudflare_1": [
+            "185.15.59.224"
+          ],
+          "yandex": [
+            "185.15.59.224"
+          ],
+          "quad9": [
+            "185.15.59.224"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:09.249457Z",
+      "notes": null
+    },
+    {
+      "test": "dns_yandex_ru_system",
+      "category": "dns",
+      "target": "yandex.ru",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "77.88.55.88",
+          "5.255.255.77",
+          "77.88.44.55"
+        ],
+        "system_ttl": 275,
+        "isp_ips": [
+          "77.88.55.88",
+          "5.255.255.77",
+          "77.88.44.55"
+        ],
+        "doh_ips": [
+          "77.88.44.55",
+          "77.88.55.88",
+          "5.255.255.77"
+        ],
+        "resolved_asn": "AS13238",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "77.88.55.88",
+            "5.255.255.77",
+            "77.88.44.55"
+          ],
+          "google_2": [
+            "5.255.255.77",
+            "77.88.44.55",
+            "77.88.55.88"
+          ],
+          "cloudflare_1": [
+            "77.88.55.88",
+            "77.88.44.55",
+            "5.255.255.77"
+          ],
+          "yandex": [
+            "77.88.44.55",
+            "77.88.55.88",
+            "5.255.255.77"
+          ],
+          "quad9": [
+            "77.88.55.88",
+            "77.88.44.55",
+            "5.255.255.77"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:09.547862Z",
+      "notes": null
+    },
+    {
+      "test": "dns_youtube_com_system",
+      "category": "dns",
+      "target": "youtube.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "142.251.110.93",
+          "142.251.110.136",
+          "142.251.110.190",
+          "142.251.110.91"
+        ],
+        "system_ttl": 237,
+        "isp_ips": [
+          "142.250.154.136",
+          "142.250.154.190",
+          "142.250.154.91",
+          "142.250.154.93"
+        ],
+        "doh_ips": [
+          "142.251.20.136",
+          "142.251.20.91",
+          "142.251.14.91",
+          "142.251.14.136",
+          "142.251.14.190",
+          "142.251.14.93",
+          "192.178.183.190",
+          "142.251.20.93",
+          "192.178.183.136",
+          "192.178.183.93",
+          "192.178.183.91",
+          "142.251.20.190"
+        ],
+        "resolved_asn": "AS15169",
+        "cert_valid": true,
+        "ip_overlap_with_doh": false,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "192.178.183.93",
+            "192.178.183.91",
+            "192.178.183.190",
+            "192.178.183.136"
+          ],
+          "google_2": [
+            "192.178.183.91",
+            "192.178.183.190",
+            "192.178.183.93",
+            "192.178.183.136"
+          ],
+          "cloudflare_1": [
+            "142.251.14.91",
+            "142.251.14.93",
+            "142.251.14.136",
+            "142.251.14.190"
+          ],
+          "yandex": [
+            "64.233.161.91",
+            "64.233.161.136",
+            "64.233.161.190",
+            "64.233.161.93"
+          ],
+          "quad9": [
+            "192.178.183.91",
+            "192.178.183.93",
+            "192.178.183.190",
+            "192.178.183.136"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:09.813576Z",
+      "notes": null
+    },
+    {
+      "test": "tcp_149_154_175_53_443",
+      "category": "tcp",
+      "target": "149.154.175.53:443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "all_verdicts": [
+          "OK"
+        ],
+        "rtts_ms": [
+          151.13134500279557
+        ],
+        "rst_detection": "rtt_heuristic_no_scapy"
+      },
+      "rtt_ms": 151.13134500279557,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.816105Z",
+      "notes": null
+    },
+    {
+      "test": "tcp_149_154_175_53_80",
+      "category": "tcp",
+      "target": "149.154.175.53:80",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "all_verdicts": [
+          "OK"
+        ],
+        "rtts_ms": [
+          150.8662690030178
+        ],
+        "rst_detection": "rtt_heuristic_no_scapy"
+      },
+      "rtt_ms": 150.8662690030178,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.816211Z",
+      "notes": null
+    },
+    {
+      "test": "tcp_149_154_175_53_5222",
+      "category": "tcp",
+      "target": "149.154.175.53:5222",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "all_verdicts": [
+          "OK"
+        ],
+        "rtts_ms": [
+          150.71267999883275
+        ],
+        "rst_detection": "rtt_heuristic_no_scapy"
+      },
+      "rtt_ms": 150.71267999883275,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.816239Z",
+      "notes": null
+    },
+    {
+      "test": "tcp_149_154_167_51_443",
+      "category": "tcp",
+      "target": "149.154.167.51:443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "all_verdicts": [
+          "OK"
+        ],
+        "rtts_ms": [
+          150.28760000132024
+        ],
+        "rst_detection": "rtt_heuristic_no_scapy"
+      },
+      "rtt_ms": 150.28760000132024,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.816012Z",
+      "notes": null
+    },
+    {
+      "test": "tcp_149_154_167_51_80",
+      "category": "tcp",
+      "target": "149.154.167.51:80",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "all_verdicts": [
+          "OK"
+        ],
+        "rtts_ms": [
+          149.9123630055692
+        ],
+        "rst_detection": "rtt_heuristic_no_scapy"
+      },
+      "rtt_ms": 149.9123630055692,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.815902Z",
+      "notes": null
+    },
+    {
+      "test": "tcp_149_154_167_51_5222",
+      "category": "tcp",
+      "target": "149.154.167.51:5222",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "all_verdicts": [
+          "OK"
+        ],
+        "rtts_ms": [
+          150.0524930015672
+        ],
+        "rst_detection": "rtt_heuristic_no_scapy"
+      },
+      "rtt_ms": 150.0524930015672,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.815988Z",
+      "notes": null
+    },
+    {
+      "test": "tcp_149_154_175_100_443",
+      "category": "tcp",
+      "target": "149.154.175.100:443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "all_verdicts": [
+          "OK"
+        ],
+        "rtts_ms": [
+          150.1609870028915
+        ],
+        "rst_detection": "rtt_heuristic_no_scapy"
+      },
+      "rtt_ms": 150.1609870028915,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.816130Z",
+      "notes": null
+    },
+    {
+      "test": "tcp_149_154_175_100_80",
+      "category": "tcp",
+      "target": "149.154.175.100:80",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "all_verdicts": [
+          "OK"
+        ],
+        "rtts_ms": [
+          150.0752290012315
+        ],
+        "rst_detection": "rtt_heuristic_no_scapy"
+      },
+      "rtt_ms": 150.0752290012315,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.816154Z",
+      "notes": null
+    },
+    {
+      "test": "tcp_149_154_175_100_5222",
+      "category": "tcp",
+      "target": "149.154.175.100:5222",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "all_verdicts": [
+          "OK"
+        ],
+        "rtts_ms": [
+          149.9897680041613
+        ],
+        "rst_detection": "rtt_heuristic_no_scapy"
+      },
+      "rtt_ms": 149.9897680041613,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.816181Z",
+      "notes": null
+    },
+    {
+      "test": "tcp_149_154_167_91_443",
+      "category": "tcp",
+      "target": "149.154.167.91:443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "all_verdicts": [
+          "OK"
+        ],
+        "rtts_ms": [
+          149.18528399721254
+        ],
+        "rst_detection": "rtt_heuristic_no_scapy"
+      },
+      "rtt_ms": 149.18528399721254,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.815957Z",
+      "notes": null
+    },
+    {
+      "test": "tcp_149_154_167_91_80",
+      "category": "tcp",
+      "target": "149.154.167.91:80",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "all_verdicts": [
+          "OK"
+        ],
+        "rtts_ms": [
+          148.82214899989776
+        ],
+        "rst_detection": "rtt_heuristic_no_scapy"
+      },
+      "rtt_ms": 148.82214899989776,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.816043Z",
+      "notes": null
+    },
+    {
+      "test": "tcp_149_154_167_91_5222",
+      "category": "tcp",
+      "target": "149.154.167.91:5222",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "all_verdicts": [
+          "OK"
+        ],
+        "rtts_ms": [
+          148.65272100723814
+        ],
+        "rst_detection": "rtt_heuristic_no_scapy"
+      },
+      "rtt_ms": 148.65272100723814,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.816081Z",
+      "notes": null
+    },
+    {
+      "test": "tcp_91_108_56_130_443",
+      "category": "tcp",
+      "target": "91.108.56.130:443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "all_verdicts": [
+          "OK"
+        ],
+        "rtts_ms": [
+          168.08405600022525
+        ],
+        "rst_detection": "rtt_heuristic_no_scapy"
+      },
+      "rtt_ms": 168.08405600022525,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.864033Z",
+      "notes": null
+    },
+    {
+      "test": "tcp_91_108_56_130_80",
+      "category": "tcp",
+      "target": "91.108.56.130:80",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "all_verdicts": [
+          "OK"
+        ],
+        "rtts_ms": [
+          174.47842200635932
+        ],
+        "rst_detection": "rtt_heuristic_no_scapy"
+      },
+      "rtt_ms": 174.47842200635932,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.864100Z",
+      "notes": null
+    },
+    {
+      "test": "tcp_91_108_56_130_5222",
+      "category": "tcp",
+      "target": "91.108.56.130:5222",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "all_verdicts": [
+          "OK"
+        ],
+        "rtts_ms": [
+          174.09633999341168
+        ],
+        "rst_detection": "rtt_heuristic_no_scapy"
+      },
+      "rtt_ms": 174.09633999341168,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.864074Z",
+      "notes": null
+    },
+    {
+      "test": "tls_meduza_io_sni_blocked",
+      "category": "tls",
+      "target": "104.18.0.79:meduza.io",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "104.18.0.79",
+        "sni": "meduza.io",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 23.284355003852397,
+        "rtt_total_ms": 31.178243007161655,
+        "alpn": null,
+        "cert_subject_cn": "meduza.io",
+        "cert_issuer_cn": "E7",
+        "cert_chain_sha256": [
+          "9880a9283a6bab3c054577f3ff9f6e4031baada22dda19d4dacdbfa27dfe19fa"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.570142Z",
+      "notes": null
+    },
+    {
+      "test": "tls_meduza_io_sni_neutral",
+      "category": "tls",
+      "target": "104.18.0.79:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "104.18.0.79",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 5.562737002037466,
+        "rtt_total_ms": 14.764414998353459,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null,
+        "cert_chain_sha256": [
+          "da9fca34e821865e3066db0f029492013b6517f14aaf5a693abde9a48a174c19"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.588767Z",
+      "notes": null
+    },
+    {
+      "test": "tls_meduza_io_ech",
+      "category": "tls",
+      "target": "meduza.io",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": "no_ech_in_https_record"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.730625Z",
+      "notes": "Server has no ECH config — cannot conclude about censorship."
+    },
+    {
+      "test": "tls_novayagazeta_eu_sni_blocked",
+      "category": "tls",
+      "target": "172.66.151.241:novayagazeta.eu",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "172.66.151.241",
+        "sni": "novayagazeta.eu",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 23.66673199867364,
+        "rtt_total_ms": 31.56574399326928,
+        "alpn": null,
+        "cert_subject_cn": "novayagazeta.eu",
+        "cert_issuer_cn": "WE1",
+        "cert_chain_sha256": [
+          "73ccb9d8c24a4191724ff208ec3fa506ad86f79fa4335b6a9ade571ecb83938f"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.583911Z",
+      "notes": null
+    },
+    {
+      "test": "tls_novayagazeta_eu_sni_neutral",
+      "category": "tls",
+      "target": "172.66.151.241:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "172.66.151.241",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 6.666640998446383,
+        "rtt_total_ms": 14.81941000383813,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null,
+        "cert_chain_sha256": [
+          "da9fca34e821865e3066db0f029492013b6517f14aaf5a693abde9a48a174c19"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.606744Z",
+      "notes": null
+    },
+    {
+      "test": "tls_novayagazeta_eu_ech",
+      "category": "tls",
+      "target": "novayagazeta.eu",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "curl_returncode": 0,
+        "ech_config_source": "https_record_doh",
+        "stderr_tail": "sport-security: max-age=63072000; includeSubDomains; preload\r\n< content-security-policy: frame-ancestors 'self' https://*.novayagazeta.eu;\r\n< vary: accept-encoding\r\n< cf-cache-status: DYNAMIC\r\n< CF-RAY: 9f393033cd8a1b48-FRA\r\n< \r\n{ [765 bytes data]\n* Connection #0 to host novayagazeta.eu left intact\n"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.870021Z",
+      "notes": null
+    },
+    {
+      "test": "tls_mediazona_ca_sni_blocked",
+      "category": "tls",
+      "target": "104.21.64.6:mediazona.ca",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "104.21.64.6",
+        "sni": "mediazona.ca",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 24.241908991825767,
+        "rtt_total_ms": 34.58026799489744,
+        "alpn": null,
+        "cert_subject_cn": "mediazona.ca",
+        "cert_issuer_cn": "WE1",
+        "cert_chain_sha256": [
+          "556bfb9642b9782bd57675254c11b730a57dd29bb8851238c8250c577a15a189"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.587676Z",
+      "notes": null
+    },
+    {
+      "test": "tls_mediazona_ca_sni_neutral",
+      "category": "tls",
+      "target": "104.21.64.6:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "104.21.64.6",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 8.903604000806808,
+        "rtt_total_ms": 14.611136997700669,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null,
+        "cert_chain_sha256": [
+          "da9fca34e821865e3066db0f029492013b6517f14aaf5a693abde9a48a174c19"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.608370Z",
+      "notes": null
+    },
+    {
+      "test": "tls_mediazona_ca_ech",
+      "category": "tls",
+      "target": "mediazona.ca",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "curl_returncode": 0,
+        "ech_config_source": "https_record_doh",
+        "stderr_tail": "3vMVBTkOZaSOOwMrbc7w3XFubb5ShVFgBru1bdtf1s%2FwpZFG3Hu9TD87CyQoqQWVfxmj6LIJXMOZg%2BzPU2vbfZTZN3LRN0B3wmJiR4NgbjcSKoGFdW4q1eXufZ4%3D\"}]}\r\n< cf-cache-status: DYNAMIC\r\n< CF-RAY: 9f393033cf17f5a6-FRA\r\n< alt-svc: h3=\":443\"; ma=86400\r\n< \r\n{ [734 bytes data]\n* Connection #0 to host mediazona.ca left intact\n"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.042268Z",
+      "notes": null
+    },
+    {
+      "test": "tls_tvrain_ru_sni_blocked",
+      "category": "tls",
+      "target": "109.234.211.254:tvrain.ru",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "109.234.211.254",
+        "sni": "tvrain.ru",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 23.60342600150034,
+        "rtt_total_ms": 38.08245700201951,
+        "alpn": null,
+        "cert_subject_cn": "tvrain.ru",
+        "cert_issuer_cn": "WE1",
+        "cert_chain_sha256": [
+          "e38af3992f1582472fea6cefaa844c89879004b6b4f3a7ba4a10efde151043a8"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.572821Z",
+      "notes": null
+    },
+    {
+      "test": "tls_tvrain_ru_sni_neutral",
+      "category": "tls",
+      "target": "109.234.211.254:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "109.234.211.254",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 4.224573000101373,
+        "rtt_total_ms": 21.400527999503538,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null,
+        "cert_chain_sha256": [
+          "da9fca34e821865e3066db0f029492013b6517f14aaf5a693abde9a48a174c19"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.595137Z",
+      "notes": null
+    },
+    {
+      "test": "tls_tvrain_ru_ech",
+      "category": "tls",
+      "target": "tvrain.ru",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": "no_ech_in_https_record"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.739354Z",
+      "notes": "Server has no ECH config — cannot conclude about censorship."
+    },
+    {
+      "test": "tls_bbc_com_sni_blocked",
+      "category": "tls",
+      "target": "151.101.0.81:bbc.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "151.101.0.81",
+        "sni": "bbc.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 26.228125992929563,
+        "rtt_total_ms": 34.97968798910733,
+        "alpn": null,
+        "cert_subject_cn": "www.bbc.com",
+        "cert_issuer_cn": "GlobalSign RSA OV SSL CA 2018",
+        "cert_chain_sha256": [
+          "87a4d12db9b57d6864b54d2efdcc66cdc17a051713948cf40bef42a0865b59cb"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.581448Z",
+      "notes": null
+    },
+    {
+      "test": "tls_bbc_com_sni_neutral",
+      "category": "tls",
+      "target": "151.101.0.81:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "151.101.0.81",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 6.277359003433958,
+        "rtt_total_ms": 12.497957999585196,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null,
+        "cert_chain_sha256": [
+          "87a4d12db9b57d6864b54d2efdcc66cdc17a051713948cf40bef42a0865b59cb"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.595057Z",
+      "notes": null
+    },
+    {
+      "test": "tls_bbc_com_ech",
+      "category": "tls",
+      "target": "bbc.com",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": "no_ech_in_https_record"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.709563Z",
+      "notes": "Server has no ECH config — cannot conclude about censorship."
+    },
+    {
+      "test": "tls_dw_com_sni_blocked",
+      "category": "tls",
+      "target": "194.55.30.46:dw.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "194.55.30.46",
+        "sni": "dw.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 36.91602799517568,
+        "rtt_total_ms": 59.2782680032542,
+        "alpn": null,
+        "cert_subject_cn": "*.dw.com",
+        "cert_issuer_cn": "Thawte TLS RSA CA G1",
+        "cert_chain_sha256": [
+          "dfbdd63097056f470140b4c0ab8623b4c6deb58679b835dc4b7f4c5eb90c8fd0"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.575486Z",
+      "notes": null
+    },
+    {
+      "test": "tls_dw_com_sni_neutral",
+      "category": "tls",
+      "target": "194.55.30.46:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "194.55.30.46",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 26.893247006228194,
+        "rtt_total_ms": 44.23067100287881,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null,
+        "cert_chain_sha256": [
+          "dfbdd63097056f470140b4c0ab8623b4c6deb58679b835dc4b7f4c5eb90c8fd0"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.625583Z",
+      "notes": null
+    },
+    {
+      "test": "tls_dw_com_ech",
+      "category": "tls",
+      "target": "dw.com",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": "no_ech_in_https_record"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.780221Z",
+      "notes": "Server has no ECH config — cannot conclude about censorship."
+    },
+    {
+      "test": "tls_rferl_org_sni_blocked",
+      "category": "tls",
+      "target": "184.86.103.200:rferl.org",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "184.86.103.200",
+        "sni": "rferl.org",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 26.648732004105113,
+        "rtt_total_ms": 33.35946600418538,
+        "alpn": null,
+        "cert_subject_cn": "rfe-prod-4.cert.pangeadigital.io",
+        "cert_issuer_cn": "R12",
+        "cert_chain_sha256": [
+          "b8fa74f185319ed9e5076f86bed444295468c72242b05db124966acb505b084d"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.812980Z",
+      "notes": null
+    },
+    {
+      "test": "tls_rferl_org_sni_neutral",
+      "category": "tls",
+      "target": "184.86.103.200:cloudflare.com",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "184.86.103.200",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": false,
+        "error": "ssl_error",
+        "detail": "[SSL: TLSV1_ALERT_INTERNAL_ERROR] tlsv1 alert internal error (_ssl.c:1010)"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.855779Z",
+      "notes": null
+    },
+    {
+      "test": "tls_rferl_org_ech",
+      "category": "tls",
+      "target": "rferl.org",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": "no_ech_in_https_record"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.994425Z",
+      "notes": "Server has no ECH config — cannot conclude about censorship."
+    },
+    {
+      "test": "tls_currenttime_tv_sni_blocked",
+      "category": "tls",
+      "target": "184.86.103.219:currenttime.tv",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "184.86.103.219",
+        "sni": "currenttime.tv",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 27.609095006482676,
+        "rtt_total_ms": 54.759359001764096,
+        "alpn": null,
+        "cert_subject_cn": "rfe-prod-9.cert.pangeadigital.io",
+        "cert_issuer_cn": "R13",
+        "cert_chain_sha256": [
+          "ea7e868a2d92947c58bbc04bc18444dfae0f32db0e5ed4e77df9810dd16048db"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.862296Z",
+      "notes": null
+    },
+    {
+      "test": "tls_currenttime_tv_sni_neutral",
+      "category": "tls",
+      "target": "184.86.103.219:cloudflare.com",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "184.86.103.219",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": false,
+        "error": "ssl_error",
+        "detail": "[SSL: TLSV1_ALERT_INTERNAL_ERROR] tlsv1 alert internal error (_ssl.c:1010)"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.913102Z",
+      "notes": null
+    },
+    {
+      "test": "tls_currenttime_tv_ech",
+      "category": "tls",
+      "target": "currenttime.tv",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": "no_ech_in_https_record"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.125465Z",
+      "notes": "Server has no ECH config — cannot conclude about censorship."
+    },
+    {
+      "test": "tls_inopressa_ru_sni_blocked",
+      "category": "tls",
+      "target": "212.227.190.190:inopressa.ru",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "212.227.190.190",
+        "sni": "inopressa.ru",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 40.69142701337114,
+        "rtt_total_ms": 66.25894601165783,
+        "alpn": null,
+        "cert_subject_cn": "*.inopressa.ru",
+        "cert_issuer_cn": "E7",
+        "cert_chain_sha256": [
+          "fb2b8fb91a7970db1f4a81073a6335ad219c9dae6b30b1baa0e7111d3ff40da3"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.983305Z",
+      "notes": null
+    },
+    {
+      "test": "tls_inopressa_ru_sni_neutral",
+      "category": "tls",
+      "target": "212.227.190.190:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "212.227.190.190",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 13.546196001698263,
+        "rtt_total_ms": 42.06824400171172,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null,
+        "cert_chain_sha256": [
+          "499967a98aa62a536349ca7ad0e77c13429603a479e4ff4d3638eb7969350e50"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.043199Z",
+      "notes": null
+    },
+    {
+      "test": "tls_inopressa_ru_ech",
+      "category": "tls",
+      "target": "inopressa.ru",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": "no_ech_in_https_record"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.256506Z",
+      "notes": "Server has no ECH config — cannot conclude about censorship."
+    },
+    {
+      "test": "tls_bellingcat_com_sni_blocked",
+      "category": "tls",
+      "target": "172.66.172.84:bellingcat.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "172.66.172.84",
+        "sni": "bellingcat.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 25.159436991089024,
+        "rtt_total_ms": 36.75646999909077,
+        "alpn": null,
+        "cert_subject_cn": "bellingcat.com",
+        "cert_issuer_cn": "WE1",
+        "cert_chain_sha256": [
+          "119a066b552c638db7fd9ecb1e16d1963fd7e068679a6e2a388d5df2d1a1aa34"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.909042Z",
+      "notes": null
+    },
+    {
+      "test": "tls_bellingcat_com_sni_neutral",
+      "category": "tls",
+      "target": "172.66.172.84:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "172.66.172.84",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 2.0380759960971773,
+        "rtt_total_ms": 14.17966399458237,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null,
+        "cert_chain_sha256": [
+          "da9fca34e821865e3066db0f029492013b6517f14aaf5a693abde9a48a174c19"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.934788Z",
+      "notes": null
+    },
+    {
+      "test": "tls_bellingcat_com_ech",
+      "category": "tls",
+      "target": "bellingcat.com",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": "no_ech_in_https_record"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.102295Z",
+      "notes": "Server has no ECH config — cannot conclude about censorship."
+    },
+    {
+      "test": "tls_youtube_com_sni_blocked",
+      "category": "tls",
+      "target": "142.251.20.190:youtube.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "142.251.20.190",
+        "sni": "youtube.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 26.18246100610122,
+        "rtt_total_ms": 45.23648000031244,
+        "alpn": null,
+        "cert_subject_cn": "*.google.com",
+        "cert_issuer_cn": "WE2",
+        "cert_chain_sha256": [
+          "e51c3ce4d70e43c7262da7e20609b3b751d6d98b8b83fed4a3f56fbb05bba54f"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.000784Z",
+      "notes": null
+    },
+    {
+      "test": "tls_youtube_com_sni_neutral",
+      "category": "tls",
+      "target": "142.251.20.190:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "142.251.20.190",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 5.736346007324755,
+        "rtt_total_ms": 18.18465400720015,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null,
+        "cert_chain_sha256": [
+          "b923c14ef87a0a5aa8b961c18e4e49c97dc5e7829c1f2f41893c884e6fd41ffb"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.023352Z",
+      "notes": null
+    },
+    {
+      "test": "tls_youtube_com_ech",
+      "category": "tls",
+      "target": "youtube.com",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": "no_ech_in_https_record"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.187725Z",
+      "notes": "Server has no ECH config — cannot conclude about censorship."
+    },
+    {
+      "test": "tls_instagram_com_sni_blocked",
+      "category": "tls",
+      "target": "57.144.244.34:instagram.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "57.144.244.34",
+        "sni": "instagram.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 24.17430400964804,
+        "rtt_total_ms": 34.145382000133395,
+        "alpn": null,
+        "cert_subject_cn": "*.instagram.com",
+        "cert_issuer_cn": "DigiCert Global G2 TLS RSA SHA256 2020 CA1",
+        "cert_chain_sha256": [
+          "c29641e2e829789532748d53e5d4365dbf1ff73a911df194f38ea0f1f2ce719a"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.110654Z",
+      "notes": null
+    },
+    {
+      "test": "tls_instagram_com_sni_neutral",
+      "category": "tls",
+      "target": "57.144.244.34:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "57.144.244.34",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 3.7968760007061064,
+        "rtt_total_ms": 8.077053003944457,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null,
+        "cert_chain_sha256": [
+          "c29641e2e829789532748d53e5d4365dbf1ff73a911df194f38ea0f1f2ce719a"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.126667Z",
+      "notes": null
+    },
+    {
+      "test": "tls_instagram_com_ech",
+      "category": "tls",
+      "target": "instagram.com",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": "no_ech_in_https_record"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.427904Z",
+      "notes": "Server has no ECH config — cannot conclude about censorship."
+    },
+    {
+      "test": "tls_facebook_com_sni_blocked",
+      "category": "tls",
+      "target": "57.144.244.1:facebook.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "57.144.244.1",
+        "sni": "facebook.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 31.107988994335756,
+        "rtt_total_ms": 42.50612200121395,
+        "alpn": null,
+        "cert_subject_cn": "*.facebook.com",
+        "cert_issuer_cn": "DigiCert Global G2 TLS RSA SHA256 2020 CA1",
+        "cert_chain_sha256": [
+          "3a71e7de7a6d6bb4e428b795756b232932f329abec386fe8317e20a0a97506fd"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.206960Z",
+      "notes": null
+    },
+    {
+      "test": "tls_facebook_com_sni_neutral",
+      "category": "tls",
+      "target": "57.144.244.1:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "57.144.244.1",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 5.3148279985180125,
+        "rtt_total_ms": 12.052983001922257,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null,
+        "cert_chain_sha256": [
+          "3a71e7de7a6d6bb4e428b795756b232932f329abec386fe8317e20a0a97506fd"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.246331Z",
+      "notes": null
+    },
+    {
+      "test": "tls_facebook_com_ech",
+      "category": "tls",
+      "target": "facebook.com",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": "no_ech_in_https_record"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.463517Z",
+      "notes": "Server has no ECH config — cannot conclude about censorship."
+    },
+    {
+      "test": "tls_twitter_com_sni_blocked",
+      "category": "tls",
+      "target": "172.66.0.227:twitter.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "172.66.0.227",
+        "sni": "twitter.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 26.11463700304739,
+        "rtt_total_ms": 33.760317004635,
+        "alpn": null,
+        "cert_subject_cn": "twitter.com",
+        "cert_issuer_cn": "E7",
+        "cert_chain_sha256": [
+          "76136867264a97353e9058d6769aaeeff8095ee1657cf96c5f9a48051f3286ad"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.352453Z",
+      "notes": null
+    },
+    {
+      "test": "tls_twitter_com_sni_neutral",
+      "category": "tls",
+      "target": "172.66.0.227:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "172.66.0.227",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 16.489782006829046,
+        "rtt_total_ms": 21.37309299723711,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null,
+        "cert_chain_sha256": [
+          "da9fca34e821865e3066db0f029492013b6517f14aaf5a693abde9a48a174c19"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.408746Z",
+      "notes": null
+    },
+    {
+      "test": "tls_twitter_com_ech",
+      "category": "tls",
+      "target": "twitter.com",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": "no_ech_in_https_record"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.707259Z",
+      "notes": "Server has no ECH config — cannot conclude about censorship."
+    },
+    {
+      "test": "tls_tiktok_com_sni_blocked",
+      "category": "tls",
+      "target": "104.126.37.153:tiktok.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "104.126.37.153",
+        "sni": "tiktok.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 26.754071994218975,
+        "rtt_total_ms": 35.86819599149749,
+        "alpn": null,
+        "cert_subject_cn": "*.tiktok.com",
+        "cert_issuer_cn": "RapidSSL TLS ECC CA G1",
+        "cert_chain_sha256": [
+          "0109b4e1a32aab7ea8ffec74be6dc7de02c90c63bcc4c150a1d1b0ff57949249"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.266331Z",
+      "notes": null
+    },
+    {
+      "test": "tls_tiktok_com_sni_neutral",
+      "category": "tls",
+      "target": "104.126.37.153:cloudflare.com",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "104.126.37.153",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": false,
+        "error": "ssl_error",
+        "detail": "[SSL: TLSV1_ALERT_INTERNAL_ERROR] tlsv1 alert internal error (_ssl.c:1010)"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.298454Z",
+      "notes": null
+    },
+    {
+      "test": "tls_tiktok_com_ech",
+      "category": "tls",
+      "target": "tiktok.com",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": "no_ech_in_https_record"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.505768Z",
+      "notes": "Server has no ECH config — cannot conclude about censorship."
+    },
+    {
+      "test": "tls_linkedin_com_sni_blocked",
+      "category": "tls",
+      "target": "150.171.22.12:linkedin.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "150.171.22.12",
+        "sni": "linkedin.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 29.01718599605374,
+        "rtt_total_ms": 55.42245600372553,
+        "alpn": null,
+        "cert_subject_cn": "www.linkedin.com",
+        "cert_issuer_cn": "DigiCert Global G2 TLS RSA SHA256 2020 CA1",
+        "cert_chain_sha256": [
+          "ed13bd4d797ad34fb6bec16fa98ca2914f3b53f2b045ee5508b9d5335f7dbe36"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.406449Z",
+      "notes": null
+    },
+    {
+      "test": "tls_linkedin_com_sni_neutral",
+      "category": "tls",
+      "target": "150.171.22.12:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "150.171.22.12",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 8.253993990365416,
+        "rtt_total_ms": 25.49614099552855,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null,
+        "cert_chain_sha256": [
+          "8ff12d319d9309ff021c6fe1d37ffba8eb245cad9dff0a0a1d462f5ec147fcba"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.440549Z",
+      "notes": null
+    },
+    {
+      "test": "tls_linkedin_com_ech",
+      "category": "tls",
+      "target": "linkedin.com",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": "no_ech_in_https_record"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.671574Z",
+      "notes": "Server has no ECH config — cannot conclude about censorship."
+    },
+    {
+      "test": "tls_signal_org_sni_blocked",
+      "category": "tls",
+      "target": "104.18.11.47:signal.org",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "104.18.11.47",
+        "sni": "signal.org",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 30.478099011816084,
+        "rtt_total_ms": 44.994664000114426,
+        "alpn": null,
+        "cert_subject_cn": "signal.org",
+        "cert_issuer_cn": "WE1",
+        "cert_chain_sha256": [
+          "7201f2fb02d26d201480961798325d0dbc5f540eda039a626fdf81c41b8e03d4"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.435120Z",
+      "notes": null
+    },
+    {
+      "test": "tls_signal_org_sni_neutral",
+      "category": "tls",
+      "target": "104.18.11.47:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "104.18.11.47",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 3.4814190003089607,
+        "rtt_total_ms": 11.691281004459597,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null,
+        "cert_chain_sha256": [
+          "da9fca34e821865e3066db0f029492013b6517f14aaf5a693abde9a48a174c19"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.468307Z",
+      "notes": null
+    },
+    {
+      "test": "tls_signal_org_ech",
+      "category": "tls",
+      "target": "signal.org",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": "no_ech_in_https_record"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.696194Z",
+      "notes": "Server has no ECH config — cannot conclude about censorship."
+    },
+    {
+      "test": "tls_whatsapp_com_sni_blocked",
+      "category": "tls",
+      "target": "57.144.249.32:whatsapp.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "57.144.249.32",
+        "sni": "whatsapp.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 28.708940008073114,
+        "rtt_total_ms": 36.65936000470538,
+        "alpn": null,
+        "cert_subject_cn": "*.whatsapp.net",
+        "cert_issuer_cn": "DigiCert Global G2 TLS RSA SHA256 2020 CA1",
+        "cert_chain_sha256": [
+          "eae2e66e2ced32400725539e68e26707cc39b44160f52de095327fcfd3a55eb1"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.613745Z",
+      "notes": null
+    },
+    {
+      "test": "tls_whatsapp_com_sni_neutral",
+      "category": "tls",
+      "target": "57.144.249.32:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "57.144.249.32",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 4.586705006659031,
+        "rtt_total_ms": 10.858964000362903,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null,
+        "cert_chain_sha256": [
+          "eae2e66e2ced32400725539e68e26707cc39b44160f52de095327fcfd3a55eb1"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.669221Z",
+      "notes": null
+    },
+    {
+      "test": "tls_whatsapp_com_ech",
+      "category": "tls",
+      "target": "whatsapp.com",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": "no_ech_in_https_record"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.851455Z",
+      "notes": "Server has no ECH config — cannot conclude about censorship."
+    },
+    {
+      "test": "tls_web_whatsapp_com_sni_blocked",
+      "category": "tls",
+      "target": "57.144.249.32:web.whatsapp.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "57.144.249.32",
+        "sni": "web.whatsapp.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 27.205698992474936,
+        "rtt_total_ms": 39.398840002832,
+        "alpn": null,
+        "cert_subject_cn": "*.whatsapp.net",
+        "cert_issuer_cn": "DigiCert Global G2 TLS RSA SHA256 2020 CA1",
+        "cert_chain_sha256": [
+          "eae2e66e2ced32400725539e68e26707cc39b44160f52de095327fcfd3a55eb1"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.652385Z",
+      "notes": null
+    },
+    {
+      "test": "tls_web_whatsapp_com_sni_neutral",
+      "category": "tls",
+      "target": "57.144.249.32:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "57.144.249.32",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 15.202878988930024,
+        "rtt_total_ms": 26.691859995480627,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null,
+        "cert_chain_sha256": [
+          "eae2e66e2ced32400725539e68e26707cc39b44160f52de095327fcfd3a55eb1"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.702338Z",
+      "notes": null
+    },
+    {
+      "test": "tls_web_whatsapp_com_ech",
+      "category": "tls",
+      "target": "web.whatsapp.com",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": "no_ech_in_https_record"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.859563Z",
+      "notes": "Server has no ECH config — cannot conclude about censorship."
+    },
+    {
+      "test": "tls_discord_com_sni_blocked",
+      "category": "tls",
+      "target": "162.159.135.232:discord.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "162.159.135.232",
+        "sni": "discord.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 29.220548996818252,
+        "rtt_total_ms": 43.43217800487764,
+        "alpn": null,
+        "cert_subject_cn": "discord.com",
+        "cert_issuer_cn": "WE1",
+        "cert_chain_sha256": [
+          "e339a6843b0f4890e9bc50ca6c882a318dd238cbc643b6c8b711c4f476dd2d0c"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.678959Z",
+      "notes": null
+    },
+    {
+      "test": "tls_discord_com_sni_neutral",
+      "category": "tls",
+      "target": "162.159.135.232:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "162.159.135.232",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 3.4926009975606576,
+        "rtt_total_ms": 13.65934700879734,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null,
+        "cert_chain_sha256": [
+          "da9fca34e821865e3066db0f029492013b6517f14aaf5a693abde9a48a174c19"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.705470Z",
+      "notes": null
+    },
+    {
+      "test": "tls_discord_com_ech",
+      "category": "tls",
+      "target": "discord.com",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": "no_ech_in_https_record"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.867393Z",
+      "notes": "Server has no ECH config — cannot conclude about censorship."
+    },
+    {
+      "test": "tls_viber_com_sni_blocked",
+      "category": "tls",
+      "target": "44.207.86.245:viber.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "44.207.86.245",
+        "sni": "viber.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 118.75812699145172,
+        "rtt_total_ms": 213.30348298943136,
+        "alpn": null,
+        "cert_subject_cn": "*.viber.com",
+        "cert_issuer_cn": "Amazon RSA 2048 M04",
+        "cert_chain_sha256": [
+          "d2657b8665c9f5d6f1f9efcf2eb47918bae7cda12461c0ef850f5c86a8311d23"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.996325Z",
+      "notes": null
+    },
+    {
+      "test": "tls_viber_com_sni_neutral",
+      "category": "tls",
+      "target": "44.207.86.245:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "44.207.86.245",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 95.19746499427129,
+        "rtt_total_ms": 196.87899999553338,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null,
+        "cert_chain_sha256": [
+          "d2657b8665c9f5d6f1f9efcf2eb47918bae7cda12461c0ef850f5c86a8311d23"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:59.208002Z",
+      "notes": null
+    },
+    {
+      "test": "tls_viber_com_ech",
+      "category": "tls",
+      "target": "viber.com",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": "no_ech_in_https_record"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:59.328366Z",
+      "notes": "Server has no ECH config — cannot conclude about censorship."
+    },
+    {
+      "test": "tls_nordvpn_com_sni_blocked",
+      "category": "tls",
+      "target": "104.16.208.203:nordvpn.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "104.16.208.203",
+        "sni": "nordvpn.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 29.29033800319303,
+        "rtt_total_ms": 41.164850001223385,
+        "alpn": null,
+        "cert_subject_cn": "*.nordvpn.com",
+        "cert_issuer_cn": "Sectigo Public Server Authentication CA DV R36",
+        "cert_chain_sha256": [
+          "6a3c03e58a71ef5895d3f103d4d4f8dc50cc05582edd50767ac147111ae4bb5c"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.807198Z",
+      "notes": null
+    },
+    {
+      "test": "tls_nordvpn_com_sni_neutral",
+      "category": "tls",
+      "target": "104.16.208.203:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "104.16.208.203",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 3.2142109994310886,
+        "rtt_total_ms": 8.770483997068368,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null,
+        "cert_chain_sha256": [
+          "da9fca34e821865e3066db0f029492013b6517f14aaf5a693abde9a48a174c19"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.848728Z",
+      "notes": null
+    },
+    {
+      "test": "tls_nordvpn_com_ech",
+      "category": "tls",
+      "target": "nordvpn.com",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": "no_ech_in_https_record"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.994176Z",
+      "notes": "Server has no ECH config — cannot conclude about censorship."
+    },
+    {
+      "test": "tls_protonvpn_com_sni_blocked",
+      "category": "tls",
+      "target": "185.159.159.140:protonvpn.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "185.159.159.140",
+        "sni": "protonvpn.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 35.575253001297824,
+        "rtt_total_ms": 52.335658998345025,
+        "alpn": null,
+        "cert_subject_cn": "protonmail.com",
+        "cert_issuer_cn": "R12",
+        "cert_chain_sha256": [
+          "0f68a89537fff1630d9962c8564f79bd9f159b410069458b1eca1c633539a10d"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.870081Z",
+      "notes": null
+    },
+    {
+      "test": "tls_protonvpn_com_sni_neutral",
+      "category": "tls",
+      "target": "185.159.159.140:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "185.159.159.140",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 15.633211005479097,
+        "rtt_total_ms": 32.42232000047807,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null,
+        "cert_chain_sha256": [
+          "0f68a89537fff1630d9962c8564f79bd9f159b410069458b1eca1c633539a10d"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.940768Z",
+      "notes": null
+    },
+    {
+      "test": "tls_protonvpn_com_ech",
+      "category": "tls",
+      "target": "protonvpn.com",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": "no_ech_in_https_record"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:59.068050Z",
+      "notes": "Server has no ECH config — cannot conclude about censorship."
+    },
+    {
+      "test": "tls_expressvpn_com_sni_blocked",
+      "category": "tls",
+      "target": "18.66.112.100:expressvpn.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "18.66.112.100",
+        "sni": "expressvpn.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 28.019646008033305,
+        "rtt_total_ms": 33.12292900227476,
+        "alpn": null,
+        "cert_subject_cn": "expressvpn.com",
+        "cert_issuer_cn": "Amazon RSA 2048 M01",
+        "cert_chain_sha256": [
+          "86674825e5e12e7aa9754937e2d72939c34295af1d823b8dbb73f75e9c43151d"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.953964Z",
+      "notes": null
+    },
+    {
+      "test": "tls_expressvpn_com_sni_neutral",
+      "category": "tls",
+      "target": "18.66.112.100:cloudflare.com",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "18.66.112.100",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": false,
+        "error": "ssl_error",
+        "detail": "[SSL: SSLV3_ALERT_HANDSHAKE_FAILURE] ssl/tls alert handshake failure (_ssl.c:1010)"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.988452Z",
+      "notes": null
+    },
+    {
+      "test": "tls_expressvpn_com_ech",
+      "category": "tls",
+      "target": "expressvpn.com",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": "no_ech_in_https_record"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:59.093579Z",
+      "notes": "Server has no ECH config — cannot conclude about censorship."
+    },
+    {
+      "test": "tls_mullvad_net_sni_blocked",
+      "category": "tls",
+      "target": "45.83.223.209:mullvad.net",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "45.83.223.209",
+        "sni": "mullvad.net",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 31.023297997307964,
+        "rtt_total_ms": 44.660164989181794,
+        "alpn": null,
+        "cert_subject_cn": "mullvad.net",
+        "cert_issuer_cn": "E7",
+        "cert_chain_sha256": [
+          "2c162a84b040bb2bca5c483c805bb6b38f542b0b33bb3883a6d45adda62941ef"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.992074Z",
+      "notes": null
+    },
+    {
+      "test": "tls_mullvad_net_sni_neutral",
+      "category": "tls",
+      "target": "45.83.223.209:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "45.83.223.209",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 13.450777987600304,
+        "rtt_total_ms": 25.862702997983433,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null,
+        "cert_chain_sha256": [
+          "2c162a84b040bb2bca5c483c805bb6b38f542b0b33bb3883a6d45adda62941ef"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:59.029320Z",
+      "notes": null
+    },
+    {
+      "test": "tls_mullvad_net_ech",
+      "category": "tls",
+      "target": "mullvad.net",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": "no_ech_in_https_record"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:59.201724Z",
+      "notes": "Server has no ECH config — cannot conclude about censorship."
+    },
+    {
+      "test": "tls_vk_com_sni_blocked",
+      "category": "tls",
+      "target": "87.240.137.164:vk.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "87.240.137.164",
+        "sni": "vk.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 61.22298300033435,
+        "rtt_total_ms": 114.99213000934105,
+        "alpn": null,
+        "cert_subject_cn": "*.vk.com",
+        "cert_issuer_cn": "GlobalSign ECC OV SSL CA 2018",
+        "cert_chain_sha256": [
+          "4c2849a6f1e102920c390ff41fab0a413bca1412e6a0f37a030304ed13d876dc"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:59.082707Z",
+      "notes": null
+    },
+    {
+      "test": "tls_vk_com_sni_neutral",
+      "category": "tls",
+      "target": "87.240.137.164:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "87.240.137.164",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 40.839866996975616,
+        "rtt_total_ms": 77.88050999806728,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null,
+        "cert_chain_sha256": [
+          "13a44185ca43adc21ebc769f88545d90c3168022fc09d0e325385212066d1725"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:59.194241Z",
+      "notes": null
+    },
+    {
+      "test": "tls_vk_com_ech",
+      "category": "tls",
+      "target": "vk.com",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": "no_ech_in_https_record"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:59.287284Z",
+      "notes": "Server has no ECH config — cannot conclude about censorship."
+    },
+    {
+      "test": "tls_yandex_ru_sni_blocked",
+      "category": "tls",
+      "target": "77.88.55.88:yandex.ru",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "77.88.55.88",
+        "sni": "yandex.ru",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 73.69029699475504,
+        "rtt_total_ms": 127.6484400004847,
+        "alpn": null,
+        "cert_subject_cn": "*.yandex.tr",
+        "cert_issuer_cn": "GlobalSign ECC OV SSL CA 2018",
+        "cert_chain_sha256": [
+          "004b73abc7082568a07182924623a26973fb7f4ab4ed30a5f022c3fa17c355eb"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:59.193064Z",
+      "notes": null
+    },
+    {
+      "test": "tls_yandex_ru_sni_neutral",
+      "category": "tls",
+      "target": "77.88.55.88:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "77.88.55.88",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 47.883035003906116,
+        "rtt_total_ms": 97.66714701254386,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null,
+        "cert_chain_sha256": [
+          "004b73abc7082568a07182924623a26973fb7f4ab4ed30a5f022c3fa17c355eb"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:59.303135Z",
+      "notes": null
+    },
+    {
+      "test": "tls_yandex_ru_ech",
+      "category": "tls",
+      "target": "yandex.ru",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": "no_ech_in_https_record"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:59.411367Z",
+      "notes": "Server has no ECH config — cannot conclude about censorship."
+    },
+    {
+      "test": "tls_wikipedia_org_sni_blocked",
+      "category": "tls",
+      "target": "185.15.59.224:wikipedia.org",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "185.15.59.224",
+        "sni": "wikipedia.org",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 45.14755800482817,
+        "rtt_total_ms": 64.1520369972568,
+        "alpn": null,
+        "cert_subject_cn": "*.wikipedia.org",
+        "cert_issuer_cn": "E7",
+        "cert_chain_sha256": [
+          "4720a86f440eb48c9792e5cba9c8fe8b127c806f15ea60750724bf3325497a9b"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:59.199375Z",
+      "notes": null
+    },
+    {
+      "test": "tls_wikipedia_org_sni_neutral",
+      "category": "tls",
+      "target": "185.15.59.224:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "185.15.59.224",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 9.164965013042092,
+        "rtt_total_ms": 18.864317011320964,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null,
+        "cert_chain_sha256": [
+          "4720a86f440eb48c9792e5cba9c8fe8b127c806f15ea60750724bf3325497a9b"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:59.221729Z",
+      "notes": null
+    },
+    {
+      "test": "tls_wikipedia_org_ech",
+      "category": "tls",
+      "target": "wikipedia.org",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": "no_ech_in_https_record"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:59.376139Z",
+      "notes": "Server has no ECH config — cannot conclude about censorship."
+    },
+    {
+      "test": "tls_google_com_sni_blocked",
+      "category": "tls",
+      "target": "142.251.20.113:google.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "142.251.20.113",
+        "sni": "google.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 38.07974499068223,
+        "rtt_total_ms": 53.522408998105675,
+        "alpn": null,
+        "cert_subject_cn": "*.google.com",
+        "cert_issuer_cn": "WE2",
+        "cert_chain_sha256": [
+          "e51c3ce4d70e43c7262da7e20609b3b751d6d98b8b83fed4a3f56fbb05bba54f"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:59.215825Z",
+      "notes": null
+    },
+    {
+      "test": "tls_google_com_sni_neutral",
+      "category": "tls",
+      "target": "142.251.20.113:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "142.251.20.113",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 7.624599995324388,
+        "rtt_total_ms": 25.88835099595599,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null,
+        "cert_chain_sha256": [
+          "b923c14ef87a0a5aa8b961c18e4e49c97dc5e7829c1f2f41893c884e6fd41ffb"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:59.273436Z",
+      "notes": null
+    },
+    {
+      "test": "tls_google_com_ech",
+      "category": "tls",
+      "target": "google.com",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": "no_ech_in_https_record"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:59.400179Z",
+      "notes": "Server has no ECH config — cannot conclude about censorship."
+    },
+    {
+      "test": "tls_cloudflare_com_sni_blocked",
+      "category": "tls",
+      "target": "104.16.133.229:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "104.16.133.229",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 31.290472004911862,
+        "rtt_total_ms": 38.697263997164555,
+        "alpn": null,
+        "cert_subject_cn": "cloudflare.com",
+        "cert_issuer_cn": "WE1",
+        "cert_chain_sha256": [
+          "da9fca34e821865e3066db0f029492013b6517f14aaf5a693abde9a48a174c19"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:59.295796Z",
+      "notes": null
+    },
+    {
+      "test": "tls_cloudflare_com_sni_neutral",
+      "category": "tls",
+      "target": "104.16.133.229:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "104.16.133.229",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 2.95738699787762,
+        "rtt_total_ms": 9.418518995516934,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null,
+        "cert_chain_sha256": [
+          "da9fca34e821865e3066db0f029492013b6517f14aaf5a693abde9a48a174c19"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:59.319408Z",
+      "notes": null
+    },
+    {
+      "test": "tls_cloudflare_com_ech",
+      "category": "tls",
+      "target": "cloudflare.com",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": "no_ech_in_https_record"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:59.417383Z",
+      "notes": "Server has no ECH config — cannot conclude about censorship."
+    },
+    {
+      "test": "tls_crypto_cloudflare_com_sni_blocked",
+      "category": "tls",
+      "target": "162.159.135.79:crypto.cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "162.159.135.79",
+        "sni": "crypto.cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 26.99769400351215,
+        "rtt_total_ms": 39.27905700402334,
+        "alpn": null,
+        "cert_subject_cn": "crypto.cloudflare.com",
+        "cert_issuer_cn": "WE1",
+        "cert_chain_sha256": [
+          "3075539c5678e910029d2aa8f497304e1e15cfbbd2f9cb62c443d250f37d59a1"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:59.389142Z",
+      "notes": null
+    },
+    {
+      "test": "tls_crypto_cloudflare_com_sni_neutral",
+      "category": "tls",
+      "target": "162.159.135.79:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "162.159.135.79",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 12.406455993186682,
+        "rtt_total_ms": 22.626796999247745,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null,
+        "cert_chain_sha256": [
+          "da9fca34e821865e3066db0f029492013b6517f14aaf5a693abde9a48a174c19"
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:59.419282Z",
+      "notes": null
+    },
+    {
+      "test": "tls_crypto_cloudflare_com_ech",
+      "category": "tls",
+      "target": "crypto.cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "curl_returncode": 0,
+        "ech_config_source": "https_record_doh",
+        "stderr_tail": "ttps://research.cloudflare.com\r\n< Server: cloudflare\r\n< Strict-Transport-Security: max-age=31536000; includeSubDomains\r\n< Vary: Accept-Encoding\r\n< X-Content-Type-Options: nosniff\r\n< Date: Tue, 28 Apr 2026 21:33:59 GMT\r\n< \r\n{ [167 bytes data]\n* Connection #0 to host crypto.cloudflare.com left intact\n"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:59.484122Z",
+      "notes": null
+    },
+    {
+      "test": "http_meduza_io",
+      "category": "http",
+      "target": "https://meduza.io/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 412122,
+        "tls_ok": true,
+        "is_blockpage": false,
+        "cert_chain_sha256": [
+          "9880a9283a6bab3c054577f3ff9f6e4031baada22dda19d4dacdbfa27dfe19fa"
+        ],
+        "final_url": "https://meduza.io/",
+        "content_type": "text/html; charset=utf-8"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:59.275227Z",
+      "notes": null
+    },
+    {
+      "test": "http_novayagazeta_eu",
+      "category": "http",
+      "target": "https://novayagazeta.eu/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 524288,
+        "tls_ok": true,
+        "is_blockpage": false,
+        "cert_chain_sha256": [
+          "73ccb9d8c24a4191724ff208ec3fa506ad86f79fa4335b6a9ade571ecb83938f"
+        ],
+        "final_url": "https://novayagazeta.eu/",
+        "content_type": "text/html; charset=utf-8"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:59.200406Z",
+      "notes": null
+    },
+    {
+      "test": "http_mediazona_ca",
+      "category": "http",
+      "target": "https://mediazona.ca/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 68706,
+        "tls_ok": true,
+        "is_blockpage": false,
+        "cert_chain_sha256": [
+          "556bfb9642b9782bd57675254c11b730a57dd29bb8851238c8250c577a15a189"
+        ],
+        "final_url": "https://mediazona.ca/",
+        "content_type": "text/html; charset=utf-8"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.561824Z",
+      "notes": null
+    },
+    {
+      "test": "http_tvrain_ru",
+      "category": "http",
+      "target": "https://tvrain.ru/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 163993,
+        "tls_ok": true,
+        "is_blockpage": false,
+        "cert_chain_sha256": [
+          "2ae73c62da763e6852c2607a0df46d80655e0a017e831f6415a657ef01321c2f"
+        ],
+        "final_url": "https://tvrain.tv/",
+        "content_type": "text/html; charset=utf-8"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:59.612358Z",
+      "notes": null
+    },
+    {
+      "test": "http_bbc_com",
+      "category": "http",
+      "target": "https://www.bbc.com/russian/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 524288,
+        "tls_ok": true,
+        "is_blockpage": false,
+        "cert_chain_sha256": [
+          "87a4d12db9b57d6864b54d2efdcc66cdc17a051713948cf40bef42a0865b59cb"
+        ],
+        "final_url": "https://www.bbc.com/russian",
+        "content_type": "text/html; charset=utf-8"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.408051Z",
+      "notes": null
+    },
+    {
+      "test": "http_dw_com",
+      "category": "http",
+      "target": "https://www.dw.com/ru/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 282211,
+        "tls_ok": true,
+        "is_blockpage": false,
+        "cert_chain_sha256": [
+          "78a9e6ea665dc95bf7f703ab4f8940354171083c8be70be66e377175c3655a14"
+        ],
+        "final_url": "https://www.dw.com/ru/%D1%82%D0%B5%D0%BC%D1%8B-%D0%B4%D0%BD%D1%8F/s-9119",
+        "content_type": "text/html; charset=utf-8"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.576248Z",
+      "notes": null
+    },
+    {
+      "test": "http_rferl_org",
+      "category": "http",
+      "target": "https://www.rferl.org/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 154085,
+        "tls_ok": true,
+        "is_blockpage": false,
+        "cert_chain_sha256": [
+          "30f677565c1c02b29fbbbadea85fe96513dfe7876f05be49fec8fc1d8dad0804"
+        ],
+        "final_url": "https://www.rferl.org/",
+        "content_type": "text/html; charset=utf-8"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.247912Z",
+      "notes": null
+    },
+    {
+      "test": "http_currenttime_tv",
+      "category": "http",
+      "target": "https://www.currenttime.tv/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 215207,
+        "tls_ok": true,
+        "is_blockpage": false,
+        "cert_chain_sha256": [
+          "ea7e868a2d92947c58bbc04bc18444dfae0f32db0e5ed4e77df9810dd16048db"
+        ],
+        "final_url": "https://www.currenttime.tv/",
+        "content_type": "text/html; charset=utf-8"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.563271Z",
+      "notes": null
+    },
+    {
+      "test": "http_inopressa_ru",
+      "category": "http",
+      "target": "https://www.inopressa.ru/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 44827,
+        "tls_ok": true,
+        "is_blockpage": false,
+        "cert_chain_sha256": [
+          "fb2b8fb91a7970db1f4a81073a6335ad219c9dae6b30b1baa0e7111d3ff40da3"
+        ],
+        "final_url": "https://www.inopressa.ru/",
+        "content_type": "text/html; charset=windows-1251;"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.940636Z",
+      "notes": null
+    },
+    {
+      "test": "http_bellingcat_com",
+      "category": "http",
+      "target": "https://www.bellingcat.com/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 119074,
+        "tls_ok": true,
+        "is_blockpage": false,
+        "cert_chain_sha256": [
+          "b0f4e11c91384fa5b3ce1c9324e7bea4adf318feb25bf8419f8718d9864a9877"
+        ],
+        "final_url": "https://www.bellingcat.com/",
+        "content_type": "text/html; charset=UTF-8"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:59.509163Z",
+      "notes": null
+    },
+    {
+      "test": "http_youtube_com",
+      "category": "http",
+      "target": "https://www.youtube.com/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 524288,
+        "tls_ok": true,
+        "is_blockpage": false,
+        "cert_chain_sha256": [
+          "e51c3ce4d70e43c7262da7e20609b3b751d6d98b8b83fed4a3f56fbb05bba54f"
+        ],
+        "final_url": "https://www.youtube.com/",
+        "content_type": "text/html; charset=utf-8"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:59.741070Z",
+      "notes": null
+    },
+    {
+      "test": "http_instagram_com",
+      "category": "http",
+      "target": "https://www.instagram.com/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 524288,
+        "tls_ok": true,
+        "is_blockpage": false,
+        "cert_chain_sha256": [
+          "276c79ea9e2efc66125fed6a974c834e5d23faea4e57b11fddfe9ab42bf03c85"
+        ],
+        "final_url": "https://www.instagram.com/",
+        "content_type": "text/html; charset=\"utf-8\""
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:00.563649Z",
+      "notes": null
+    },
+    {
+      "test": "http_facebook_com",
+      "category": "http",
+      "target": "https://www.facebook.com/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 469433,
+        "tls_ok": true,
+        "is_blockpage": false,
+        "cert_chain_sha256": [
+          "3a71e7de7a6d6bb4e428b795756b232932f329abec386fe8317e20a0a97506fd"
+        ],
+        "final_url": "https://www.facebook.com/",
+        "content_type": "text/html; charset=\"utf-8\""
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:00.052487Z",
+      "notes": null
+    },
+    {
+      "test": "http_twitter_com",
+      "category": "http",
+      "target": "https://twitter.com/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 253404,
+        "tls_ok": true,
+        "is_blockpage": false,
+        "cert_chain_sha256": [
+          "8fee26ab588faaec621425dc35a6878ac1f10c0308e4bfd2bcb42b07f7868d65"
+        ],
+        "final_url": "https://x.com/",
+        "content_type": "text/html; charset=utf-8"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:59.957164Z",
+      "notes": null
+    },
+    {
+      "test": "http_twitter_com",
+      "category": "http",
+      "target": "https://x.com/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 253404,
+        "tls_ok": true,
+        "is_blockpage": false,
+        "cert_chain_sha256": [
+          "8fee26ab588faaec621425dc35a6878ac1f10c0308e4bfd2bcb42b07f7868d65"
+        ],
+        "final_url": "https://x.com/",
+        "content_type": "text/html; charset=utf-8"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:59.914678Z",
+      "notes": null
+    },
+    {
+      "test": "http_tiktok_com",
+      "category": "http",
+      "target": "https://www.tiktok.com/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 280267,
+        "tls_ok": true,
+        "is_blockpage": false,
+        "cert_chain_sha256": [
+          "f3a3a1ec8622c4859688b4fb051b11b8f6a0311add3016dcde6b44fb4e72ba90"
+        ],
+        "final_url": "https://www.tiktok.com/explore",
+        "content_type": "text/html; charset=utf-8"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:00.128557Z",
+      "notes": null
+    },
+    {
+      "test": "http_linkedin_com",
+      "category": "http",
+      "target": "https://www.linkedin.com/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 142342,
+        "tls_ok": true,
+        "is_blockpage": false,
+        "cert_chain_sha256": [
+          "ed13bd4d797ad34fb6bec16fa98ca2914f3b53f2b045ee5508b9d5335f7dbe36"
+        ],
+        "final_url": "https://www.linkedin.com/",
+        "content_type": "text/html; charset=utf-8"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:59.914592Z",
+      "notes": null
+    },
+    {
+      "test": "http_signal_org",
+      "category": "http",
+      "target": "https://signal.org/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 22194,
+        "tls_ok": true,
+        "is_blockpage": false,
+        "cert_chain_sha256": [
+          "7201f2fb02d26d201480961798325d0dbc5f540eda039a626fdf81c41b8e03d4"
+        ],
+        "final_url": "https://signal.org/",
+        "content_type": "text/html; charset=utf-8"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:59.740767Z",
+      "notes": null
+    },
+    {
+      "test": "http_whatsapp_com",
+      "category": "http",
+      "target": "https://www.whatsapp.com/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 245020,
+        "tls_ok": true,
+        "is_blockpage": false,
+        "cert_chain_sha256": [
+          "eae2e66e2ced32400725539e68e26707cc39b44160f52de095327fcfd3a55eb1"
+        ],
+        "final_url": "https://www.whatsapp.com/",
+        "content_type": "text/html; charset=\"utf-8\""
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:00.616730Z",
+      "notes": null
+    },
+    {
+      "test": "http_web_whatsapp_com",
+      "category": "http",
+      "target": "https://web.whatsapp.com/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 16082,
+        "tls_ok": true,
+        "is_blockpage": false,
+        "cert_chain_sha256": [
+          "eae2e66e2ced32400725539e68e26707cc39b44160f52de095327fcfd3a55eb1"
+        ],
+        "final_url": "https://web.whatsapp.com/",
+        "content_type": "text/html; charset=\"utf-8\""
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:00.397004Z",
+      "notes": null
+    },
+    {
+      "test": "http_discord_com",
+      "category": "http",
+      "target": "https://discord.com/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 163017,
+        "tls_ok": true,
+        "is_blockpage": false,
+        "cert_chain_sha256": [
+          "e339a6843b0f4890e9bc50ca6c882a318dd238cbc643b6c8b711c4f476dd2d0c"
+        ],
+        "final_url": "https://discord.com/",
+        "content_type": "text/html; charset=utf-8"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:00.144076Z",
+      "notes": null
+    },
+    {
+      "test": "http_viber_com",
+      "category": "http",
+      "target": "https://www.viber.com/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 51794,
+        "tls_ok": true,
+        "is_blockpage": false,
+        "cert_chain_sha256": [
+          "1b637267d21fff4268bd817b3ca984a09dc8e05cf0ecfd8cd75796339c2cee89"
+        ],
+        "final_url": "https://www.viber.com/en/",
+        "content_type": "text/html; charset=UTF-8"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:00.397382Z",
+      "notes": null
+    },
+    {
+      "test": "http_vk_com",
+      "category": "http",
+      "target": "https://vk.com/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 120934,
+        "tls_ok": true,
+        "is_blockpage": false,
+        "cert_chain_sha256": [
+          "4c2849a6f1e102920c390ff41fab0a413bca1412e6a0f37a030304ed13d876dc"
+        ],
+        "final_url": "https://m.vk.com/",
+        "content_type": "text/html; charset=utf-8"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:00.826651Z",
+      "notes": null
+    },
+    {
+      "test": "http_yandex_ru",
+      "category": "http",
+      "target": "https://yandex.ru/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 2291,
+        "tls_ok": true,
+        "is_blockpage": false,
+        "cert_chain_sha256": [
+          "b08e2318aa0c074016f98d3a6e59fba96c1e22fa610cd22bd676a2058debb0bd"
+        ],
+        "final_url": "https://sso.passport.yandex.ru/push?uuid=7aeb2e4d-8a10-4163-8182-4eef3000e202&retpath=https%3A%2F%2Fdzen.ru%2F%3Fyredirect%3Dtrue%26is_autologin_ya%3Dtrue",
+        "content_type": "text/html; charset=utf-8"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:01.034509Z",
+      "notes": null
+    },
+    {
+      "test": "http_wikipedia_org",
+      "category": "http",
+      "target": "https://ru.wikipedia.org/wiki/%D0%97%D0%B0%D0%B3%D0%BB%D0%B0%D0%B2%D0%BD%D0%B0%D1%8F_%D1%81%D1%82%D1%80%D0%B0%D0%BD%D0%B8%D1%86%D0%B0",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 222998,
+        "tls_ok": true,
+        "is_blockpage": false,
+        "cert_chain_sha256": [
+          "4720a86f440eb48c9792e5cba9c8fe8b127c806f15ea60750724bf3325497a9b"
+        ],
+        "final_url": "https://ru.wikipedia.org/wiki/%D0%97%D0%B0%D0%B3%D0%BB%D0%B0%D0%B2%D0%BD%D0%B0%D1%8F_%D1%81%D1%82%D1%80%D0%B0%D0%BD%D0%B8%D1%86%D0%B0",
+        "content_type": "text/html; charset=UTF-8"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:00.397448Z",
+      "notes": null
+    },
+    {
+      "test": "http_wikipedia_org",
+      "category": "http",
+      "target": "https://en.wikipedia.org/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 229388,
+        "tls_ok": true,
+        "is_blockpage": false,
+        "cert_chain_sha256": [
+          "4720a86f440eb48c9792e5cba9c8fe8b127c806f15ea60750724bf3325497a9b"
+        ],
+        "final_url": "https://en.wikipedia.org/wiki/Main_Page",
+        "content_type": "text/html; charset=UTF-8"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:00.397311Z",
+      "notes": null
+    },
+    {
+      "test": "http_google_com",
+      "category": "http",
+      "target": "https://www.google.com/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 80559,
+        "tls_ok": true,
+        "is_blockpage": false,
+        "cert_chain_sha256": [
+          "3672f3bbf56f79b27100100ad63f9dfb51638c0bf85d552cd859111cbf6e1c9f"
+        ],
+        "final_url": "https://www.google.com/",
+        "content_type": "text/html; charset=UTF-8"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:00.682636Z",
+      "notes": null
+    },
+    {
+      "test": "http_cloudflare_com",
+      "category": "http",
+      "target": "https://www.cloudflare.com/cdn-cgi/trace",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 289,
+        "tls_ok": true,
+        "is_blockpage": false,
+        "cert_chain_sha256": [
+          "6bb8c08b99a9674463fd3d591b9ab64a0ac5d94bc11902509089ddac00593b43"
+        ],
+        "final_url": "https://www.cloudflare.com/cdn-cgi/trace",
+        "content_type": "text/plain"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:00.578803Z",
+      "notes": null
+    },
+    {
+      "test": "http_crypto_cloudflare_com",
+      "category": "http",
+      "target": "https://crypto.cloudflare.com/cdn-cgi/trace",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 280,
+        "tls_ok": true,
+        "is_blockpage": false,
+        "cert_chain_sha256": [
+          "3075539c5678e910029d2aa8f497304e1e15cfbbd2f9cb62c443d250f37d59a1"
+        ],
+        "final_url": "https://crypto.cloudflare.com/cdn-cgi/trace",
+        "content_type": "text/plain"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:00.682548Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_dc1_v4_443",
+      "category": "telegram",
+      "target": "149.154.175.53:443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 125.8,
+        "mtproto_response": false,
+        "response_bytes": 0,
+        "probe_total_ms": 5127.1
+      },
+      "rtt_ms": 125.82654799916781,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:02.319648Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_dc1_v4_80",
+      "category": "telegram",
+      "target": "149.154.175.53:80",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 128.2,
+        "mtproto_response": false,
+        "response_bytes": 0,
+        "probe_total_ms": 5129.1
+      },
+      "rtt_ms": 128.1931639969116,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:02.322053Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_dc1_v4_5222",
+      "category": "telegram",
+      "target": "149.154.175.53:5222",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 125.3,
+        "mtproto_response": false,
+        "response_bytes": 0,
+        "probe_total_ms": 5126.4
+      },
+      "rtt_ms": 125.29783400532324,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:02.319510Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_dc1_v4_2001",
+      "category": "telegram",
+      "target": "149.154.175.53:2001",
+      "verdict": "BLOCKED",
+      "method": "ip_dropped",
+      "confidence": 1.0,
+      "evidence": {
+        "error": "tcp_timeout"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:05.193581Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_dc1_v6_443",
+      "category": "telegram",
+      "target": "2001:b28:f23d:f001::a:443",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 0.0,
+      "evidence": {
+        "error": "[Errno 101] Network is unreachable",
+        "reason": "network_unreachable_local"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.230653Z",
+      "notes": "Local probe has no route to this address — not censorship."
+    },
+    {
+      "test": "telegram_dc1_v6_80",
+      "category": "telegram",
+      "target": "2001:b28:f23d:f001::a:80",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 0.0,
+      "evidence": {
+        "error": "[Errno 101] Network is unreachable",
+        "reason": "network_unreachable_local"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.231009Z",
+      "notes": "Local probe has no route to this address — not censorship."
+    },
+    {
+      "test": "telegram_dc1_v6_5222",
+      "category": "telegram",
+      "target": "2001:b28:f23d:f001::a:5222",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 0.0,
+      "evidence": {
+        "error": "[Errno 101] Network is unreachable",
+        "reason": "network_unreachable_local"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.231135Z",
+      "notes": "Local probe has no route to this address — not censorship."
+    },
+    {
+      "test": "telegram_dc1_v6_2001",
+      "category": "telegram",
+      "target": "2001:b28:f23d:f001::a:2001",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 0.0,
+      "evidence": {
+        "error": "[Errno 101] Network is unreachable",
+        "reason": "network_unreachable_local"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.231240Z",
+      "notes": "Local probe has no route to this address — not censorship."
+    },
+    {
+      "test": "telegram_dc2_v4_443",
+      "category": "telegram",
+      "target": "149.154.167.51:443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 75.0,
+        "mtproto_response": false,
+        "response_bytes": 0,
+        "probe_total_ms": 5075.2
+      },
+      "rtt_ms": 74.9844829988433,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:02.306556Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_dc2_v4_80",
+      "category": "telegram",
+      "target": "149.154.167.51:80",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 75.0,
+        "mtproto_response": false,
+        "response_bytes": 0,
+        "probe_total_ms": 5075.3
+      },
+      "rtt_ms": 74.96989400533494,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:02.306759Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_dc2_v4_5222",
+      "category": "telegram",
+      "target": "149.154.167.51:5222",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 74.4,
+        "mtproto_response": false,
+        "response_bytes": 0,
+        "probe_total_ms": 5074.5
+      },
+      "rtt_ms": 74.3895929917926,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:02.306225Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_dc2_v4_2001",
+      "category": "telegram",
+      "target": "149.154.167.51:2001",
+      "verdict": "BLOCKED",
+      "method": "ip_dropped",
+      "confidence": 1.0,
+      "evidence": {
+        "error": "tcp_timeout"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:05.232244Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_dc2_v6_443",
+      "category": "telegram",
+      "target": "2001:67c:4e8:f002::a:443",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 0.0,
+      "evidence": {
+        "error": "[Errno 101] Network is unreachable",
+        "reason": "network_unreachable_local"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.232058Z",
+      "notes": "Local probe has no route to this address — not censorship."
+    },
+    {
+      "test": "telegram_dc2_v6_80",
+      "category": "telegram",
+      "target": "2001:67c:4e8:f002::a:80",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 0.0,
+      "evidence": {
+        "error": "[Errno 101] Network is unreachable",
+        "reason": "network_unreachable_local"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.232176Z",
+      "notes": "Local probe has no route to this address — not censorship."
+    },
+    {
+      "test": "telegram_dc2_v6_5222",
+      "category": "telegram",
+      "target": "2001:67c:4e8:f002::a:5222",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 0.0,
+      "evidence": {
+        "error": "[Errno 101] Network is unreachable",
+        "reason": "network_unreachable_local"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.232284Z",
+      "notes": "Local probe has no route to this address — not censorship."
+    },
+    {
+      "test": "telegram_dc2_v6_2001",
+      "category": "telegram",
+      "target": "2001:67c:4e8:f002::a:2001",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 0.0,
+      "evidence": {
+        "error": "[Errno 101] Network is unreachable",
+        "reason": "network_unreachable_local"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.232383Z",
+      "notes": "Local probe has no route to this address — not censorship."
+    },
+    {
+      "test": "telegram_dc3_v4_443",
+      "category": "telegram",
+      "target": "149.154.175.100:443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 159.3,
+        "mtproto_response": false,
+        "response_bytes": 0,
+        "probe_total_ms": 5184.5
+      },
+      "rtt_ms": 159.32859499298502,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:02.416986Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_dc3_v4_80",
+      "category": "telegram",
+      "target": "149.154.175.100:80",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 159.3,
+        "mtproto_response": false,
+        "response_bytes": 0,
+        "probe_total_ms": 5184.7
+      },
+      "rtt_ms": 159.29450999828987,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:02.417224Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_dc3_v4_5222",
+      "category": "telegram",
+      "target": "149.154.175.100:5222",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 159.2,
+        "mtproto_response": false,
+        "response_bytes": 0,
+        "probe_total_ms": 5184.6
+      },
+      "rtt_ms": 159.2227850051131,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:02.417290Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_dc3_v4_2001",
+      "category": "telegram",
+      "target": "149.154.175.100:2001",
+      "verdict": "BLOCKED",
+      "method": "ip_dropped",
+      "confidence": 1.0,
+      "evidence": {
+        "error": "tcp_timeout"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:05.233604Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_dc3_v6_443",
+      "category": "telegram",
+      "target": "2001:b28:f23d:f003::a:443",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 0.0,
+      "evidence": {
+        "error": "[Errno 101] Network is unreachable",
+        "reason": "network_unreachable_local"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.233014Z",
+      "notes": "Local probe has no route to this address — not censorship."
+    },
+    {
+      "test": "telegram_dc3_v6_80",
+      "category": "telegram",
+      "target": "2001:b28:f23d:f003::a:80",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 0.0,
+      "evidence": {
+        "error": "[Errno 101] Network is unreachable",
+        "reason": "network_unreachable_local"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.233159Z",
+      "notes": "Local probe has no route to this address — not censorship."
+    },
+    {
+      "test": "telegram_dc3_v6_5222",
+      "category": "telegram",
+      "target": "2001:b28:f23d:f003::a:5222",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 0.0,
+      "evidence": {
+        "error": "[Errno 101] Network is unreachable",
+        "reason": "network_unreachable_local"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.233270Z",
+      "notes": "Local probe has no route to this address — not censorship."
+    },
+    {
+      "test": "telegram_dc3_v6_2001",
+      "category": "telegram",
+      "target": "2001:b28:f23d:f003::a:2001",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 0.0,
+      "evidence": {
+        "error": "[Errno 101] Network is unreachable",
+        "reason": "network_unreachable_local"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.233378Z",
+      "notes": "Local probe has no route to this address — not censorship."
+    },
+    {
+      "test": "telegram_dc4_v4_443",
+      "category": "telegram",
+      "target": "149.154.167.91:443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 73.2,
+        "mtproto_response": false,
+        "response_bytes": 0,
+        "probe_total_ms": 5073.6
+      },
+      "rtt_ms": 73.24915200297255,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:02.307056Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_dc4_v4_80",
+      "category": "telegram",
+      "target": "149.154.167.91:80",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 73.0,
+        "mtproto_response": false,
+        "response_bytes": 0,
+        "probe_total_ms": 5073.3
+      },
+      "rtt_ms": 73.00756899348926,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:02.306812Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_dc4_v4_5222",
+      "category": "telegram",
+      "target": "149.154.167.91:5222",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 73.0,
+        "mtproto_response": false,
+        "response_bytes": 0,
+        "probe_total_ms": 5073.2
+      },
+      "rtt_ms": 72.95534899458289,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:02.306860Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_dc4_v4_2001",
+      "category": "telegram",
+      "target": "149.154.167.91:2001",
+      "verdict": "BLOCKED",
+      "method": "ip_dropped",
+      "confidence": 1.0,
+      "evidence": {
+        "error": "tcp_timeout"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:05.234876Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_dc4_v6_443",
+      "category": "telegram",
+      "target": "2001:67c:4e8:f004::a:443",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 0.0,
+      "evidence": {
+        "error": "[Errno 101] Network is unreachable",
+        "reason": "network_unreachable_local"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.234033Z",
+      "notes": "Local probe has no route to this address — not censorship."
+    },
+    {
+      "test": "telegram_dc4_v6_80",
+      "category": "telegram",
+      "target": "2001:67c:4e8:f004::a:80",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 0.0,
+      "evidence": {
+        "error": "[Errno 101] Network is unreachable",
+        "reason": "network_unreachable_local"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.234142Z",
+      "notes": "Local probe has no route to this address — not censorship."
+    },
+    {
+      "test": "telegram_dc4_v6_5222",
+      "category": "telegram",
+      "target": "2001:67c:4e8:f004::a:5222",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 0.0,
+      "evidence": {
+        "error": "[Errno 101] Network is unreachable",
+        "reason": "network_unreachable_local"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.234240Z",
+      "notes": "Local probe has no route to this address — not censorship."
+    },
+    {
+      "test": "telegram_dc4_v6_2001",
+      "category": "telegram",
+      "target": "2001:67c:4e8:f004::a:2001",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 0.0,
+      "evidence": {
+        "error": "[Errno 101] Network is unreachable",
+        "reason": "network_unreachable_local"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.234336Z",
+      "notes": "Local probe has no route to this address — not censorship."
+    },
+    {
+      "test": "telegram_dc5_v4_443",
+      "category": "telegram",
+      "target": "91.108.56.130:443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 277.7,
+        "mtproto_response": false,
+        "response_bytes": 0,
+        "probe_total_ms": 5278.1
+      },
+      "rtt_ms": 277.70348099875264,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:02.512497Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_dc5_v4_80",
+      "category": "telegram",
+      "target": "91.108.56.130:80",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 350.3,
+        "mtproto_response": false,
+        "response_bytes": 0,
+        "probe_total_ms": 5350.9
+      },
+      "rtt_ms": 350.2632040035678,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:02.585462Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_dc5_v4_5222",
+      "category": "telegram",
+      "target": "91.108.56.130:5222",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 277.4,
+        "mtproto_response": false,
+        "response_bytes": 0,
+        "probe_total_ms": 5277.9
+      },
+      "rtt_ms": 277.43673299846705,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:02.512627Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_dc5_v4_2001",
+      "category": "telegram",
+      "target": "91.108.56.130:2001",
+      "verdict": "BLOCKED",
+      "method": "ip_dropped",
+      "confidence": 1.0,
+      "evidence": {
+        "error": "tcp_timeout"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:05.235054Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_dc5_v6_443",
+      "category": "telegram",
+      "target": "2001:b28:f23f:f005::a:443",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 0.0,
+      "evidence": {
+        "error": "[Errno 101] Network is unreachable",
+        "reason": "network_unreachable_local"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.235126Z",
+      "notes": "Local probe has no route to this address — not censorship."
+    },
+    {
+      "test": "telegram_dc5_v6_80",
+      "category": "telegram",
+      "target": "2001:b28:f23f:f005::a:80",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 0.0,
+      "evidence": {
+        "error": "[Errno 101] Network is unreachable",
+        "reason": "network_unreachable_local"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.235236Z",
+      "notes": "Local probe has no route to this address — not censorship."
+    },
+    {
+      "test": "telegram_dc5_v6_5222",
+      "category": "telegram",
+      "target": "2001:b28:f23f:f005::a:5222",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 0.0,
+      "evidence": {
+        "error": "[Errno 101] Network is unreachable",
+        "reason": "network_unreachable_local"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.235343Z",
+      "notes": "Local probe has no route to this address — not censorship."
+    },
+    {
+      "test": "telegram_dc5_v6_2001",
+      "category": "telegram",
+      "target": "2001:b28:f23f:f005::a:2001",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 0.0,
+      "evidence": {
+        "error": "[Errno 101] Network is unreachable",
+        "reason": "network_unreachable_local"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.235441Z",
+      "notes": "Local probe has no route to this address — not censorship."
+    },
+    {
+      "test": "telegram_web_web_telegram_org",
+      "category": "telegram",
+      "target": "https://web.telegram.org/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": 200
+      },
+      "rtt_ms": 90.22596900467761,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:05.344326Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_web_webk_telegram_org",
+      "category": "telegram",
+      "target": "https://webk.telegram.org/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": 200
+      },
+      "rtt_ms": 89.8708809982054,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:05.344944Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_web_weba_telegram_org",
+      "category": "telegram",
+      "target": "https://weba.telegram.org/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": 200
+      },
+      "rtt_ms": 64.1058009932749,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:05.319851Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_aux_core_telegram_org",
+      "category": "telegram",
+      "target": "https://core.telegram.org/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": 200
+      },
+      "rtt_ms": 175.9410079976078,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:05.539279Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_aux_my_telegram_org",
+      "category": "telegram",
+      "target": "https://my.telegram.org/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": 200
+      },
+      "rtt_ms": 234.82182700536214,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:05.599182Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_aux_translations_telegram_org",
+      "category": "telegram",
+      "target": "https://translations.telegram.org/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": 200
+      },
+      "rtt_ms": 175.66523900313769,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:05.540729Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_aux_t_me",
+      "category": "telegram",
+      "target": "https://t.me/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": 200
+      },
+      "rtt_ms": 234.3709190026857,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:05.600113Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_aux_telegram_org",
+      "category": "telegram",
+      "target": "https://telegram.org/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": 200
+      },
+      "rtt_ms": 178.36717200407293,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:05.544734Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_aux_desktop_telegram_org",
+      "category": "telegram",
+      "target": "https://desktop.telegram.org/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": 200
+      },
+      "rtt_ms": 175.67808899912052,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:05.542687Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_aux_macos_telegram_org",
+      "category": "telegram",
+      "target": "https://macos.telegram.org/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": 200
+      },
+      "rtt_ms": 173.12396899797022,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:05.543966Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_cdn_cdn_telegram_org",
+      "category": "telegram",
+      "target": "https://cdn.telegram.org/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": 200
+      },
+      "rtt_ms": 102.63361300167162,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:05.722902Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_cdn_cdn1_cdn_telegram_org",
+      "category": "telegram",
+      "target": "https://cdn1.cdn-telegram.org/",
+      "verdict": "BLOCKED",
+      "method": "tls_handshake_failure",
+      "confidence": 1.0,
+      "evidence": {
+        "error": "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: Hostname mismatch, certificate is not valid for 'cdn1.cdn-telegram.org'. (_ssl.c:1010)"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:05.875283Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_cdn_cdn4_cdn_telegram_org",
+      "category": "telegram",
+      "target": "https://cdn4.cdn-telegram.org/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": 200
+      },
+      "rtt_ms": 130.40789600927383,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:05.752403Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_cdn_cdn5_cdn_telegram_org",
+      "category": "telegram",
+      "target": "https://cdn5.cdn-telegram.org/",
+      "verdict": "BLOCKED",
+      "method": "tls_handshake_failure",
+      "confidence": 1.0,
+      "evidence": {
+        "error": "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: Hostname mismatch, certificate is not valid for 'cdn5.cdn-telegram.org'. (_ssl.c:1010)"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:05.952993Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_voice_dc1_udp_7670",
+      "category": "telegram",
+      "target": "149.154.175.53:7670/udp",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 0.1,
+      "evidence": {
+        "status": "no_reply_expected",
+        "reason": "Telegram VoIP uses MTProto/UDP, not STUN; timeout is not evidence of censorship."
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:08.955068Z",
+      "notes": "STUN probe to Telegram VoIP port is informational only."
+    },
+    {
+      "test": "telegram_voice_dc1_udp_7680",
+      "category": "telegram",
+      "target": "149.154.175.53:7680/udp",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 0.1,
+      "evidence": {
+        "status": "no_reply_expected",
+        "reason": "Telegram VoIP uses MTProto/UDP, not STUN; timeout is not evidence of censorship."
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:08.955189Z",
+      "notes": "STUN probe to Telegram VoIP port is informational only."
+    },
+    {
+      "test": "telegram_voice_dc2_udp_7670",
+      "category": "telegram",
+      "target": "149.154.167.51:7670/udp",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 0.1,
+      "evidence": {
+        "status": "no_reply_expected",
+        "reason": "Telegram VoIP uses MTProto/UDP, not STUN; timeout is not evidence of censorship."
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:08.955239Z",
+      "notes": "STUN probe to Telegram VoIP port is informational only."
+    },
+    {
+      "test": "telegram_voice_dc2_udp_7680",
+      "category": "telegram",
+      "target": "149.154.167.51:7680/udp",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 0.1,
+      "evidence": {
+        "status": "no_reply_expected",
+        "reason": "Telegram VoIP uses MTProto/UDP, not STUN; timeout is not evidence of censorship."
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:08.955307Z",
+      "notes": "STUN probe to Telegram VoIP port is informational only."
+    },
+    {
+      "test": "telegram_health_score",
+      "category": "telegram",
+      "target": "telegram",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "health_score": 0.794,
+        "health_pct": 79.4
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:08.955629Z",
+      "notes": null
+    },
+    {
+      "test": "protocols_listener_not_configured",
+      "category": "protocols",
+      "target": "n/a",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "reason": "No listener endpoint configured. Run listener container first."
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.135571Z",
+      "notes": "Protocol tests require listener container to be running"
+    },
+    {
+      "test": "cloudflare_quic_1111",
+      "category": "cloudflare",
+      "target": "udp://1.1.1.1:443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "response_bytes": 23,
+        "is_version_negotiation": true,
+        "note": "UDP 443 passes TSPU — QUIC/HTTP3 accessible"
+      },
+      "rtt_ms": 68.55314401036594,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.304160Z",
+      "notes": null
+    },
+    {
+      "test": "cloudflare_quic_1001",
+      "category": "cloudflare",
+      "target": "udp://1.0.0.1:443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "response_bytes": 23,
+        "is_version_negotiation": true,
+        "note": "UDP 443 passes TSPU — QUIC/HTTP3 accessible"
+      },
+      "rtt_ms": 68.44741199165583,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.304232Z",
+      "notes": null
+    },
+    {
+      "test": "cloudflare_quic_warp_masque",
+      "category": "cloudflare",
+      "target": "udp://162.159.197.10:443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "response_bytes": 23,
+        "is_version_negotiation": true,
+        "note": "UDP 443 passes TSPU — QUIC/HTTP3 accessible"
+      },
+      "rtt_ms": 68.34984100714792,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.304277Z",
+      "notes": null
+    },
+    {
+      "test": "cloudflare_warp_engage_api",
+      "category": "cloudflare",
+      "target": "tcp://engage.cloudflareclient.com:443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 75.0
+      },
+      "rtt_ms": 74.95522400131449,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.310998Z",
+      "notes": null
+    },
+    {
+      "test": "cloudflare_warp_connectivity_check",
+      "category": "cloudflare",
+      "target": "tcp://connectivity.cloudflareclient.com:443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 74.9
+      },
+      "rtt_ms": 74.94854100514203,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.311070Z",
+      "notes": null
+    },
+    {
+      "test": "cloudflare_warp_zt_orchestration",
+      "category": "cloudflare",
+      "target": "tcp://zero-trust-client.cloudflareclient.com:443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 74.6
+      },
+      "rtt_ms": 74.57277800131124,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.311117Z",
+      "notes": null
+    },
+    {
+      "test": "cloudflare_warp_masque_anycast_tcp",
+      "category": "cloudflare",
+      "target": "tcp://162.159.197.10:443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 69.2
+      },
+      "rtt_ms": 69.20785699912813,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.306164Z",
+      "notes": null
+    },
+    {
+      "test": "cloudflare_warp_wg_anycast_tcp",
+      "category": "cloudflare",
+      "target": "tcp://162.159.193.10:443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 69.1
+      },
+      "rtt_ms": 69.12995500897523,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.306220Z",
+      "notes": null
+    },
+    {
+      "test": "cloudflare_warp_masque_udp_4443",
+      "category": "cloudflare",
+      "target": "udp://162.159.197.10:4443",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 0.3,
+      "evidence": {
+        "protocol": "masque",
+        "error": "icmp_unreachable",
+        "reason": "pop_doesnt_bind_fallback_port"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.304330Z",
+      "notes": "ICMP Port Unreachable. Network path open; this Cloudflare anycast member is just not advertising this fallback port. Not a censorship signal."
+    },
+    {
+      "test": "cloudflare_warp_masque_udp_8443",
+      "category": "cloudflare",
+      "target": "udp://162.159.197.10:8443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "protocol": "masque",
+        "response_bytes": 23,
+        "note": "QUIC VN reply — MASQUE port reachable and running HTTP/3"
+      },
+      "rtt_ms": 66.96211999224033,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.304388Z",
+      "notes": null
+    },
+    {
+      "test": "cloudflare_warp_wg_udp_2408",
+      "category": "cloudflare",
+      "target": "udp://162.159.193.10:2408",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 0.1,
+      "evidence": {
+        "protocol": "wireguard",
+        "error": "udp_timeout",
+        "timeout_sec": 2.0,
+        "reason": "tunnel_silently_drops_invalid"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:59.313742Z",
+      "notes": "UDP timeout on a wireguard port is the protocol's default behaviour — cannot be attributed to censorship without a positive control signal."
+    },
+    {
+      "test": "cloudflare_warp_wg_udp_4500",
+      "category": "cloudflare",
+      "target": "udp://162.159.193.10:4500",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 0.1,
+      "evidence": {
+        "protocol": "wireguard",
+        "error": "udp_timeout",
+        "timeout_sec": 2.0,
+        "reason": "tunnel_silently_drops_invalid"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:59.313859Z",
+      "notes": "UDP timeout on a wireguard port is the protocol's default behaviour — cannot be attributed to censorship without a positive control signal."
+    },
+    {
+      "test": "cloudflare_http_workers_dev",
+      "category": "cloudflare",
+      "target": "https://workers.dev/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": 200,
+        "expected": 200
+      },
+      "rtt_ms": 878.9306140097324,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:58.117095Z",
+      "notes": null
+    },
+    {
+      "test": "cloudflare_http_pages_dev",
+      "category": "cloudflare",
+      "target": "https://pages.dev/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": 200,
+        "expected": 200
+      },
+      "rtt_ms": 463.3716829994228,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.720282Z",
+      "notes": null
+    },
+    {
+      "test": "cloudflare_http_cloudflare_dns_com",
+      "category": "cloudflare",
+      "target": "https://cloudflare-dns.com/cdn-cgi/trace",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": 200,
+        "expected": 200
+      },
+      "rtt_ms": 309.46354199841153,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:33:57.584691Z",
+      "notes": null
+    },
+    {
+      "test": "throttling_cloudflare_baseline",
+      "category": "throttling",
+      "target": "speed.cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "bandwidth_mbps": 405.05,
+        "role": "control_baseline"
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:10.028552Z",
+      "notes": null
+    },
+    {
+      "test": "throttling_selectel_baseline",
+      "category": "throttling",
+      "target": "speedtest.selectel.ru",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "bandwidth_mbps": 0.32,
+        "profile_mbps": []
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:10.221015Z",
+      "notes": null
+    },
+    {
+      "test": "throttling_youtube_method_a",
+      "category": "throttling",
+      "target": "youtube.com",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "source_url": "https://dl.google.com/dl/android/studio/ide-zips/2023.1.1.28/android-studio-2023.1.1.28-linux.tar.gz",
+        "bandwidth_mbps": 666.01,
+        "profile_mbps": [
+          734.1561745660588,
+          816.3651729166525,
+          852.2375329027111,
+          940.6406834316315,
+          936.9126136423416,
+          707.7421693738181,
+          608.3988812197907,
+          475.4624910218276,
+          310.11406484083983
+        ],
+        "burst_then_drop": false
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:20.224213Z",
+      "notes": null
+    },
+    {
+      "test": "throttling_youtube_sni_probe_method_b",
+      "category": "throttling",
+      "target": "speedtest.selectel.ru (SNI=googlevideo.com)",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.95,
+      "evidence": {
+        "control_host": "speedtest.selectel.ru",
+        "runs": {
+          "correct_sni": {
+            "label": "correct_sni",
+            "sni": "speedtest.selectel.ru",
+            "bandwidth_mbps": 381.73328,
+            "speed_bytes_sec": 47716660.0,
+            "time_total_sec": 2.197505,
+            "http_code": 200,
+            "curl_returncode": 0
+          },
+          "googlevideo_sni": {
+            "label": "googlevideo_sni",
+            "sni": "googlevideo.com",
+            "bandwidth_mbps": 493.950192,
+            "speed_bytes_sec": 61743774.0,
+            "time_total_sec": 1.69827,
+            "http_code": 200,
+            "curl_returncode": 0
+          },
+          "typo_sni": {
+            "label": "typo_sni",
+            "sni": "googleviideo.com",
+            "bandwidth_mbps": 420.176416,
+            "speed_bytes_sec": 52522052.0,
+            "time_total_sec": 1.996449,
+            "http_code": 200,
+            "curl_returncode": 0
+          }
+        },
+        "bandwidth_correct_sni_mbps": 381.73,
+        "bandwidth_googlevideo_sni_mbps": 493.95,
+        "bandwidth_typo_sni_mbps": 420.18
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:26.174967Z",
+      "notes": "Method B (Vetrov/Habr 2024): SNI-level ТСПУ throttling attribution"
+    },
+    {
+      "test": "middlebox_header_host_case",
+      "category": "middlebox",
+      "target": "1.1.1.1:80",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "sent_header": "hOsT",
+        "status_line": "HTTP/1.1 301 Moved Permanently",
+        "status_code": 301,
+        "response_head": "HTTP/1.1 301 Moved Permanently\r\nServer: cloudflare\r\nDate: Tue, 28 Apr 2026 21:34:26 GMT\r\nContent-Type: text/html\r\nContent-Length: 167\r\nConnection: close\r\nLocation: https://1.1.1.1/\r\nCF-RAY: 9f3930e5a8",
+        "cloudflare_ok_statuses": [
+          301,
+          302,
+          400
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:26.182792Z",
+      "notes": "Modified Host header case"
+    },
+    {
+      "test": "middlebox_header_useragent_case",
+      "category": "middlebox",
+      "target": "1.1.1.1:80",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "sent_header": "uSeR-aGeNt",
+        "status_line": "HTTP/1.1 301 Moved Permanently",
+        "status_code": 301,
+        "response_head": "HTTP/1.1 301 Moved Permanently\r\nServer: cloudflare\r\nDate: Tue, 28 Apr 2026 21:34:26 GMT\r\nContent-Type: text/html\r\nContent-Length: 167\r\nConnection: close\r\nLocation: https://1.1.1.1/\r\nCF-RAY: 9f3930e5af",
+        "cloudflare_ok_statuses": [
+          301,
+          302,
+          400
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:26.185711Z",
+      "notes": "Modified User-Agent case"
+    },
+    {
+      "test": "middlebox_invalid_request_line",
+      "category": "middlebox",
+      "target": "httpbin.org:80",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "sent_method": "XFSKJRY",
+        "status_line": "HTTP/1.1 405 METHOD NOT ALLOWED",
+        "status_code": 405,
+        "response_head": "HTTP/1.1 405 METHOD NOT ALLOWED\r\nDate: Tue, 28 Apr 2026 21:34:26 GMT\r\nContent-Type: text/html\r\nContent-Length: 178\r\nConnection: keep-alive\r\nServer: gunicorn/19.9.0\r\nAllow: HEAD, GET, OPTIONS\r\nAccess-C",
+        "expected_one_of": [
+          400,
+          405,
+          501
+        ]
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:26.368196Z",
+      "notes": null
+    },
+    {
+      "test": "middlebox_tcp_fragmentation",
+      "category": "middlebox",
+      "target": "cloudflare.com:443",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 0.0,
+      "evidence": {
+        "status": "not_implemented_in_mvp",
+        "reason": "Real TCP fragmentation requires raw-socket or low-level send-chunk control; the previous placeholder only ran a normal TLS handshake and was misleading."
+      },
+      "rtt_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-04-28T21:34:26.368238Z",
+      "notes": "TCP fragmentation circumvention not implemented in MVP."
+    }
+  ],
+  "summary": {
+    "total": 257,
+    "by_verdict": {
+      "OK": 187,
+      "INCONCLUSIVE": 63,
+      "BLOCKED": 7
+    },
+    "by_category": {
+      "dns": {
+        "OK": 37
+      },
+      "tcp": {
+        "OK": 15
+      },
+      "tls": {
+        "OK": 61,
+        "INCONCLUSIVE": 32
+      },
+      "http": {
+        "OK": 29
+      },
+      "telegram": {
+        "OK": 28,
+        "BLOCKED": 7,
+        "INCONCLUSIVE": 24
+      },
+      "protocols": {
+        "INCONCLUSIVE": 1
+      },
+      "cloudflare": {
+        "OK": 12,
+        "INCONCLUSIVE": 3
+      },
+      "throttling": {
+        "OK": 2,
+        "INCONCLUSIVE": 2
+      },
+      "middlebox": {
+        "OK": 3,
+        "INCONCLUSIVE": 1
+      }
+    },
+    "detected_techniques": [
+      "ip_dropped",
+      "tls_handshake_failure"
+    ],
+    "blocked_count": 7,
+    "ok_count": 187,
+    "module_failures": []
+  }
+}
