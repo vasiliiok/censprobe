@@ -1,0 +1,70 @@
+{
+  "test_id": "vultr",
+  "session_id": "moscow-free",
+  "listener_started_at": "2026-04-28T22:15:09.282723Z",
+  "listener_stopped_at": "2026-04-28T22:23:37.563488Z",
+  "duration_sec": 508.3,
+  "results": {
+    "openvpn": {
+      "verdict": "BLOCKED",
+      "handshake_count": 0,
+      "data_transfer_ok": false,
+      "first_handshake_at": null,
+      "avg_rtt_ms": null,
+      "avg_data_echo_ms": null,
+      "from_asn": null,
+      "note": null
+    },
+    "wireguard": {
+      "verdict": "BLOCKED",
+      "handshake_count": 0,
+      "data_transfer_ok": false,
+      "first_handshake_at": null,
+      "avg_rtt_ms": null,
+      "avg_data_echo_ms": null,
+      "from_asn": null,
+      "note": null
+    },
+    "amneziawg": {
+      "verdict": "BLOCKED",
+      "handshake_count": 0,
+      "data_transfer_ok": false,
+      "first_handshake_at": null,
+      "avg_rtt_ms": null,
+      "avg_data_echo_ms": null,
+      "from_asn": null,
+      "note": null
+    },
+    "shadowsocks": {
+      "verdict": "BLOCKED",
+      "handshake_count": 0,
+      "data_transfer_ok": false,
+      "first_handshake_at": null,
+      "avg_rtt_ms": null,
+      "avg_data_echo_ms": null,
+      "from_asn": null,
+      "note": null
+    },
+    "vless_reality": {
+      "verdict": "BLOCKED",
+      "handshake_count": 0,
+      "data_transfer_ok": false,
+      "first_handshake_at": null,
+      "avg_rtt_ms": null,
+      "avg_data_echo_ms": null,
+      "from_asn": null,
+      "note": null
+    },
+    "hysteria2": {
+      "verdict": "BLOCKED",
+      "handshake_count": 0,
+      "data_transfer_ok": false,
+      "first_handshake_at": null,
+      "avg_rtt_ms": null,
+      "avg_data_echo_ms": null,
+      "from_asn": null,
+      "note": null
+    }
+  },
+  "events": []
+}
