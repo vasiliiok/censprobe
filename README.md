@@ -114,14 +114,14 @@ TEST_ID=selectel-spb-001 SESSION_ID=client-mob-mts-msk \
 - `targets/vpn.yaml` — VPN-сервисы
 - `targets/telegram.yaml` — дата-центры Telegram
 - `targets/neutral.yaml` — нейтральные ресурсы (VK, Yandex, Wikipedia)
-- `targets/cloudflare.yaml` — инфраструктура Cloudflare (используется модулем cloudflare)
+- `targets/cloudflare.yaml` — инфраструктура Cloudflare и WARP: QUIC/HTTP3 (UDP 443), WARP control plane (engage/connectivity/zero-trust на TCP 443), MASQUE-anycast (162.159.197.0/24 — основной протокол WARP с дек. 2024) и WireGuard-anycast (162.159.193.0/24 — legacy). Покрываются все UDP-ports реальной WARP-fallback-лестницы: MASQUE 443→4443/8443, WG 2408→4500. Используется модулем cloudflare.
 
 **Как добавить новый сайт:**
 
 1. Откройте нужный файл в `targets/`.
 2. Добавьте домен по аналогии с существующими.
 3. Сделайте `git commit` и `git push`.
-4. Запустите `control` для обновления эталонного baseline.
+4. Перегенерация baseline (`control`) **нужна только** если добавили Telegram-эндпоинт или цель для Method A throttling — для DNS/TLS/HTTP вердикты считаются inline и baseline не используется.
 
 Порты протоколов по умолчанию задаются в `protocols/default.yaml`, отпечатки блок-страниц — в `signatures/blockpages.yaml`.
 
@@ -157,7 +157,17 @@ TEST_ID=selectel-spb-001 docker compose --profile reporter run --rm reporter --p
 
 ## Эталонный Baseline (Control)
 
-Чтобы отличить блокировку ТСПУ от реальной недоступности сайта (например, 403 от самого ресурса), Censprobe сравнивает результаты с эталонным *baseline* — снимком, сделанным с чистого зарубежного сервера.
+Baseline — это снимок с чистого зарубежного сервера, который Censprobe использует **только** в двух случаях:
+
+1. **Telegram reconcile.** Часть эндпоинтов Telegram (порт `2001`, `k.web.telegram.org`/`a.web.telegram.org` отвечают NXDOMAIN извне РФ, CDN `cdn1..5` отдают «не тот» сертификат) и без эталона с EU-сервера на нейтральном VPS они выглядят как «заблокировано». Baseline помечает их `INCONCLUSIVE` (reason: `baseline_also_unreachable`).
+2. **Method A throttling.** Для верификации замеров YouTube/CDN bandwidth используется порог `< baseline_p10 × 0.3` → `THROTTLED`.
+
+Для DNS/TLS/HTTP и Method B SNI-throttling baseline **не используется**:
+
+- DNS — подход CERTainty (PETS 2023): валидность TLS-сертификата + согласие с DoH/DoT.
+- TLS — системный trust store; cert-chain hash-сравнение убрано (ложные срабатывания на CDN-rotation).
+- HTTP — сигнатуры блок-страниц + `expected_status` из `targets/*.yaml`.
+- Method B — относительная разница bandwidth между correct/trigger/typo SNI внутри одного запуска (устойчиво к разной ширине uplink).
 
 Baseline генерируется профилем **control** на чистом EU/DE-сервере:
 
@@ -168,7 +178,7 @@ docker compose --profile control up
 
 `CONTROL_ID` и `CONTROL_COUNTRY` задаются в `.env` (по умолчанию: `control-de-01` и `DE`). Количество повторных замеров — `RUNS_COUNT` (по умолчанию: 5).
 
-Эталон сохранится в `baseline/latest.json`. Рекомендуется обновлять его перед серией тестов новых серверов.
+Эталон сохранится в `baseline/latest.json` (≈9 КБ — только две секции: `telegram` и `throttling`). Запуск solo без актуального baseline допустим: DNS/TLS/HTTP всё равно дадут полноценные вердикты, потеряются только Telegram-reconcile (NXDOMAIN/wrong-cert эндпоинты вернут `BLOCKED` вместо `INCONCLUSIVE`) и Method A throttling (вернёт `INCONCLUSIVE`). Обновлять baseline имеет смысл при добавлении новых Telegram/throttling-целей или раз в 1–2 недели для актуализации Telegram DC reachability.
 
 ---
 

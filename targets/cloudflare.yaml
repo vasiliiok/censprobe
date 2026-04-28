@@ -5,10 +5,17 @@
 # modules (those already handle cloudflare.com via neutral.yaml).
 #
 # Key censorship signals for Russia:
-#   1. QUIC/HTTP3 (UDP 443) — TSPU has blocked UDP 443 since 2022, breaking HTTP3
-#   2. Cloudflare WARP — WireGuard VPN (UDP 2408 / TCP 443)
-#   3. workers.dev / pages.dev — Cloudflare-hosted content sometimes blocked by RKN
-#   4. ECH — summarized from tls module; crypto.cloudflare.com tests it directly
+#   1. QUIC/HTTP3 (UDP 443) — TSPU has blocked UDP 443 since 2022, breaking HTTP3.
+#      This is also the *primary* path for Cloudflare WARP since Dec 2024:
+#      MASQUE (HTTP/3 over QUIC) replaced WireGuard as WARP's default protocol.
+#   2. Cloudflare WARP control plane — engage / connectivity / zero-trust
+#      hostnames on TCP 443.
+#   3. WARP MASQUE anycast (162.159.197.0/24) — UDP 443 primary, with UDP
+#      fallbacks on 4443/8443/8095 and a TCP 443 fallback path.
+#   4. WARP WireGuard anycast (162.159.193.0/24) — legacy fallback protocol;
+#      UDP 2408 default, UDP 500/1701/4500 fallbacks.
+#   5. workers.dev / pages.dev — Cloudflare-hosted content sometimes blocked by RKN.
+#   6. ECH — summarized from tls module; crypto.cloudflare.com tests it directly.
 
 # UDP 443 / QUIC probe targets
 # We send a QUIC Version Negotiation trigger and wait for any server response.
@@ -24,18 +31,87 @@ quic_targets:
     name: "cloudflare_quic_1001"
     notes: "Cloudflare 1.0.0.1 — secondary anycast"
 
-# Cloudflare WARP endpoints
-# WARP uses WireGuard over UDP 2408 and HTTPS (TCP 443) for registration.
+  - host: "162.159.197.10"
+    port: 443
+    name: "cloudflare_quic_warp_masque"
+    notes: "WARP MASQUE anycast (162.159.197.0/24) — UDP 443 to WARP infra specifically"
+
+# Cloudflare WARP endpoints — TCP probes
+# WARP control plane uses HTTPS (TCP 443). Reachability per endpoint:
+#   engage.cloudflareclient.com         — registration / device enrollment
+#   connectivity.cloudflareclient.com   — tunnel passthrough check (returns 522 by design)
+#   zero-trust-client.cloudflareclient.com — Zero Trust client orchestration
+#   162.159.197.x                       — MASQUE tunnel anycast (default since
+#                                          Dec 2024). TCP 443 here is the explicit
+#                                          fallback path when UDP 443 is blocked.
+#   162.159.193.x                       — WireGuard tunnel anycast (legacy
+#                                          protocol; TCP-only here = IP-level test).
+# Endpoint list authoritative source:
+#   developers.cloudflare.com/cloudflare-one/team-and-resources/devices/
+#     cloudflare-one-client/deployment/firewall/
 warp_targets:
   - host: "engage.cloudflareclient.com"
     port_tcp: 443
-    name: "cloudflare_warp_api"
-    notes: "WARP registration API — HTTPS; blocked = WARP setup impossible"
+    name: "cloudflare_warp_engage_api"
+    notes: "WARP registration API — blocked = consumer WARP cannot enroll"
 
-  - host: "162.159.193.1"
+  - host: "connectivity.cloudflareclient.com"
     port_tcp: 443
-    name: "cloudflare_warp_anycast_tcp"
-    notes: "Cloudflare WARP anycast IP, TCP 443 — tests IP-level blocking"
+    name: "cloudflare_warp_connectivity_check"
+    notes: "WARP tunnel passthrough probe endpoint"
+
+  - host: "zero-trust-client.cloudflareclient.com"
+    port_tcp: 443
+    name: "cloudflare_warp_zt_orchestration"
+    notes: "Zero Trust client orchestration — blocked = WARP-for-teams unmanageable"
+
+  - host: "162.159.197.10"
+    port_tcp: 443
+    name: "cloudflare_warp_masque_anycast_tcp"
+    notes: "MASQUE anycast (default WARP protocol), TCP 443 fallback path"
+
+  - host: "162.159.193.10"
+    port_tcp: 443
+    name: "cloudflare_warp_wg_anycast_tcp"
+    notes: "WireGuard legacy anycast, TCP 443 — IP-level reachability"
+
+# WARP tunnel UDP probes
+# Real WARP servers (both MASQUE/QUIC and WireGuard) drop packets that don't
+# authenticate, so timeout cannot be attributed to censorship. INCONCLUSIVE on
+# silent timeout; BLOCKED only on explicit ICMP/socket rejection.
+#
+# MASQUE UDP fallback ladder (per Cloudflare One firewall docs):
+#   default 443, fallbacks 500, 1701, 4500, 4443, 8443, 8095
+# We probe the most distinctive of these — UDP 443 is already covered by the
+# `cloudflare_quic_warp_masque` test in quic_targets, so here we cover the
+# fallback ports a real client would try when UDP 443 is blocked (the RU TSPU
+# scenario).
+#
+# WireGuard fallback ladder: default 2408, fallbacks 500, 1701, 4500.
+warp_tunnel_udp_targets:
+  - host: "162.159.197.10"
+    port_udp: 4443
+    protocol: masque
+    name: "cloudflare_warp_masque_udp_4443"
+    notes: "MASQUE UDP fallback when 443 is blocked"
+
+  - host: "162.159.197.10"
+    port_udp: 8443
+    protocol: masque
+    name: "cloudflare_warp_masque_udp_8443"
+    notes: "MASQUE UDP fallback (high-port) — least likely to hit port-based blocks"
+
+  - host: "162.159.193.10"
+    port_udp: 2408
+    protocol: wireguard
+    name: "cloudflare_warp_wg_udp_2408"
+    notes: "WireGuard primary UDP port (legacy WARP protocol)"
+
+  - host: "162.159.193.10"
+    port_udp: 4500
+    protocol: wireguard
+    name: "cloudflare_warp_wg_udp_4500"
+    notes: "WireGuard NAT-T fallback UDP port"
 
 # Cloudflare platform HTTP targets (workers.dev, pages.dev)
 # RKN has blocked specific workers.dev/pages.dev subdomains hosting banned content.

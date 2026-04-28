@@ -203,7 +203,6 @@ async def _async_main(runs: int, skip_push: bool) -> None:
         f"[bold green]Control baseline complete.[/bold green]\n"
         f"Version: [yellow]{baseline.version}[/yellow]\n"
         f"Valid until: {baseline.validity_until.strftime('%Y-%m-%d') if baseline.validity_until else 'N/A'}\n"
-        f"DNS entries: {len(baseline.dns)} | HTTP: {len(baseline.http)} | "
         f"Telegram: {len(baseline.telegram)} | Throttling: {len(baseline.throttling)}",
         title="Done",
     ))
@@ -280,12 +279,8 @@ def _print_baseline_summary(baseline) -> None:
     table = Table(title="Baseline Summary", show_header=True)
     table.add_column("Category")
     table.add_column("Entries", justify="right")
-    table.add_row("DNS domains", str(len(baseline.dns)))
-    table.add_row("TLS domains", str(len(baseline.tls)))
-    table.add_row("HTTP URLs", str(len(baseline.http)))
     table.add_row("Telegram endpoints", str(len(baseline.telegram)))
     table.add_row("Throttling domains", str(len(baseline.throttling)))
-    table.add_row("SNI throttling", "yes" if baseline.sni_throttling else "no")
     console.print(table)
 
 

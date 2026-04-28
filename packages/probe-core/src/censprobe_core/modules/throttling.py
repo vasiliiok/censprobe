@@ -55,11 +55,29 @@ async def run_throttling_tests(
 
     # Method B — YouTube SNI probe
     if enable_method_b:
-        result = await _run_method_b_sni_probe(comparator)
+        result = await _run_method_b_sni_probe()
         if result:
             results.append(result)
 
     return results
+
+
+def _decide_method_b_verdict(
+    bw_correct: float, bw_trigger: float, bw_typo: float,
+) -> Verdict:
+    """Within-run relative bandwidth check for ТСПУ SNI throttling.
+
+    YOUTUBE_SNI_THROTTLED iff trigger SNI is < 25% of BOTH the correct and
+    typo SNIs on the same uplink in the same run — i.e., the only
+    plausible explanation is that the network treats googlevideo.com SNI
+    differently. INCONCLUSIVE when any of the three measurements failed
+    (bw == 0); otherwise OK.
+    """
+    if bw_correct <= 0 or bw_trigger <= 0 or bw_typo <= 0:
+        return Verdict.INCONCLUSIVE
+    if bw_trigger < bw_correct * 0.25 and bw_trigger < bw_typo * 0.25:
+        return Verdict.YOUTUBE_SNI_THROTTLED
+    return Verdict.OK
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -230,13 +248,20 @@ def _detect_burst_drop(profile: list[float]) -> bool:
 # Method B — SNI throttling probe via curl --connect-to
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def _run_method_b_sni_probe(comparator: BaselineComparator) -> Optional[TestResult]:
+async def _run_method_b_sni_probe() -> Optional[TestResult]:
     """
     Method B: Three curl runs to selectel.ru IP with different SNIs.
 
     curl --connect-to ::speedtest.selectel.ru -k
     sends TLS ClientHello with SNI=googlevideo.com but connects to selectel IP.
     ТСПУ sees the SNI and throttles if it's in their list.
+
+    Verdict is decided by within-run relative bandwidth, not against a
+    static control snapshot. The baseline approach was unstable: a probe
+    VPS with a narrower uplink than the control VPS would have all three
+    SNIs measure below the baseline, masking real throttling. The
+    relative check (trigger vs. correct/typo on the same uplink in the
+    same run) is robust to that.
     """
     cfg = _METHOD_B_CONFIG
     control_host = cfg["control_ip_host"]
@@ -245,10 +270,8 @@ async def _run_method_b_sni_probe(comparator: BaselineComparator) -> Optional[Te
 
     # Run sequentially, not in parallel. Parallel downloads compete for the
     # same uplink: on a narrow VPS (30–50 Mbit/s) three simultaneous curls
-    # split the channel three ways, so all three look slow relative to the
-    # baseline and compare_sni_throttling returns INCONCLUSIVE even when ТСПУ
-    # is actively throttling googlevideo.com SNI. Sequential runs give each
-    # SNI the full uplink, making the relative drop of the throttled SNI clear.
+    # split the channel three ways and the relative drop of the throttled
+    # SNI is masked. Sequential runs give each SNI the full uplink.
     for run in cfg["runs"]:
         try:
             result = await _curl_connect_to_run(
@@ -260,12 +283,11 @@ async def _run_method_b_sni_probe(comparator: BaselineComparator) -> Optional[Te
         except Exception as e:
             run_results[run["label"]] = {"bandwidth_mbps": 0.0, "error": str(e)}
 
-    # Extract bandwidth values
-    bw_correct  = run_results.get("correct_sni", {}).get("bandwidth_mbps", 0.0)
-    bw_trigger  = run_results.get("googlevideo_sni", {}).get("bandwidth_mbps", 0.0)
-    bw_typo     = run_results.get("typo_sni", {}).get("bandwidth_mbps", 0.0)
+    bw_correct = run_results.get("correct_sni", {}).get("bandwidth_mbps", 0.0)
+    bw_trigger = run_results.get("googlevideo_sni", {}).get("bandwidth_mbps", 0.0)
+    bw_typo    = run_results.get("typo_sni", {}).get("bandwidth_mbps", 0.0)
 
-    verdict = comparator.compare_sni_throttling(bw_correct, bw_trigger, bw_typo)
+    verdict = _decide_method_b_verdict(bw_correct, bw_trigger, bw_typo)
 
     method = BlockingMethod.SNI_THROTTLING if verdict == Verdict.YOUTUBE_SNI_THROTTLED else None
 

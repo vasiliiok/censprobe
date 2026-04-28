@@ -258,7 +258,7 @@
           {% set vc = r.verdict | upper %}
           {% if vc == 'OK' %}
             <span class="badge badge-ok">OK</span>
-          {% elif vc in ['BLOCKED','DNS_BLOCKED','IP_DROPPED','RST_INJECTED','REFUSED','QUIC_DROPPED'] %}
+          {% elif vc in ['BLOCKED','DNS_BLOCKED','IP_DROPPED','RST_INJECTED','REFUSED'] %}
             <span class="badge badge-blocked">{{ vc }}</span>
           {% elif vc in ['THROTTLED','YOUTUBE_SNI_THROTTLED'] %}
             <span class="badge badge-throttled">{{ vc }}</span>
