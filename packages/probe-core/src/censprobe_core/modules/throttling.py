@@ -126,7 +126,14 @@ async def _run_method_a_baseline(comparator: BaselineComparator) -> list[TestRes
 
     # YouTube (front page — googlevideo.com is also tagged so ТСПУ sees it as YT).
     yt_bw, yt_profile, yt_url = await _measure_bandwidth_googlevideo()
-    yt_verdict, yt_method = comparator.compare_bandwidth("youtube.com", yt_bw)
+    # bw=0.0 means every candidate URL failed (DNS error, connection refused,
+    # non-200 response, exception). Without a measurement we have nothing to
+    # compare against the baseline p10 — comparator.compare_bandwidth would
+    # otherwise see 0.0 < threshold and falsely return THROTTLED.
+    if yt_bw == 0.0:
+        yt_verdict, yt_method = Verdict.INCONCLUSIVE, None
+    else:
+        yt_verdict, yt_method = comparator.compare_bandwidth("youtube.com", yt_bw)
     results.append(TestResult(
         test="throttling_youtube_method_a",
         category="throttling",

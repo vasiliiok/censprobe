@@ -267,14 +267,24 @@ async def _test_domain(
     confidence: float
 
     if cert_valid is False:
-        # Cert from system-resolver IP doesn't validate as `domain`. If the
-        # IP also disagrees with what DoH returns → poisoned. If it overlaps
-        # with DoH (same IP, but cert-validation failed for another reason
-        # like an expired root) → ambiguous, surface as ANOMALY.
+        # Cert from system-resolver IP doesn't validate as `domain`.
         if ip_overlap:
+            # System and DoH agree on the IP but cert validation failed —
+            # ambiguous (could be expired root, broken chain, or a real
+            # server-side cert issue rather than DNS-level redirection).
             verdict = Verdict.ANOMALY
             confidence = 0.6
+        elif not doh_ips:
+            # DoH itself was unreachable / blocked, so we have no second
+            # source of truth. Cert-failure alone (without DoH consensus)
+            # cannot prove DNS poisoning per CERTainty PETS 2023 — the
+            # IP could be authentic but serving a broken cert. Downgrade
+            # to ANOMALY rather than overclaiming DNS_POISONING.
+            verdict = Verdict.ANOMALY
+            confidence = 0.4
         else:
+            # System and DoH disagree on the IP, AND cert from the system
+            # IP doesn't validate as `domain` → poisoned.
             verdict = Verdict.DNS_POISONING
             method = BlockingMethod.DNS_POISONING
             confidence = 0.9

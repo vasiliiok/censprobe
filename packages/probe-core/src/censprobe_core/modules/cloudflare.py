@@ -40,9 +40,14 @@ QUIC verdict:
 WARP tunnel UDP verdict (both MASQUE-fallback and WireGuard ports):
   Real servers silently drop packets that don't authenticate, so we cannot
   expect a positive response. We surface:
-    ICMP rejection / EHOSTUNREACH → BLOCKED (network refuses the path)
-    timeout                       → INCONCLUSIVE (server-silence is the
-                                                  protocol's normal behaviour)
+    EHOSTUNREACH / "no route" / EPERM → BLOCKED + IP_DROPPED (network
+                                          actively refuses the outbound path)
+    ICMP Port Unreachable             → INCONCLUSIVE (Cloudflare anycast
+                                          PoP doesn't bind this fallback
+                                          port; network path is open)
+    timeout                           → INCONCLUSIVE (server-silence is the
+                                          protocol's normal behaviour)
+    QUIC VN reply on a MASQUE port    → OK (port reachable + speaks HTTP/3)
 """
 from __future__ import annotations
 
@@ -347,9 +352,9 @@ def _build_wg_handshake_init() -> bytes:
         b'\x01'                         # message_type = handshake init
         + b'\x00\x00\x00'               # reserved
         + os.urandom(4)                 # sender_index
-        + os.urandom(32)                # ephemeral pubkey
-        + os.urandom(48)                # encrypted static
-        + os.urandom(16)                # encrypted timestamp
+        + os.urandom(32)                # unencrypted ephemeral
+        + os.urandom(48)                # encrypted static (32B + 16B Poly1305 tag)
+        + os.urandom(28)                # encrypted timestamp (12B TAI64N + 16B Poly1305 tag)
         + os.urandom(16)                # mac1
         + b'\x00' * 16                  # mac2
     )
@@ -379,14 +384,19 @@ async def _test_warp_udp(
     plausible packet for the port — random bytes would get dropped earlier.
 
     Verdicts:
-      BLOCKED      — sendto raised (EHOSTUNREACH / EPERM) or ICMP unreachable
-                     came back as ConnectionRefusedError. The network actively
-                     refuses the path.
-      OK           — got any datagram back (rare; would indicate the server
-                     didn't drop our packet, or something on path is replying).
-      INCONCLUSIVE — silent timeout. Both MASQUE and WireGuard silently drop
-                     unauthenticated handshakes, so timeout cannot be
-                     attributed to censorship.
+      BLOCKED      — sendto raised (EHOSTUNREACH / "no route" / EPERM): the
+                     local network stack refuses the outbound path before the
+                     packet leaves the host.
+      OK           — got a datagram back. On a MASQUE port a QUIC VN reply
+                     to our GREASE-version trigger is the expected positive
+                     signal (HTTP/3 server is up); on a WG port any reply is
+                     unusual (we can't form a valid mac1 without the server
+                     pubkey) so confidence stays lower.
+      INCONCLUSIVE — silent timeout (MASQUE/WG silently drop unauthenticated
+                     handshakes, can't attribute to censorship), or ICMP
+                     Port Unreachable (Cloudflare anycast PoP doesn't bind
+                     this fallback port — network path is open, so this is
+                     not a censorship signal).
     """
     if protocol == "masque":
         probe = _build_masque_probe_packet()
