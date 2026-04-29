@@ -7,10 +7,9 @@ Scope (after baseline simplification):
 - Method A throttling threshold: probe bw vs baseline_p10 * 0.3.
 
 DNS / TLS / HTTP and Method-B SNI throttling no longer use baseline data —
-they decide inline from cert validity, DoH consensus, blockpage signatures
-and within-run relative bandwidth, which avoids CDN-cert / ASN-rotation
-false positives that a static control snapshot can't distinguish from real
-censorship.
+they decide inline from cert validity, DoH consensus and within-run relative
+bandwidth, which avoids CDN-cert / ASN-rotation false positives that a
+static control snapshot can't distinguish from real censorship.
 """
 from __future__ import annotations
 

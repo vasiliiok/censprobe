@@ -54,7 +54,6 @@ class BlockingMethod(StrEnum):
     TCP_RST_AFTER_TLS_CH = "tcp_rst_after_tls_ch"
     TLS_HANDSHAKE_FAILURE = "tls_handshake_failure"
     ECH_BLOCKED = "ech_blocked"
-    BLOCKPAGE_RETURNED = "blockpage_returned"
     BANDWIDTH_THROTTLING = "bandwidth_throttling"
     SNI_THROTTLING = "sni_throttling"
     QUIC_DROPPED = "quic_dropped"

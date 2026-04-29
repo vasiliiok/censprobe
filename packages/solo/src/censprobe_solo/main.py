@@ -4,7 +4,7 @@ censprobe-solo — Main entrypoint.
 Lifecycle:
   1. Read TEST_ID from env
   2. If reports/<TEST_ID>/meta.yaml missing → auto-detect server info, create it
-  3. Load baseline/latest.json + targets/*.yaml + signatures/blockpages.yaml
+  3. Load baseline/latest.json + targets/*.yaml
   4. Run full probe suite (runner.run_all())
   5. Compute scores (scoring.compute_scores())
   6. Save report as reports/<TEST_ID>/server-solo-<timestamp>.json

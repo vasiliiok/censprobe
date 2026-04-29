@@ -122,7 +122,7 @@ TEST_ID=selectel-spb-001 SESSION_ID=client-mob-mts-msk \
 3. Сделайте `git commit` и `git push`.
 4. Перегенерация baseline (`control`) **нужна только** если добавили Telegram-эндпоинт или цель для Method A throttling — для DNS/TLS/HTTP вердикты считаются inline и baseline не используется.
 
-Параметры VPN-протоколов (порты, ключи, AmneziaWG-обфускация) генерируются `listener` per-test в `reports/<test_id>/protocols.yaml`. Отпечатки блок-страниц — в `signatures/blockpages.yaml`.
+Параметры VPN-протоколов (порты, ключи, AmneziaWG-обфускация) генерируются `listener` per-test в `reports/<test_id>/protocols.yaml`.
 
 ---
 
@@ -258,8 +258,6 @@ censprobe/
 │   ├── control/                # генератор baseline
 │   └── dashboard/              # Grafana + sync-api + PostgreSQL
 ├── targets/                    # что тестировать (YAML)
-├── signatures/                 # отпечатки блок-страниц
-│   └── blockpages.yaml
 ├── baseline/                   # эталон от control-контейнера
 │   ├── latest.json
 │   └── archive/

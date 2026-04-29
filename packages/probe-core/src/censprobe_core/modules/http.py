@@ -1,54 +1,39 @@
 """
-modules/http.py — HTTP/HTTPS fetch and block page detection.
+modules/http.py — HTTP/HTTPS fetch and reachability classification.
 
 Tests:
-  - HTTPS fetch: status, body length, TLS cert chain, stable fragment SHA256
-  - Block page detection via signatures/blockpages.yaml fingerprints
+  - HTTPS fetch: status, body length, TLS cert chain
   - Geoblocking vs censorship distinction: 403/451 + valid cert → GEOBLOCK_NOT_CENSORSHIP
-  - Middlebox detection via response header manipulation
+  - Network-level interference attribution: TLS handshake failure, RST, IP drop
+
+Block-page fingerprinting was removed: modern Russian blocking happens at
+TLS ClientHello (RST or timeout) before any HTTP-level stub can be served,
+so HTML signatures fire on a vanishingly small tail of cases while still
+carrying false-positive risk on news articles that mention РКН by name.
 """
 from __future__ import annotations
 
 import asyncio
 import hashlib
 import logging
-import re
 import socket
 import ssl
-from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
 import httpx
-import yaml
 
 from censprobe_core.models import TestResult, Verdict, BlockingMethod
 
 logger = logging.getLogger(__name__)
 
 _TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=10.0)
-_MAX_BODY_READ = 512 * 1024  # 512 KB — enough for fingerprinting
+# Cap response read so a misbehaving server can't OOM the probe by streaming
+# an ISO under a TSPU block-page response. Body bytes themselves are no longer
+# inspected (block-page fingerprinting is gone) — we only record body_length
+# as a forensic signal.
+_MAX_BODY_READ = 512 * 1024
 _MAX_PARALLEL = 8            # concurrency cap for HTTP probes
-_WORKSPACE = Path("/workspace")
-
-
-def _load_blockpage_signatures() -> dict:
-    """Load block page fingerprints from signatures/blockpages.yaml."""
-    path = _WORKSPACE / "signatures" / "blockpages.yaml"
-    try:
-        return yaml.safe_load(path.read_text()) or {}
-    except Exception:
-        return {}
-
-
-_BLOCKPAGE_SIGS = None
-
-
-def _get_blockpage_sigs() -> dict:
-    global _BLOCKPAGE_SIGS
-    if _BLOCKPAGE_SIGS is None:
-        _BLOCKPAGE_SIGS = _load_blockpage_signatures()
-    return _BLOCKPAGE_SIGS
 
 
 async def run_http_tests(
@@ -84,25 +69,19 @@ def _verdict_from_response(
     *,
     status: int,
     tls_ok: bool,
-    is_blockpage: bool,
     expected_status: Optional[int],
 ) -> tuple[Verdict, Optional[BlockingMethod]]:
     """Decide the HTTP verdict from response signals alone.
 
     Order matters:
-      1. Blockpage signature → BLOCKED, regardless of status code
-         (Roskomnadzor stub pages are commonly served with 200 or 302).
-      2. 403/451 with valid TLS and no blockpage → server-side geoblock,
-         not network censorship.
-      3. expected_status from targets/*.yaml → OK on match, ANOMALY otherwise.
-      4. No expected_status: status==200 is OK, anything else is ANOMALY.
+      1. 403/451 with valid TLS → server-side geoblock, not network censorship.
+      2. expected_status from targets/*.yaml → OK on match, ANOMALY otherwise.
+      3. No expected_status: status==200 is OK, anything else is ANOMALY.
 
     Static body-length-range comparison from the control baseline was
     removed — modern sites (news, social) drift in body size between
     edges and revisions, producing false ANOMALY verdicts.
     """
-    if is_blockpage:
-        return Verdict.BLOCKED, BlockingMethod.BLOCKPAGE_RETURNED
     if status in (403, 451) and tls_ok:
         return Verdict.GEOBLOCK_NOT_CENSORSHIP, None
     if expected_status is not None:
@@ -123,22 +102,17 @@ async def _test_url(
 
     for attempt in range(1, repeats + 1):
         try:
-            # Stream the response so a malicious / misbehaving server
-            # can't feed us gigabytes — httpx.get() buffers the whole body
-            # into RAM, which means a TSPU block-page that streams an ISO
-            # image would OOM the probe process. We cap at _MAX_BODY_READ
-            # (enough for fingerprinting) and discard the rest.
+            # Stream and count bytes only (don't buffer) — httpx.get() would
+            # buffer the whole body into RAM, and a TSPU block-page streaming
+            # an ISO would OOM us. We stop reading after _MAX_BODY_READ.
             async with client.stream(
                 "GET", url, headers={"User-Agent": _ua_probe()}
             ) as r:
-                buf = bytearray()
+                body_length = 0
                 async for chunk in r.aiter_bytes():
-                    remaining = _MAX_BODY_READ - len(buf)
-                    if remaining <= 0:
+                    body_length += len(chunk)
+                    if body_length >= _MAX_BODY_READ:
                         break
-                    buf.extend(chunk[:remaining])
-                body = bytes(buf)
-                body_length = len(body)
                 status = r.status_code
                 final_url = str(r.url)
                 content_type = r.headers.get("content-type", "")
@@ -147,13 +121,11 @@ async def _test_url(
             # fire, so TLS *did* succeed. Reusing that boolean below for the
             # "geoblock vs censorship" attribution.
             tls_ok = url.startswith("https://")
-            is_blockpage = _is_blockpage(body, status)
             cert_sha256_list = await _extract_cert_sha256(final_url, url)
 
             verdict, method = _verdict_from_response(
                 status=status,
                 tls_ok=tls_ok,
-                is_blockpage=is_blockpage,
                 expected_status=target.get("expected_status"),
             )
 
@@ -173,7 +145,6 @@ async def _test_url(
                     "status": status,
                     "body_length": body_length,
                     "tls_ok": tls_ok,
-                    "is_blockpage": is_blockpage,
                     "cert_chain_sha256": cert_sha256_list,
                     "final_url": final_url,
                     "content_type": content_type,
@@ -228,49 +199,6 @@ async def _test_url(
             await asyncio.sleep(2)
 
     return last_error or _timeout_result(test_name, url, attempts=repeats)
-
-
-_TITLE_RE = re.compile(rb"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
-
-
-def _is_blockpage(body: bytes, status: int) -> bool:
-    """Detect block page by body and title fingerprints.
-
-    Previously this only matched body_patterns, so a page whose evidence
-    of being an РКН stub lived solely in the <title> (a common shape
-    for МТС / Ростелеком redirects) slipped through. We now also match
-    title_patterns, and respect the per-signature http_status filter so
-    that a 404 page from a normal site that happens to contain the word
-    "Роскомнадзор" doesn't get tagged.
-    """
-    # Real block pages are tiny stubs (typically <5 KB, never >100 KB).
-    # A large body is real content, not a block page — skip matching entirely.
-    if len(body) > 100 * 1024:
-        return False
-    sigs = _get_blockpage_sigs()
-    text = body.decode("utf-8", errors="ignore").lower()
-
-    title_match = _TITLE_RE.search(body)
-    title_text = (
-        title_match.group(1).decode("utf-8", errors="ignore").lower()
-        if title_match
-        else ""
-    )
-
-    for sig_name, sig in sigs.get("block_pages", {}).items():
-        # If the signature constrains the HTTP status, enforce it.
-        allowed_statuses = sig.get("http_status")
-        if allowed_statuses and status not in allowed_statuses:
-            continue
-
-        for pattern in sig.get("body_patterns", []) or []:
-            if pattern and pattern.lower() in text:
-                return True
-        if title_text:
-            for pattern in sig.get("title_patterns", []) or []:
-                if pattern and pattern.lower() in title_text:
-                    return True
-    return False
 
 
 async def _extract_cert_sha256(response_url: str, url: str) -> list[str]:

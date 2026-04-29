@@ -11,10 +11,9 @@ throttling rely on baseline data. The builder records:
                  0.3×p10 threshold for the THROTTLED verdict.
 
 DNS / TLS / HTTP and Method-B SNI throttling are decided inline by the
-probe modules from cert validity, DoH consensus, blockpage signatures
-and within-run relative bandwidth. Their baseline fields stay defined
-on BaselineData so older latest.json files still parse, but we no
-longer populate them.
+probe modules from cert validity, DoH consensus and within-run relative
+bandwidth. Their baseline fields stay defined on BaselineData so older
+latest.json files still parse, but we no longer populate them.
 
 Output: BaselineData model → written as baseline/latest.json
         Previous latest.json moved to baseline/archive/<date>.json
