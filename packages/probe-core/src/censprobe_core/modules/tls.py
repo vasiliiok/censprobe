@@ -23,7 +23,6 @@ import logging
 import socket
 import ssl
 import time
-from typing import Optional
 
 import httpx
 
@@ -34,7 +33,7 @@ from censprobe_core.models import TestResult, Verdict, BlockingMethod
 # both the DoH RTT and the wall-clock cost of TLS phase. Reusing one
 # client across the whole probe run lets the TCP/TLS connection to
 # Cloudflare stay warm.
-_DOH_CLIENT: Optional[httpx.AsyncClient] = None
+_DOH_CLIENT: httpx.AsyncClient | None = None
 
 
 def _get_doh_client() -> httpx.AsyncClient:
@@ -277,7 +276,7 @@ async def _tls_connect(
         return Verdict.ERROR, evidence
 
 
-def _attribute_tls_failure(verdict: Verdict, evidence: dict) -> Optional[BlockingMethod]:
+def _attribute_tls_failure(verdict: Verdict, evidence: dict) -> BlockingMethod | None:
     """Guess blocking method from TLS evidence."""
     if verdict == Verdict.OK:
         return None
@@ -297,7 +296,7 @@ async def _run_subprocess(
     *,
     capture_stdout: bool = True,
     capture_stderr: bool = True,
-) -> tuple[Optional[int], bytes, bytes]:
+) -> tuple[int | None, bytes, bytes]:
     """Run subprocess with timeout, ensuring no zombie / leaked child.
 
     Returns (returncode, stdout, stderr). returncode is None if killed for
@@ -324,7 +323,7 @@ async def _run_subprocess(
         return None, b"", b""
 
 
-async def _fetch_ech_config(domain: str) -> Optional[str]:
+async def _fetch_ech_config(domain: str) -> str | None:
     """
     Fetch the ECHConfig for *domain* from its HTTPS DNS record (type 65) via DoH.
 
@@ -348,7 +347,7 @@ async def _fetch_ech_config(domain: str) -> Optional[str]:
     """
     import base64
 
-    async def _try_google(dom: str) -> Optional[str]:
+    async def _try_google(dom: str) -> str | None:
         client = _get_doh_client()
         resp = await client.get(
             "https://dns.google/resolve",
@@ -369,7 +368,7 @@ async def _fetch_ech_config(domain: str) -> Optional[str]:
                     return ech_b64
         return None
 
-    async def _try_cloudflare_hex(dom: str) -> Optional[str]:
+    async def _try_cloudflare_hex(dom: str) -> str | None:
         """
         Cloudflare DoH returns HTTPS records as raw hex: "\\# <len> <hex bytes>".
         Parse SvcParam key=5 (ECH) from the wire format and base64-encode it.
@@ -426,7 +425,7 @@ async def _fetch_ech_config(domain: str) -> Optional[str]:
     return None
 
 
-async def _test_ech(domain: str) -> Optional[TestResult]:
+async def _test_ech(domain: str) -> TestResult | None:
     """
     Test ECH (Encrypted Client Hello) via curl --ech.
 
@@ -509,8 +508,8 @@ async def _test_ech(domain: str) -> Optional[TestResult]:
     )
 
     verdict: Verdict
-    method: Optional[BlockingMethod] = None
-    notes: Optional[str] = None
+    method: BlockingMethod | None = None
+    notes: str | None = None
     confidence: float = 1.0
     if rc == 0:
         verdict = Verdict.OK
@@ -546,7 +545,7 @@ async def _test_ech(domain: str) -> Optional[TestResult]:
 # Cache whether any local curl binary supports ECH, and which one to use.
 # We prefer curl-ech (our custom build dropped in by the Dockerfile multi-stage)
 # over the system curl (OpenSSL 3.0 on Debian 12, no ECH).
-_CURL_ECH_CACHE: Optional[bool] = None
+_CURL_ECH_CACHE: bool | None = None
 _CURL_ECH_BINARY: str = "curl"          # name / path of the ECH-capable binary
 _CURL_ECH_CACHE_LOCK = asyncio.Lock()
 
@@ -599,7 +598,7 @@ async def _curl_supports_ech() -> bool:
         return False
 
 
-async def _resolve_ip(domain: str) -> Optional[str]:
+async def _resolve_ip(domain: str) -> str | None:
     """Resolve `domain` to a single IPv4 for the TLS test.
 
     Why DoH-first: if the local resolver is poisoned (a real possibility
@@ -636,7 +635,7 @@ async def _resolve_ip(domain: str) -> Optional[str]:
         return None
 
 
-def _extract_cn(rdn_seq) -> Optional[str]:
+def _extract_cn(rdn_seq) -> str | None:
     """
     Pull out commonName from ssl.getpeercert()'s 'subject' / 'issuer' field.
 

@@ -57,7 +57,6 @@ import os
 import socket
 import time
 from pathlib import Path
-from typing import Optional
 
 import httpx
 import yaml
@@ -66,7 +65,7 @@ from censprobe_core.models import TestResult, Verdict, BlockingMethod
 
 logger = logging.getLogger(__name__)
 
-_WORKSPACE = Path("/workspace")
+WORKSPACE = Path("/workspace")
 _CONNECT_TIMEOUT = 10.0
 _QUIC_TIMEOUT    = 3.0   # seconds to wait for QUIC VN response
 _WG_UDP_TIMEOUT  = 2.0   # seconds — WG won't respond to invalid handshake anyway
@@ -169,7 +168,7 @@ async def _test_quic(host: str, port: int, name: str) -> TestResult:
       INCONCLUSIVE — socket/routing error not attributable to TSPU
     """
     probe = _build_quic_vn_trigger()
-    received_data: Optional[bytes] = None
+    received_data: bytes | None = None
 
     class _Proto(asyncio.DatagramProtocol):
         def __init__(self):
@@ -619,7 +618,7 @@ async def _test_http(domain: str, url: str, expected_status: int) -> TestResult:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _load_config() -> dict:
-    path = _WORKSPACE / "targets" / "cloudflare.yaml"
+    path = WORKSPACE / "targets" / "cloudflare.yaml"
     try:
         return yaml.safe_load(path.read_text()) or {}
     except Exception as e:

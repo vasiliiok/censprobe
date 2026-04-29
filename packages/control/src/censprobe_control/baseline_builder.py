@@ -59,9 +59,9 @@ from censprobe_core.models import (
 
 logger = logging.getLogger(__name__)
 
-_WORKSPACE = Path("/workspace")
-_BASELINE_LATEST = _WORKSPACE / "baseline" / "latest.json"
-_BASELINE_ARCHIVE = _WORKSPACE / "baseline" / "archive"
+WORKSPACE = Path("/workspace")
+_BASELINE_LATEST = WORKSPACE / "baseline" / "latest.json"
+_BASELINE_ARCHIVE = WORKSPACE / "baseline" / "archive"
 
 
 def build_baseline(
@@ -196,7 +196,7 @@ def _aggregate_throttling(results: list[TestResult]) -> dict[str, BaselineThrott
 # Save / archive helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def save_baseline(baseline: BaselineData, workspace: Path = _WORKSPACE) -> Path:
+def save_baseline(baseline: BaselineData, workspace: Path = WORKSPACE) -> Path:
     """
     Write baseline to baseline/latest.json.
     Archive previous latest.json to baseline/archive/<version>.json.

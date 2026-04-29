@@ -31,12 +31,12 @@ from censprobe_core.models import BlockingMethod, TestResult, Verdict
 
 logger = logging.getLogger(__name__)
 
-_WORKSPACE = Path("/workspace")
+WORKSPACE = Path("/workspace")
 _TIMEOUT = 8.0
 
 
 def _load_telegram_config() -> dict:
-    path = _WORKSPACE / "targets" / "telegram.yaml"
+    path = WORKSPACE / "targets" / "telegram.yaml"
     try:
         return yaml.safe_load(path.read_text()) or {}
     except Exception:

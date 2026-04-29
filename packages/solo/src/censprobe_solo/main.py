@@ -44,7 +44,7 @@ logging.basicConfig(
     format="%(message)s",
     datefmt="[%H:%M:%S]",
 )
-logger = logging.getLogger("censprobe.solo")
+logger = logging.getLogger(__name__)
 
 console = Console()
 WORKSPACE = Path("/workspace")

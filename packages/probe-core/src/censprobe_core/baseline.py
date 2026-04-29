@@ -17,7 +17,6 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 
 from censprobe_core.models import (
     BaselineData,
@@ -27,8 +26,8 @@ from censprobe_core.models import (
 
 logger = logging.getLogger(__name__)
 
-_WORKSPACE = Path("/workspace")
-_BASELINE_PATH = _WORKSPACE / "baseline" / "latest.json"
+WORKSPACE = Path("/workspace")
+_BASELINE_PATH = WORKSPACE / "baseline" / "latest.json"
 
 
 def load_baseline(path: Path | None = None, *, quiet_if_stub: bool = False) -> BaselineData:
@@ -112,7 +111,7 @@ class BaselineComparator:
         self,
         domain: str,
         bandwidth_mbps: float,
-    ) -> tuple[Verdict, Optional[BlockingMethod]]:
+    ) -> tuple[Verdict, BlockingMethod | None]:
         """
         Compare measured bandwidth against baseline p10.
         THROTTLED if bandwidth < p10 * 0.3.
@@ -136,7 +135,7 @@ class BaselineComparator:
         self,
         endpoint_key: str,
         reachable: bool,
-        rtt_ms: Optional[float],
+        rtt_ms: float | None,
     ) -> Verdict:
         """Compare Telegram endpoint reachability against baseline."""
         if self._stub:
