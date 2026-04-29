@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import socket
 import ssl
 from typing import Optional
@@ -41,6 +42,13 @@ logger = logging.getLogger(__name__)
 # RTT readings (we measure them inside the same path).
 _DOH_CLIENT: Optional[httpx.AsyncClient] = None
 _ASN_CLIENT: Optional[httpx.AsyncClient] = None
+
+# All geo/ASN lookups go over HTTPS — see server_meta.py opsec note: an
+# on-path observer must not be able to cheaply link this server's IP to
+# censorship-measurement activity. Plain-HTTP probes to ip-api.com would
+# leak the queried IP plus our return path in cleartext.
+_IPAPI_IS_KEY = os.environ.get("IPAPI_IS_KEY", "")
+_IPAPI_IS_URL = "https://api.ipapi.is/"
 
 
 def _get_doh_client() -> httpx.AsyncClient:
@@ -535,7 +543,9 @@ async def _validate_cert(domain: str, ip: str) -> Optional[bool]:
         # Bound total time even if the underlying socket ignores its
         # own timeout (e.g. blocked SYN with no RST → SYN backoff).
         return await asyncio.wait_for(asyncio.to_thread(_check), timeout=8.0)
-    except (asyncio.TimeoutError, Exception):
+    except Exception:
+        # Covers asyncio.TimeoutError and any unexpected error from
+        # to_thread/_check; in either case the verdict is "inconclusive".
         return None
 
 
@@ -544,13 +554,19 @@ _ASN_BACKOFF_UNTIL: float = 0.0
 
 
 async def _ip_to_asn(ip: str) -> Optional[str]:
-    """Look up ASN for an IP via ip-api.com, with process-local caching.
+    """Look up ASN for an IP via ipapi.is over HTTPS, with process-local caching.
 
-    The free ip-api.com tier is 45 requests/min — a single control run
-    can issue well over that (5 runs × 30+ domains). A 429 burns the
-    rest of the test and leaves every baseline ASN at None. We cache
-    per-IP in-process and enter a global 90-second backoff the moment
-    the server asks us to slow down.
+    Why HTTPS / ipapi.is: server_meta.py already uses the same provider
+    for the (single) external-IP lookup; routing the per-domain ASN
+    forensics over the same TLS-protected path keeps the project's
+    on-path-observer threat model consistent — plain-HTTP queries to
+    ip-api.com would leak the resolved IP for every probed domain in
+    cleartext.
+
+    Caching: the free tier of ipapi.is is rate-limited (1k/day without a
+    key); a single control run easily issues 30+ domains × 5 rounds.
+    We cache per-IP in-process and enter a global 90-second backoff the
+    moment the server signals 429 to avoid melting the rest of the suite.
     """
     import time as _time
     if ip in _ASN_CACHE:
@@ -561,24 +577,24 @@ async def _ip_to_asn(ip: str) -> Optional[str]:
     if now < _ASN_BACKOFF_UNTIL:
         # During the cool-down we return None transiently but do NOT cache
         # it: once the backoff window ends we want the next probe to try
-        # ip-api again, not be stuck on a permanent None forever.
+        # again, not be stuck on a permanent None forever.
         return None
 
     try:
         client = _get_asn_client()
-        r = await client.get(f"http://ip-api.com/json/{ip}?fields=as")
+        r = await client.get(
+            _IPAPI_IS_URL,
+            params={"q": ip, "key": _IPAPI_IS_KEY},
+        )
         if r.status_code == 429:
-            # ip-api returns plaintext 429 with a Retry-After-ish hint;
-            # be conservative and pause for 90s so we don't melt the
-            # whole suite. Don't poison this IP in the cache — once
-            # the backoff expires we want to retry it.
             _ASN_BACKOFF_UNTIL = now + 90.0
             return None
         if r.status_code == 200:
             data = r.json()
-            raw = data.get("as", "")
-            if raw:
-                asn = raw.split(" ")[0]  # "AS13335 Cloudflare" → "AS13335"
+            asn_block = data.get("asn") or {}
+            asn_num = asn_block.get("asn")
+            if asn_num:
+                asn = f"AS{asn_num}"
                 _ASN_CACHE[ip] = asn
                 return asn
     except Exception:
