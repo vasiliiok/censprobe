@@ -83,20 +83,28 @@ def _git_lock() -> Iterator[None]:
         os.close(fd)
 
 
-def _run_unlocked(cmd: list[str], check: bool = True) -> subprocess.CompletedProcess:
+def _run_unlocked(
+    cmd: list[str], check: bool = True, timeout: int = 120
+) -> subprocess.CompletedProcess:
     """Run a git command synchronously in WORKSPACE WITHOUT acquiring the lock.
 
     Use this when the caller already holds `_git_lock()` and wants to issue a
     multi-step git flow atomically. For one-shot calls outside an existing
     lock context, use `_run` instead.
     """
-    result = subprocess.run(
-        cmd,
-        cwd=WORKSPACE,
-        capture_output=True,
-        text=True,
-        env=GIT_ENV,
-    )
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=WORKSPACE,
+            capture_output=True,
+            text=True,
+            env=GIT_ENV,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(
+            f"Git command timed out after {timeout}s: {' '.join(cmd)}"
+        )
     if check and result.returncode != 0:
         raise RuntimeError(
             f"Git command failed: {' '.join(cmd)}\n"

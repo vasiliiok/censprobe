@@ -214,16 +214,23 @@ def _detect_country(server_meta=None) -> str:
     Preference order:
       1. ``CONTROL_COUNTRY`` env override (operator-specified deployment hint).
       2. ``server_meta.country`` (auto-detected from ipapi.is over HTTPS).
-      3. Fallback ``"DE"`` — historical default; preserved so old setups
-         that relied on the previous hardcoded value behave the same when
-         metadata detection is unavailable.
+
+    A missing/empty country is fatal: the baseline is the ground truth for
+    every solo/client comparison, and silently labelling a control run
+    "DE" when it actually came from a different jurisdiction would
+    contaminate every downstream verdict. Operators must set
+    ``CONTROL_COUNTRY`` explicitly when geo-detection is unreachable.
     """
     env = os.getenv("CONTROL_COUNTRY")
     if env:
         return env
     if server_meta is not None and getattr(server_meta, "country", None):
         return server_meta.country
-    return "DE"
+    raise RuntimeError(
+        "Cannot determine control-point country: ipapi.is detection failed "
+        "and CONTROL_COUNTRY env var is not set. "
+        "Set CONTROL_COUNTRY=DE (or the actual ISO-3166 alpha-2 code) in .env."
+    )
 
 
 def _detect_targets_version() -> str:

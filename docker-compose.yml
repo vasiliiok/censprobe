@@ -187,6 +187,32 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?GRAFANA_PASSWORD is required — copy .env.example to .env}
       GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s:%(http_port)s/"
       DB_PASSWORD: ${DB_PASSWORD:-censprobe}
+      # ── strip Grafana to dashboards only ──────────────────────────────
+      # We use Grafana solely as a viewer over the censprobe Postgres
+      # datasource. Everything below disables features we don't use,
+      # hides their nav entries, and stops outbound calls.
+      GF_EXPLORE_ENABLED: "false"
+      GF_ALERTING_ENABLED: "false"
+      GF_UNIFIED_ALERTING_ENABLED: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_ANALYTICS_FEEDBACK_LINKS_ENABLED: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      GF_USERS_DEFAULT_THEME: "dark"
+      GF_USERS_HOME_PAGE: "/d/censprobe-01"
+      # default_home_dashboard_path makes the "Home" nav item open 01 directly
+      # instead of the empty Grafana welcome screen.
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: "/var/lib/grafana/dashboards/01-test-overview.json"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_USERS_ALLOW_ORG_CREATE: "false"
+      GF_USERS_VIEWERS_CAN_EDIT: "false"
+      GF_PLUGINS_PUBLIC_KEY_RETRIEVAL_DISABLED: "true"
+      GF_PLUGINS_PLUGIN_ADMIN_ENABLED: "false"
+      GF_SNAPSHOTS_EXTERNAL_ENABLED: "false"
+      GF_SNAPSHOTS_PUBLIC_MODE: "false"
+      GF_HELP_ENABLED: "false"
+      GF_SECURITY_DISABLE_GRAVATAR: "true"
     volumes:
       - grafana_data:/var/lib/grafana
       - ./packages/dashboard/grafana/provisioning:/etc/grafana/provisioning:ro
@@ -203,25 +229,6 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # ─────────────────────────────────────────────────────────────────
-  # 6. REPORTER — HTML/PDF отчёты
-  # Usage: TEST_ID=<id> docker compose --profile reporter run --rm reporter
-  #        TEST_ID=<id> docker compose --profile reporter run --rm reporter --pdf
-  # ─────────────────────────────────────────────────────────────────
-  reporter:
-    profiles: [reporter]
-    image: ${DOCKERHUB_USERNAME:?DOCKERHUB_USERNAME is required — copy .env.example to .env}/censprobe-reporter:${DOCKERHUB_TAG:-main}
-    pull_policy: missing
-    build:
-      context: .
-      dockerfile: packages/reporter/Dockerfile
-    environment:
-      TEST_ID: ${TEST_ID:-}
-      WORKSPACE: /workspace
-    volumes:
-      - ./:/workspace
-    working_dir: /workspace
-    restart: "no"
 
 volumes:
   db_data:

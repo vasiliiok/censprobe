@@ -5,8 +5,12 @@
     "censprobe"
   ],
   "schemaVersion": 39,
-  "version": 1,
+  "version": 3,
   "refresh": "30s",
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
   "templating": {
     "list": [
       {
@@ -35,12 +39,27 @@
   },
   "panels": [
     {
+      "id": 100,
+      "title": "Other dashboards",
+      "type": "text",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 3
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "**Jump to:** [01 Overview](/d/censprobe-01) · [02 Blocking Matrix](/d/censprobe-02) · [03 Telegram](/d/censprobe-03) · [04 Protocol Reachability](/d/censprobe-04) · [05 Technique Attribution](/d/censprobe-05) · [06 Compare Tests](/d/censprobe-06) · [07 Cloudflare & WARP](/d/censprobe-07) · [08 QUIC & ECH](/d/censprobe-08) · [09 DNS](/d/censprobe-09) · [10 TLS](/d/censprobe-10)"
+      }
+    },
+    {
       "id": 1,
       "title": "Score Comparison",
       "type": "barchart",
       "gridPos": {
         "x": 0,
-        "y": 0,
+        "y": 3,
         "w": 12,
         "h": 9
       },
@@ -50,7 +69,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT 'Entry' AS metric, entry_score AS a_score, NULL AS b_score FROM test_runs WHERE test_id = ${test_id_a:sqlstring} UNION ALL SELECT 'Entry', NULL, entry_score FROM test_runs WHERE test_id = ${test_id_b:sqlstring} UNION ALL SELECT 'Exit', exit_score, NULL FROM test_runs WHERE test_id = ${test_id_a:sqlstring} UNION ALL SELECT 'Exit', NULL, exit_score FROM test_runs WHERE test_id = ${test_id_b:sqlstring} UNION ALL SELECT 'Relay', relay_score, NULL FROM test_runs WHERE test_id = ${test_id_a:sqlstring} UNION ALL SELECT 'Relay', NULL, relay_score FROM test_runs WHERE test_id = ${test_id_b:sqlstring} UNION ALL SELECT 'Overall', overall_score, NULL FROM test_runs WHERE test_id = ${test_id_a:sqlstring} UNION ALL SELECT 'Overall', NULL, overall_score FROM test_runs WHERE test_id = ${test_id_b:sqlstring}",
+          "rawSql": "WITH a AS (SELECT entry_score, exit_score, relay_score, overall_score FROM test_runs WHERE test_id = ${test_id_a:sqlstring} LIMIT 1), b AS (SELECT entry_score, exit_score, relay_score, overall_score FROM test_runs WHERE test_id = ${test_id_b:sqlstring} LIMIT 1) SELECT 'Entry' AS metric, (SELECT entry_score FROM a) AS \"Server A\", (SELECT entry_score FROM b) AS \"Server B\" UNION ALL SELECT 'Exit', (SELECT exit_score FROM a), (SELECT exit_score FROM b) UNION ALL SELECT 'Relay', (SELECT relay_score FROM a), (SELECT relay_score FROM b) UNION ALL SELECT 'Overall', (SELECT overall_score FROM a), (SELECT overall_score FROM b)",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -71,7 +90,7 @@
       "type": "table",
       "gridPos": {
         "x": 0,
-        "y": 9,
+        "y": 12,
         "w": 12,
         "h": 6
       },
@@ -81,7 +100,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT test_id, asn, as_name, location, provider, distro, ipv4_masked, overall_score, detected_techniques FROM test_runs WHERE test_id = ${test_id_a:sqlstring} LIMIT 1",
+          "rawSql": "SELECT test_id, asn, as_name, location, provider, distro, ipv4, overall_score, detected_techniques FROM test_runs WHERE test_id = ${test_id_a:sqlstring} LIMIT 1",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -99,7 +118,7 @@
       "type": "table",
       "gridPos": {
         "x": 12,
-        "y": 9,
+        "y": 12,
         "w": 12,
         "h": 6
       },
@@ -109,7 +128,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT test_id, asn, as_name, location, provider, distro, ipv4_masked, overall_score, detected_techniques FROM test_runs WHERE test_id = ${test_id_b:sqlstring} LIMIT 1",
+          "rawSql": "SELECT test_id, asn, as_name, location, provider, distro, ipv4, overall_score, detected_techniques FROM test_runs WHERE test_id = ${test_id_b:sqlstring} LIMIT 1",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -127,7 +146,7 @@
       "type": "table",
       "gridPos": {
         "x": 0,
-        "y": 15,
+        "y": 18,
         "w": 24,
         "h": 8
       },

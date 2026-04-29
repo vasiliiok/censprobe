@@ -111,21 +111,19 @@ async def _async_main(test_id: str, repeats: int, skip_push: bool) -> None:
         console.print(f"[green]Created meta.yaml for {test_id}[/green]")
     else:
         console.print(f"[dim]Using existing meta.yaml for {test_id}[/dim]")
-        # An older / partially-written meta.yaml shouldn't crash the whole
-        # solo run before any tests fire. Fall back to a fresh detection
-        # rather than aborting.
-        try:
-            raw = yaml.safe_load(meta_path.read_text()) or {}
-            if not isinstance(raw, dict):
-                raise ValueError(f"meta.yaml top level must be a mapping, got {type(raw).__name__}")
-            server_meta = ServerMeta.model_validate(raw.get("server", {}))
-        except Exception as e:
-            logger.warning("Could not load existing meta.yaml (%s) — re-detecting", e)
-            try:
-                server_meta = await detect_server_meta()
-            except Exception as detect_err:
-                logger.warning("Re-detection also failed: %s", detect_err)
-                server_meta = ServerMeta()
+        # A corrupt meta.yaml is a real operator-visible error: the file
+        # is the only place we record provider/ASN/country, and silently
+        # re-detecting (or worse, falling through to empty metadata)
+        # would attribute every result in this run to "unknown" without
+        # the operator noticing. Fail loudly so they can either repair
+        # or delete the file and re-run.
+        raw = yaml.safe_load(meta_path.read_text()) or {}
+        if not isinstance(raw, dict):
+            raise RuntimeError(
+                f"{meta_path} is corrupt: top level must be a YAML mapping, "
+                f"got {type(raw).__name__}. Delete or fix the file and re-run."
+            )
+        server_meta = ServerMeta.model_validate(raw.get("server", {}))
 
         # Backfill kernel/distro for meta.yaml created before this code
         # populated those fields. Both detectors are local (uname /
@@ -155,7 +153,7 @@ async def _async_main(test_id: str, repeats: int, skip_push: bool) -> None:
     # ── Step 5: Compute scores for the local CLI summary ─────────────────────
     # Scores are NOT written into the saved JSON — they would be stale the
     # moment a listener report lands later, and downstream readers
-    # (sync-api, reporter) recompute from raw results + listener data.
+    # (sync-api) recomputes from raw results + listener data.
     # Here we use them only to print the operator-facing summary panel.
     scores = compute_scores(solo_results=results, listener_reports=listener_reports or None)
 
@@ -202,13 +200,29 @@ async def _async_main(test_id: str, repeats: int, skip_push: bool) -> None:
 
 
 def _get_baseline_version() -> str:
-    """Read baseline version from baseline/latest.json."""
+    """Read baseline version from baseline/latest.json.
+
+    Distinguishes "no baseline yet" (expected on a fresh checkout
+    before `control` has run) from "baseline is corrupt" (a real
+    error the operator needs to see). The former is recorded as
+    ``"stub"`` in meta.yaml; the latter raises.
+    """
     path = WORKSPACE / "baseline" / "latest.json"
+    if not path.exists():
+        return "stub"
     try:
         data = json.loads(path.read_text())
-        return data.get("version", "stub")
-    except Exception:
-        return "stub"
+    except (OSError, json.JSONDecodeError) as e:
+        raise RuntimeError(
+            f"baseline/latest.json exists but cannot be parsed: {e}. "
+            "Either delete it (to fall back to 'stub') or regenerate via "
+            "'docker compose --profile control up'."
+        ) from e
+    if not isinstance(data, dict):
+        raise RuntimeError(
+            f"baseline/latest.json top level must be a JSON object, got {type(data).__name__}"
+        )
+    return data.get("version", "stub")
 
 
 def _print_summary(results, scores) -> None:

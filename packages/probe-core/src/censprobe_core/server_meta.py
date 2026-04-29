@@ -10,7 +10,6 @@ Detects:
 OpSec:
   * All geo/ASN lookups go over HTTPS so an on-path observer cannot cheaply
     link this server's IP to censorship-measurement activity.
-  * Exit IP is masked to /24 before being written into git.
 """
 from __future__ import annotations
 
@@ -38,7 +37,7 @@ _IPAPI_IS_URL = "https://api.ipapi.is/"
 async def detect_server_meta() -> ServerMeta:
     """
     Auto-detect server metadata from the environment.
-    Returns ServerMeta with sensitive fields masked.
+    Returns ServerMeta populated with detected fields.
     """
     meta = ServerMeta()
 
@@ -47,7 +46,7 @@ async def detect_server_meta() -> ServerMeta:
         exit_ip = await _detect_exit_ip(client)
         if exit_ip:
             meta._exit_ip = exit_ip
-            meta.ipv4_masked = _mask_ip(exit_ip)
+            meta.ipv4 = exit_ip
             asn_info = await _detect_asn(client, exit_ip)
             if asn_info:
                 meta.asn = asn_info.get("asn")
@@ -144,24 +143,6 @@ async def _detect_asn(client: httpx.AsyncClient, ip: str) -> Optional[dict]:
     return None
 
 
-def _mask_ip(ip: str) -> str:
-    """
-    Mask IPv4 to /24 for privacy: 1.2.3.4 → 1.2.3.0/24.
-    For IPv6: mask to /48 (first 3 hextets).
-    Returns "unknown" if the input isn't a valid IP.
-    """
-    import ipaddress
-    try:
-        addr = ipaddress.ip_address(ip.strip())
-    except Exception:
-        return "unknown"
-    if isinstance(addr, ipaddress.IPv4Address):
-        net = ipaddress.ip_network(f"{addr}/24", strict=False)
-        return str(net)
-    # IPv6
-    net = ipaddress.ip_network(f"{addr}/48", strict=False)
-    return str(net)
-
 
 async def _check_ipv6() -> bool:
     """Check if IPv6 connectivity is available.
@@ -213,12 +194,6 @@ def detect_distro() -> str:
     except Exception:
         pass
     return platform.system()
-
-
-# Backwards-compatible aliases for any external caller still importing the
-# private names. Internal call sites use the public spelling above.
-_detect_kernel = detect_kernel
-_detect_distro = detect_distro
 
 
 def _guess_provider(as_name: str) -> Optional[str]:

@@ -29,12 +29,24 @@ from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, relationship
 
+import urllib.parse as _urlparse
+
 DATABASE_URL = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError(
         "DATABASE_URL environment variable is required. "
         "Example: postgresql+asyncpg://censprobe:PASSWORD@postgres/censprobe"
     )
+
+# Re-encode the password component so that special characters (e.g. "=", "+")
+# that are valid in passwords but reserved in URLs don't break asyncpg's parser.
+_parsed = _urlparse.urlparse(DATABASE_URL)
+if _parsed.password and _parsed.password != _urlparse.quote(_parsed.password, safe=""):
+    _encoded_password = _urlparse.quote(_parsed.password, safe="")
+    DATABASE_URL = _parsed._replace(
+        netloc=f"{_parsed.username}:{_encoded_password}@{_parsed.hostname}"
+        + (f":{_parsed.port}" if _parsed.port else "")
+    ).geturl()
 
 engine = create_async_engine(
     DATABASE_URL,
@@ -61,7 +73,7 @@ class TestRun(Base):
     asn = Column(String(32), nullable=True)
     as_name = Column(String(128), nullable=True)
     location = Column(String(128), nullable=True)
-    ipv4_masked = Column(String(32), nullable=True)
+    ipv4 = Column(String(64), nullable=True)
     ipv6_available = Column(Boolean, default=False)
     provider = Column(String(64), nullable=True)
     kernel = Column(String(64), nullable=True)
@@ -210,6 +222,23 @@ _MIGRATIONS: tuple[str, ...] = (
     # Composite dedup index (matches __table_args__ on TestResult).
     "CREATE INDEX IF NOT EXISTS ix_test_results_run_file "
     "ON test_results(test_run_id, report_file)",
+    # ipv4_masked → ipv4: column renamed (no longer masking to /24).
+    # The DO block handles the case where the column was already renamed.
+    """DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name='test_runs' AND column_name='ipv4_masked'
+  ) THEN
+    ALTER TABLE test_runs RENAME COLUMN ipv4_masked TO ipv4;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name='test_runs' AND column_name='ipv4'
+  ) THEN
+    ALTER TABLE test_runs ADD COLUMN ipv4 VARCHAR(64);
+  END IF;
+END $$""",
 )
 
 

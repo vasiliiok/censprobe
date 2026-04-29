@@ -37,9 +37,7 @@ jobs:
           - name: sync-api
             dockerfile: packages/dashboard/sync-api/Dockerfile
             path: dashboard/sync-api
-          - name: reporter
-            dockerfile: packages/reporter/Dockerfile
-            path: reporter
+
 
     steps:
       - uses: actions/checkout@v4

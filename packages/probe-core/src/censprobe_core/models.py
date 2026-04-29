@@ -89,27 +89,6 @@ class TestResult(BaseModel):
 # Baseline models
 # ─────────────────────────────────────────────────────────────────────────────
 
-class BaselineDnsEntry(BaseModel):
-    a_records_asn: list[str] = Field(default_factory=list)
-    aaaa_records_asn: list[str] = Field(default_factory=list)
-    observed_ips_v4: list[str] = Field(default_factory=list)
-    ttl_range: list[int] = Field(default_factory=lambda: [60, 300])
-
-
-class BaselineTlsEntry(BaseModel):
-    cert_chain_sha256: list[str] = Field(default_factory=list)
-    cert_subject_cn: Optional[str] = None
-    cert_issuer_cn: Optional[str] = None
-    ja4_server: Optional[str] = None
-    alpn: list[str] = Field(default_factory=list)
-
-
-class BaselineHttpEntry(BaseModel):
-    status: int = 200
-    title_regex: Optional[str] = None
-    body_length_range: list[int] = Field(default_factory=lambda: [0, 999999999])
-
-
 class BaselineTelegramEntry(BaseModel):
     reachable: bool = True
     rtt_range_ms: list[float] = Field(default_factory=lambda: [0.0, 9999.0])
@@ -149,9 +128,6 @@ class BaselineData(BaseModel):
     targets_version: str = "initial"
     validity_until: Optional[datetime] = None
     runs_count: int = 0
-    dns: dict[str, BaselineDnsEntry] = Field(default_factory=dict)
-    tls: dict[str, BaselineTlsEntry] = Field(default_factory=dict)
-    http: dict[str, BaselineHttpEntry] = Field(default_factory=dict)
     telegram: dict[str, BaselineTelegramEntry] = Field(default_factory=dict)
     throttling: dict[str, BaselineThrottlingEntry] = Field(default_factory=dict)
     sni_throttling: Optional[BaselineSniThrottling] = None
@@ -171,7 +147,7 @@ class ServerMeta(BaseModel):
     country: Optional[str] = None       # ISO-3166 alpha-2, e.g. "DE"
     asn: Optional[str] = None
     as_name: Optional[str] = None
-    ipv4_masked: Optional[str] = None   # masked to /24
+    ipv4: Optional[str] = None
     ipv6_available: bool = False
     plan: Optional[str] = None
     kernel: Optional[str] = None

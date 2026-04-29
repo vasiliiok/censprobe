@@ -253,7 +253,7 @@ class ProbeRunner:
         The report intentionally carries only raw measurement data — no
         ``scores`` field. Solo runs BEFORE listener, so any scores baked
         in here would freeze protocol-reachability at its neutral default
-        and mislead every downstream reader. Sync-api and reporter recompute
+        and mislead every downstream reader. Sync-api recomputes
         scores on demand from raw results + listener data.
 
         Reports are plain .json: git's pack format already deflates textual

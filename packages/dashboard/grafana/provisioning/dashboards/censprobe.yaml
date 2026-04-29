@@ -3,8 +3,13 @@ apiVersion: 1
 providers:
   - name: censprobe
     type: file
-    disableDeletion: false
+    # Dashboards live in git as JSON. UI edits would silently get
+    # overwritten on the next provisioning sync — lock them so users
+    # can't lose work by accident, and so the JSON files stay the
+    # single source of truth.
+    disableDeletion: true
     updateIntervalSeconds: 30
-    allowUiUpdates: true
+    allowUiUpdates: false
     options:
       path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

@@ -1,21 +1,20 @@
 # Censprobe
 
-Censprobe — инструмент оценки качества и устойчивости серверов к сетевым блокировкам в России. Автоматически проверяет достижимость публичных ресурсов с аплинка сервера, тестирует VPN-протоколы через DPI и оценивает наличие троттлинга и SNI-блокировок.
+Censprobe — инструмент измерения цензуры и оценки устойчивости серверов к сетевым блокировкам в России. Автоматически проверяет достижимость публичных ресурсов с аплинка сервера, тестирует протоколы обхода цензуры через DPI и оценивает наличие троттлинга и SNI-блокировок.
 
 Все тесты работают автономно через Docker Compose, а результаты агрегируются в git-репозиторий для визуализации в Grafana.
 
 ## Архитектура развертывания
 
-Система состоит из 6 независимых компонентов (профилей Docker), запускаемых на разных машинах:
+Система состоит из 5 независимых компонентов (профилей Docker), запускаемых на разных машинах:
 
 | Профиль | Где запускается | Назначение |
 |-----------|-----------------|------------|
 | `solo` | RU-сервер | Тестирует видимость публичных ресурсов с аплинка сервера |
-| `listener` | RU-сервер | Запускает dummy-респондеры 6 VPN-протоколов для приёма handshake от клиента |
-| `client` | Клиентское устройство | Пытается подключиться к listener по 6 VPN-протоколам |
+| `listener` | RU-сервер | Запускает dummy-респондеры 6 протоколов для приёма handshake от клиента |
+| `client` | Клиентское устройство | Пытается подключиться к listener по 6 протоколам |
 | `control` | Чистый EU-сервер | Генерирует эталонный baseline |
 | `dashboard` | Любая машина | Локальная аналитика в Grafana |
-| `reporter` | Любая машина | Генерация HTML/PDF-отчётов |
 
 ---
 
@@ -47,7 +46,7 @@ GRAFANA_PASSWORD=<strong-password>          # пароль admin в Grafana
 
 ## Быстрый старт: Запуск тестов
 
-Тестирование конкретного сервера всегда начинается с прогона **solo**, затем переходит в фазу тестирования VPN-протоколов связкой **listener + client**. Соблюдайте порядок.
+Тестирование конкретного сервера всегда начинается с прогона **solo**, затем переходит в фазу тестирования протоколов обхода цензуры связкой **listener + client**. Соблюдайте порядок.
 
 ### Шаг 1. Тест аплинка (Solo)
 
@@ -61,7 +60,7 @@ TEST_ID=selectel-spb-001 docker compose --profile solo up
 
 ### Шаг 2. Ожидание подключений (Listener)
 
-Запускается на тестируемом RU-сервере **после** solo. Слушает VPN-порты (OpenVPN, WireGuard, AmneziaWG, Shadowsocks, VLESS+Reality, Hysteria 2).
+Запускается на тестируемом RU-сервере **после** solo. Слушает порты протоколов (OpenVPN, WireGuard, AmneziaWG, Shadowsocks, VLESS+Reality, Hysteria 2).
 
 ```bash
 TEST_ID=selectel-spb-001 SESSION_ID=client-home-rt-spb \
@@ -123,13 +122,11 @@ TEST_ID=selectel-spb-001 SESSION_ID=client-mob-mts-msk \
 3. Сделайте `git commit` и `git push`.
 4. Перегенерация baseline (`control`) **нужна только** если добавили Telegram-эндпоинт или цель для Method A throttling — для DNS/TLS/HTTP вердикты считаются inline и baseline не используется.
 
-Порты протоколов по умолчанию задаются в `protocols/default.yaml`, отпечатки блок-страниц — в `signatures/blockpages.yaml`.
+Параметры VPN-протоколов (порты, ключи, AmneziaWG-обфускация) генерируются `listener` per-test в `reports/<test_id>/protocols.yaml`. Отпечатки блок-страниц — в `signatures/blockpages.yaml`.
 
 ---
 
-## Дашборд и отчёты
-
-### Локальная аналитика (Grafana)
+## Дашборд (Grafana)
 
 Запускается на любой машине с доступом к репозиторию:
 
@@ -139,19 +136,21 @@ docker compose --profile dashboard up -d
 
 1. Откройте `http://localhost:3000` — логин `admin`, пароль из `GRAFANA_PASSWORD` в `.env`.
 2. Чтобы подтянуть новые отчёты, выполните `git pull` — sync-api сканирует `reports/` в фоне (`CENSPROBE_IMPORT_INTERVAL_SEC`, по умолчанию 60 с) и импортирует новые `.json` в Postgres автоматически.
-3. Дашборд **01 — Test Overview** показывает свежие данные. **07 — Server Suitability** — результаты одного сервера. **06 — Compare Tests** — сравнение двух серверов.
 
-### Экспорт в HTML/PDF
+**Дашборды:**
 
-```bash
-# HTML (по умолчанию)
-TEST_ID=selectel-spb-001 docker compose --profile reporter run --rm reporter
-
-# HTML + PDF (WeasyPrint уже установлен в образе)
-TEST_ID=selectel-spb-001 docker compose --profile reporter run --rm reporter --pdf
-```
-
-Отчёты сохраняются в `reports/<TEST_ID>/report.html` (и `report.pdf` при `--pdf`).
+| Дашборд | Что показывает |
+|---------|----------------|
+| **01 — Test Overview** | Основные метрики: Censorship Resistance Score, DNS/TLS/Telegram, техники цензуры, рекомендуемые протоколы. Точка входа со ссылками на drill-down дашборды |
+| **02 — Blocking Matrix** | Полная матрица всех тестов с цветовой раскраской по вердикту |
+| **03 — Telegram Deep Dive** | Детальная досягаемость Telegram DC, health score, RTT-распределение |
+| **04 — Protocol Reachability** | Матрица досягаемости протоколов по клиентским сессиям + ASN сетей клиентов |
+| **05 — Technique Attribution** | Атрибуция техник цензуры (DNS poisoning, RST injection, throttling, middlebox) |
+| **06 — Compare Tests** | Сравнение двух серверов: scores, server info, техники |
+| **07 — Cloudflare & WARP** | WARP control plane (TCP 443), MASQUE и WireGuard UDP fallback-порты, Cloudflare CDN/HTTP |
+| **08 — QUIC & ECH** | QUIC-блокировка (TSPU/UDP 443), ECH-тесты, Hysteria2 досягаемость |
+| **09 — DNS Deep Dive** | DNS integrity, DoH-резолверы, DNS poisoning детектирование |
+| **10 — TLS Deep Dive** | SNI inspection (paired blocked/neutral SNI), TLS-методы цензуры, RTT |
 
 ---
 
@@ -229,7 +228,7 @@ scp /workspace/reports/<TEST_ID>/protocols.yaml \
 | `DOCKERHUB_USERNAME` | все | **required** — Docker Hub username, из которого берутся образы |
 | `DB_PASSWORD` | dashboard | **required** — пароль PostgreSQL |
 | `GRAFANA_PASSWORD` | dashboard | **required** — пароль admin Grafana |
-| `TEST_ID` | solo, listener, client, reporter | Идентификатор сервера (например, `selectel-spb-001`) |
+| `TEST_ID` | solo, listener, client | Идентификатор сервера (например, `selectel-spb-001`) |
 | `SESSION_ID` | listener, client | Идентификатор клиентской сети (например, `client-home-rt-spb`) |
 | `SERVER_HOST` | client | IPv4-адрес сервера с Listener |
 | `RUNS_COUNT` | solo, control | Количество повторных замеров (solo: 3, control: 5) |
@@ -250,20 +249,17 @@ SSH-ключи монтируются через volume: `~/.ssh:/root/.ssh:ro`.
 ```
 censprobe/
 ├── .env.example                # шаблон для .env
-├── docker-compose.yml          # профили: solo, listener, client, control, dashboard, reporter
+├── docker-compose.yml          # профили: solo, listener, client, control, dashboard
 ├── packages/                   # исходный код всех контейнеров
 │   ├── probe-core/             # общая библиотека измерений (censprobe_core)
 │   ├── solo/                   # запуск solo-тестирования
-│   ├── listener/               # VPN-респондеры + listener
-│   ├── client/                 # VPN-клиентские пробы
+│   ├── listener/               # протокол-респондеры + listener
+│   ├── client/                 # клиентские пробы
 │   ├── control/                # генератор baseline
-│   ├── reporter/               # генератор HTML/PDF-отчётов
 │   └── dashboard/              # Grafana + sync-api + PostgreSQL
 ├── targets/                    # что тестировать (YAML)
 ├── signatures/                 # отпечатки блок-страниц
 │   └── blockpages.yaml
-├── protocols/                  # конфигурация VPN-протоколов по умолчанию
-│   └── default.yaml
 ├── baseline/                   # эталон от control-контейнера
 │   ├── latest.json
 │   └── archive/

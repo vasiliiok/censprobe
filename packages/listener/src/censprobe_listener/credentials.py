@@ -14,6 +14,7 @@ would load empty strings and the VPN binaries would refuse to start.
 from __future__ import annotations
 
 import base64
+import contextlib
 import logging
 import os
 import secrets
@@ -213,7 +214,12 @@ def save_protocols_yaml(creds: ProtocolCredentials, path: Path) -> None:
         },
     }
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml.dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    content = yaml.dump(data, allow_unicode=True, sort_keys=False)
+    # Atomic write: if the process is killed mid-write the original file
+    # (if any) stays intact; only a successful rename makes the new version live.
+    tmp_path = path.with_suffix(".yaml.tmp")
+    tmp_path.write_text(content, encoding="utf-8")
+    tmp_path.replace(path)
     logger.info("Protocols written to %s", path)
 
 
@@ -242,8 +248,14 @@ def save_server_secrets(creds: ProtocolCredentials, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     blob = yaml.dump(data, allow_unicode=True, sort_keys=False)
     fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        fh.write(blob)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(blob)
+    except BaseException:
+        # os.fdopen() failed before taking ownership of fd — close it manually.
+        with contextlib.suppress(OSError):
+            os.close(fd)
+        raise
     logger.info("Server secrets written to %s (mode 0600, gitignored)", path)
 
 
@@ -352,32 +364,26 @@ def load_protocols_yaml(path: Path) -> ProtocolCredentials:
 
 def _wg_keypair() -> tuple[str, str]:
     """
-    Generate a WireGuard (Curve25519) keypair.
+    Generate a WireGuard (Curve25519) keypair via `wg genkey` / `wg pubkey`.
 
-    Preferred: `wg genkey` / `wg pubkey` — exact binary-compatible behaviour.
-    Fallback: the `cryptography` library, which produces a properly clamped
-    X25519 private key. A naive os.urandom(32) is NOT a valid Curve25519 key
-    (spec requires clamping bits 0/1/2 of byte 0 and bits 6/7 of byte 31),
-    and `wg` would reject it at startup.
+    The `wg` binary is provisioned by the listener Docker image
+    (wireguard-tools). If it is missing or fails, fail loudly: a silent
+    fallback to `cryptography.X25519PrivateKey` would mask a broken image
+    and the operator would only discover it later when the WireGuard
+    responder fails to start with a confusing key-format error.
     """
     try:
         private = subprocess.check_output(["wg", "genkey"]).decode().strip()
         public = subprocess.check_output(
             ["wg", "pubkey"], input=private.encode()
         ).decode().strip()
-        return private, public
-    except Exception:
-        from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
-        from cryptography.hazmat.primitives.serialization import (
-            Encoding,
-            NoEncryption,
-            PrivateFormat,
-            PublicFormat,
-        )
-        key = X25519PrivateKey.generate()
-        priv_bytes = key.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
-        pub_bytes = key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
-        return base64.b64encode(priv_bytes).decode(), base64.b64encode(pub_bytes).decode()
+    except FileNotFoundError as e:
+        raise RuntimeError(
+            "wg binary not found — listener image is missing wireguard-tools"
+        ) from e
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"wg genkey/pubkey failed: {e}") from e
+    return private, public
 
 
 def _awg_magic_headers() -> tuple[int, int, int, int]:
@@ -403,15 +409,22 @@ def _awg_magic_headers() -> tuple[int, int, int, int]:
 
 def _wg_preshared_key() -> str:
     """
-    Generate a WireGuard preshared key.
+    Generate a WireGuard preshared key via `wg genpsk`.
 
-    The PSK is an opaque 32-byte symmetric secret (HKDF input), so plain
-    random bytes are correct — no Curve25519 clamping needed.
+    Even though a PSK is just an opaque 32-byte symmetric secret and
+    `secrets.token_bytes(32)` would be cryptographically equivalent, we
+    intentionally route through `wg` so that a missing binary surfaces
+    here (during credential generation) instead of later as an opaque
+    "load_psk_file" error from the WireGuard responder.
     """
     try:
         return subprocess.check_output(["wg", "genpsk"]).decode().strip()
-    except Exception:
-        return base64.b64encode(secrets.token_bytes(32)).decode()
+    except FileNotFoundError as e:
+        raise RuntimeError(
+            "wg binary not found — listener image is missing wireguard-tools"
+        ) from e
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"wg genpsk failed: {e}") from e
 
 
 def _generate_uuid() -> str:
@@ -422,42 +435,37 @@ def _generate_uuid() -> str:
 
 def _reality_keypair() -> tuple[str, str]:
     """
-    Generate an x25519 keypair for VLESS+Reality using xray x25519.
+    Generate an x25519 keypair for VLESS+Reality using `xray x25519`.
     Returns (private_key_urlsafe_b64, public_key_urlsafe_b64).
+
     Xray/Reality parses keys with Go's base64.RawURLEncoding — URL-safe
-    alphabet and NO padding. Standard base64 (`+`/`/` with `=` padding)
-    is rejected at server startup.
+    alphabet, NO padding. Standard base64 (`+`/`/` with `=` padding) is
+    rejected at server startup, so we always go through xray itself
+    rather than re-implementing the encoding. The xray binary is
+    provisioned by the listener Docker image; if it is missing, fail
+    loudly here instead of letting the VLESS responder die later with
+    an opaque "invalid private key" error.
     """
     try:
         out = subprocess.check_output(
             ["xray", "x25519"], stderr=subprocess.DEVNULL
         ).decode()
-        # Output format:
-        # Private key: <b64>
-        # Public key:  <b64>
-        lines = out.strip().splitlines()
-        private = lines[0].split(": ", 1)[1].strip()
-        public = lines[1].split(": ", 1)[1].strip()
-        return private, public
-    except Exception:
-        # Fallback: cryptography library produces a correctly clamped X25519
-        # private key. We intentionally do NOT fall back further to os.urandom,
-        # because raw random bytes are not valid Curve25519 private keys per
-        # RFC 7748 and would fail VLESS+Reality handshake setup.
-        from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
-        from cryptography.hazmat.primitives.serialization import (
-            Encoding,
-            NoEncryption,
-            PrivateFormat,
-            PublicFormat,
-        )
-        key = X25519PrivateKey.generate()
-        private_bytes = key.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
-        public_bytes = key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
-        return (
-            base64.urlsafe_b64encode(private_bytes).rstrip(b"=").decode(),
-            base64.urlsafe_b64encode(public_bytes).rstrip(b"=").decode(),
-        )
+    except FileNotFoundError as e:
+        raise RuntimeError(
+            "xray binary not found — listener image is missing xray-core"
+        ) from e
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"xray x25519 failed: {e}") from e
+
+    # Output format:
+    # Private key: <b64>
+    # Public key:  <b64>
+    lines = out.strip().splitlines()
+    if len(lines) < 2:
+        raise RuntimeError(f"xray x25519 returned unexpected output: {out!r}")
+    private = lines[0].split(": ", 1)[1].strip()
+    public = lines[1].split(": ", 1)[1].strip()
+    return private, public
 
 
 def _openvpn_static_key() -> str:
@@ -469,18 +477,18 @@ def _openvpn_static_key() -> str:
         <16 × 32 hex chars>
         -----END OpenVPN Static key V1-----
 
-    Preferred path: call `openvpn --genkey secret /dev/stdout`.
-    Fallback: assemble the envelope from os.urandom(256) so a missing
-    openvpn binary during credential generation doesn't block tests.
+    Always calls `openvpn --genkey secret`. The openvpn binary ships in
+    the listener Docker image; a missing or failing binary is a fatal
+    image bug and must surface here, not as a confusing
+    "Cannot load static key" error from the responder later.
+
+    Some openvpn builds refuse to write the key to /dev/stdout, and
+    `--genkey secret <file>` refuses to overwrite an existing file —
+    `NamedTemporaryFile` would create the target eagerly and trip that
+    check. Use a 0o700 TemporaryDirectory and pass a not-yet-existing
+    path inside it instead.
     """
     try:
-        # Some openvpn builds refuse to write the key to /dev/stdout, and
-        # `--genkey secret <file>` refuses to overwrite an existing file.
-        # `NamedTemporaryFile` creates the file *immediately*, then openvpn
-        # would error out with "ERROR: --genkey 'secret' would overwrite
-        # ...". Use a 0o700 TemporaryDirectory and pass a not-yet-existing
-        # path inside it — that gives both the right perms and the
-        # not-yet-created semantics openvpn wants.
         with tempfile.TemporaryDirectory(prefix="censprobe_ovpn_genkey_") as td:
             key_path = Path(td) / "static.key"
             subprocess.check_call(
@@ -488,11 +496,9 @@ def _openvpn_static_key() -> str:
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
             return key_path.read_text(encoding="utf-8")
-    except Exception:
-        hex_str = secrets.token_bytes(256).hex()
-        lines = [hex_str[i:i + 32] for i in range(0, len(hex_str), 32)]
-        return (
-            "-----BEGIN OpenVPN Static key V1-----\n"
-            + "\n".join(lines)
-            + "\n-----END OpenVPN Static key V1-----\n"
-        )
+    except FileNotFoundError as e:
+        raise RuntimeError(
+            "openvpn binary not found — listener image is missing openvpn"
+        ) from e
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"openvpn --genkey secret failed: {e}") from e

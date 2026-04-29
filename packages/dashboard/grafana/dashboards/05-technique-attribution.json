@@ -5,8 +5,12 @@
     "censprobe"
   ],
   "schemaVersion": 39,
-  "version": 1,
+  "version": 3,
   "refresh": "30s",
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
   "templating": {
     "list": [
       {
@@ -24,12 +28,27 @@
   },
   "panels": [
     {
+      "id": 100,
+      "title": "Other dashboards",
+      "type": "text",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 3
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "**Jump to:** [01 Overview](/d/censprobe-01) · [02 Blocking Matrix](/d/censprobe-02) · [03 Telegram](/d/censprobe-03) · [04 Protocol Reachability](/d/censprobe-04) · [05 Technique Attribution](/d/censprobe-05) · [06 Compare Tests](/d/censprobe-06) · [07 Cloudflare & WARP](/d/censprobe-07) · [08 QUIC & ECH](/d/censprobe-08) · [09 DNS](/d/censprobe-09) · [10 TLS](/d/censprobe-10)"
+      }
+    },
+    {
       "id": 1,
       "title": "Censorship Techniques — Count by Type",
       "type": "barchart",
       "gridPos": {
         "x": 0,
-        "y": 0,
+        "y": 3,
         "w": 12,
         "h": 9
       },
@@ -60,7 +79,7 @@
       "type": "table",
       "gridPos": {
         "x": 12,
-        "y": 0,
+        "y": 3,
         "w": 12,
         "h": 9
       },
@@ -88,7 +107,7 @@
       "type": "table",
       "gridPos": {
         "x": 0,
-        "y": 9,
+        "y": 12,
         "w": 12,
         "h": 8
       },
@@ -116,7 +135,7 @@
       "type": "table",
       "gridPos": {
         "x": 12,
-        "y": 9,
+        "y": 12,
         "w": 12,
         "h": 8
       },
@@ -144,7 +163,7 @@
       "type": "table",
       "gridPos": {
         "x": 0,
-        "y": 17,
+        "y": 20,
         "w": 24,
         "h": 6
       },
@@ -154,7 +173,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT test, target, verdict, method, notes FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND category = 'middlebox' ORDER BY verdict DESC",
+          "rawSql": "SELECT test, target, verdict, method, notes FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND category = 'middlebox' AND verdict NOT IN ('OK','INCONCLUSIVE') ORDER BY verdict DESC, target",
           "format": "table",
           "refId": "A",
           "editorMode": "code",

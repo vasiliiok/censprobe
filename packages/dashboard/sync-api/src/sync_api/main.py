@@ -370,10 +370,8 @@ async def get_baseline() -> dict:
     if not isinstance(raw, dict):
         return {"status": "error", "error": "baseline is not a JSON object"}
     # Only `telegram` (reconcile) and `throttling` (Method A p10) sections
-    # are populated by the control container — dns/tls/http moved to inline
-    # verdicts in the probe modules. The legacy keys are retained on
-    # BaselineData for back-compat with old latest.json files but never
-    # populated, so reporting them here would always show "0".
+    # are populated by the control container — dns/tls/http verdicts are
+    # decided inline in the probe modules and never aggregated here.
     return {
         "status": "ok",
         "version": raw.get("version", "unknown"),
@@ -421,7 +419,7 @@ async def _get_or_create_test_run(
         asn=server.get("asn"),
         as_name=server.get("as_name"),
         location=server.get("location"),
-        ipv4_masked=server.get("ipv4_masked"),
+        ipv4=server.get("ipv4") or server.get("ipv4_masked"),
         ipv6_available=bool(server.get("ipv6_available", False)),
         provider=server.get("provider"),
         kernel=server.get("kernel"),
@@ -493,7 +491,7 @@ def _run_to_dict(run: TestRun) -> dict:
         "asn": run.asn,
         "as_name": run.as_name,
         "location": run.location,
-        "ipv4_masked": run.ipv4_masked,
+        "ipv4": run.ipv4,
         "ipv6_available": run.ipv6_available,
         "provider": run.provider,
         "kernel": run.kernel,

@@ -1,26 +1,18 @@
 {
   "title": "01 — Test Overview",
   "uid": "censprobe-01",
-  "tags": [
-    "censprobe"
-  ],
+  "tags": ["censprobe"],
   "schemaVersion": 39,
-  "version": 1,
+  "version": 3,
   "refresh": "30s",
-  "time": {
-    "from": "now-30d",
-    "to": "now"
-  },
+  "time": {"from": "now-30d", "to": "now"},
   "templating": {
     "list": [
       {
         "name": "test_id",
         "label": "Test ID",
         "type": "query",
-        "datasource": {
-          "type": "postgres",
-          "uid": "DS_CENSPROBE_PG"
-        },
+        "datasource": {"type": "postgres", "uid": "DS_CENSPROBE_PG"},
         "query": "SELECT test_id FROM test_runs ORDER BY created_at DESC",
         "refresh": 2,
         "multi": false,
@@ -30,30 +22,30 @@
   },
   "panels": [
     {
+      "id": 100,
+      "title": "Drill-down dashboards",
+      "type": "text",
+      "gridPos": {"x": 0, "y": 0, "w": 24, "h": 3},
+      "options": {
+        "mode": "markdown",
+        "content": "**Drill into a category:** [02 — Blocking Matrix](/d/censprobe-02) · [03 — Telegram](/d/censprobe-03) · [04 — Protocol Reachability](/d/censprobe-04) · [05 — Technique Attribution](/d/censprobe-05) · [06 — Compare Tests](/d/censprobe-06) · [07 — Cloudflare & WARP](/d/censprobe-07) · [08 — QUIC & ECH](/d/censprobe-08) · [09 — DNS](/d/censprobe-09) · [10 — TLS](/d/censprobe-10)"
+      }
+    },
+    {
       "id": 1,
-      "title": "Overall VPN Suitability Score",
+      "title": "Censorship Resistance Score",
+      "description": "Overall score [0–100]. Higher = less censored. Combines uplink quality, protocol reachability, and latency.",
       "type": "gauge",
-      "gridPos": {
-        "x": 0,
-        "y": 0,
-        "w": 6,
-        "h": 8
-      },
-      "datasource": {
-        "type": "postgres",
-        "uid": "DS_CENSPROBE_PG"
-      },
+      "gridPos": {"x": 0, "y": 3, "w": 5, "h": 8},
+      "datasource": {"type": "postgres", "uid": "DS_CENSPROBE_PG"},
       "targets": [
         {
-          "rawSql": "SELECT overall_score AS \"Overall Score\" FROM test_runs WHERE test_id = ${test_id:sqlstring} LIMIT 1",
+          "rawSql": "SELECT overall_score AS \"Score\" FROM test_runs WHERE test_id = ${test_id:sqlstring} LIMIT 1",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
           "rawQuery": true,
-          "datasource": {
-            "type": "postgres",
-            "uid": "DS_CENSPROBE_PG"
-          }
+          "datasource": {"type": "postgres", "uid": "DS_CENSPROBE_PG"}
         }
       ],
       "fieldConfig": {
@@ -64,18 +56,9 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              {
-                "color": "red",
-                "value": 0
-              },
-              {
-                "color": "yellow",
-                "value": 40
-              },
-              {
-                "color": "green",
-                "value": 70
-              }
+              {"color": "red", "value": 0},
+              {"color": "yellow", "value": 40},
+              {"color": "green", "value": 70}
             ]
           }
         }
@@ -83,18 +66,11 @@
     },
     {
       "id": 2,
-      "title": "Scores by Role",
+      "title": "Score by Role",
+      "description": "Entry = can clients reach me; Exit = can I reach the internet; Relay = basic TCP/UDP reachability",
       "type": "barchart",
-      "gridPos": {
-        "x": 6,
-        "y": 0,
-        "w": 9,
-        "h": 8
-      },
-      "datasource": {
-        "type": "postgres",
-        "uid": "DS_CENSPROBE_PG"
-      },
+      "gridPos": {"x": 5, "y": 3, "w": 7, "h": 8},
+      "datasource": {"type": "postgres", "uid": "DS_CENSPROBE_PG"},
       "targets": [
         {
           "rawSql": "SELECT 'Entry' AS role, entry_score AS score FROM test_runs WHERE test_id = ${test_id:sqlstring} UNION ALL SELECT 'Exit', exit_score FROM test_runs WHERE test_id = ${test_id:sqlstring} UNION ALL SELECT 'Relay', relay_score FROM test_runs WHERE test_id = ${test_id:sqlstring}",
@@ -102,62 +78,35 @@
           "refId": "A",
           "editorMode": "code",
           "rawQuery": true,
-          "datasource": {
-            "type": "postgres",
-            "uid": "DS_CENSPROBE_PG"
-          }
+          "datasource": {"type": "postgres", "uid": "DS_CENSPROBE_PG"}
         }
       ],
-      "options": {
-        "orientation": "horizontal",
-        "xField": "role"
-      }
+      "options": {"orientation": "horizontal", "xField": "role"}
     },
     {
       "id": 3,
       "title": "Server Info",
       "type": "table",
-      "gridPos": {
-        "x": 15,
-        "y": 0,
-        "w": 9,
-        "h": 8
-      },
-      "datasource": {
-        "type": "postgres",
-        "uid": "DS_CENSPROBE_PG"
-      },
+      "gridPos": {"x": 12, "y": 3, "w": 12, "h": 8},
+      "datasource": {"type": "postgres", "uid": "DS_CENSPROBE_PG"},
       "targets": [
         {
-          "rawSql": "SELECT asn, as_name, location, provider, distro, ipv4_masked FROM test_runs WHERE test_id = ${test_id:sqlstring} LIMIT 1",
+          "rawSql": "SELECT asn, as_name, location, provider, distro, ipv4, ipv6_available FROM test_runs WHERE test_id = ${test_id:sqlstring} LIMIT 1",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
           "rawQuery": true,
-          "datasource": {
-            "type": "postgres",
-            "uid": "DS_CENSPROBE_PG"
-          }
+          "datasource": {"type": "postgres", "uid": "DS_CENSPROBE_PG"}
         }
       ],
-      "options": {
-        "showHeader": true
-      }
+      "options": {"showHeader": true}
     },
     {
       "id": 4,
       "title": "DNS Integrity",
       "type": "gauge",
-      "gridPos": {
-        "x": 0,
-        "y": 8,
-        "w": 4,
-        "h": 5
-      },
-      "datasource": {
-        "type": "postgres",
-        "uid": "DS_CENSPROBE_PG"
-      },
+      "gridPos": {"x": 0, "y": 11, "w": 4, "h": 5},
+      "datasource": {"type": "postgres", "uid": "DS_CENSPROBE_PG"},
       "targets": [
         {
           "rawSql": "SELECT dns_integrity FROM test_runs WHERE test_id = ${test_id:sqlstring} LIMIT 1",
@@ -165,17 +114,22 @@
           "refId": "A",
           "editorMode": "code",
           "rawQuery": true,
-          "datasource": {
-            "type": "postgres",
-            "uid": "DS_CENSPROBE_PG"
-          }
+          "datasource": {"type": "postgres", "uid": "DS_CENSPROBE_PG"}
         }
       ],
       "fieldConfig": {
         "defaults": {
           "min": 0,
           "max": 100,
-          "unit": "short"
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": 0},
+              {"color": "yellow", "value": 40},
+              {"color": "green", "value": 70}
+            ]
+          }
         }
       }
     },
@@ -183,16 +137,8 @@
       "id": 5,
       "title": "TLS Integrity",
       "type": "gauge",
-      "gridPos": {
-        "x": 4,
-        "y": 8,
-        "w": 4,
-        "h": 5
-      },
-      "datasource": {
-        "type": "postgres",
-        "uid": "DS_CENSPROBE_PG"
-      },
+      "gridPos": {"x": 4, "y": 11, "w": 4, "h": 5},
+      "datasource": {"type": "postgres", "uid": "DS_CENSPROBE_PG"},
       "targets": [
         {
           "rawSql": "SELECT tls_integrity FROM test_runs WHERE test_id = ${test_id:sqlstring} LIMIT 1",
@@ -200,17 +146,22 @@
           "refId": "A",
           "editorMode": "code",
           "rawQuery": true,
-          "datasource": {
-            "type": "postgres",
-            "uid": "DS_CENSPROBE_PG"
-          }
+          "datasource": {"type": "postgres", "uid": "DS_CENSPROBE_PG"}
         }
       ],
       "fieldConfig": {
         "defaults": {
           "min": 0,
           "max": 100,
-          "unit": "short"
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": 0},
+              {"color": "yellow", "value": 40},
+              {"color": "green", "value": 70}
+            ]
+          }
         }
       }
     },
@@ -218,16 +169,8 @@
       "id": 6,
       "title": "Telegram Health",
       "type": "gauge",
-      "gridPos": {
-        "x": 8,
-        "y": 8,
-        "w": 4,
-        "h": 5
-      },
-      "datasource": {
-        "type": "postgres",
-        "uid": "DS_CENSPROBE_PG"
-      },
+      "gridPos": {"x": 8, "y": 11, "w": 4, "h": 5},
+      "datasource": {"type": "postgres", "uid": "DS_CENSPROBE_PG"},
       "targets": [
         {
           "rawSql": "SELECT telegram_health FROM test_runs WHERE test_id = ${test_id:sqlstring} LIMIT 1",
@@ -235,17 +178,22 @@
           "refId": "A",
           "editorMode": "code",
           "rawQuery": true,
-          "datasource": {
-            "type": "postgres",
-            "uid": "DS_CENSPROBE_PG"
-          }
+          "datasource": {"type": "postgres", "uid": "DS_CENSPROBE_PG"}
         }
       ],
       "fieldConfig": {
         "defaults": {
           "min": 0,
           "max": 100,
-          "unit": "short"
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": 0},
+              {"color": "yellow", "value": 40},
+              {"color": "green", "value": 70}
+            ]
+          }
         }
       }
     },
@@ -253,116 +201,121 @@
       "id": 7,
       "title": "Throttling Detected",
       "type": "stat",
-      "gridPos": {
-        "x": 12,
-        "y": 8,
-        "w": 4,
-        "h": 5
-      },
-      "datasource": {
-        "type": "postgres",
-        "uid": "DS_CENSPROBE_PG"
-      },
+      "gridPos": {"x": 12, "y": 11, "w": 4, "h": 5},
+      "datasource": {"type": "postgres", "uid": "DS_CENSPROBE_PG"},
       "targets": [
         {
-          "rawSql": "SELECT CASE WHEN throttling_detected THEN 'YES ⚠' ELSE 'No ✓' END AS throttling FROM test_runs WHERE test_id = ${test_id:sqlstring} LIMIT 1",
+          "rawSql": "SELECT CASE WHEN throttling_detected THEN 'YES' ELSE 'No' END AS throttling FROM test_runs WHERE test_id = ${test_id:sqlstring} LIMIT 1",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
           "rawQuery": true,
-          "datasource": {
-            "type": "postgres",
-            "uid": "DS_CENSPROBE_PG"
-          }
+          "datasource": {"type": "postgres", "uid": "DS_CENSPROBE_PG"}
         }
-      ]
+      ],
+      "options": {"colorMode": "value"},
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "YES": {"color": "red", "index": 0}
+              }
+            },
+            {
+              "type": "value",
+              "options": {
+                "No": {"color": "green", "index": 1}
+              }
+            }
+          ]
+        }
+      }
     },
     {
       "id": 8,
-      "title": "Detected Censorship Techniques",
-      "type": "table",
-      "gridPos": {
-        "x": 0,
-        "y": 13,
-        "w": 24,
-        "h": 5
-      },
-      "datasource": {
-        "type": "postgres",
-        "uid": "DS_CENSPROBE_PG"
-      },
+      "title": "Recommended Protocols",
+      "type": "stat",
+      "gridPos": {"x": 16, "y": 11, "w": 8, "h": 5},
+      "datasource": {"type": "postgres", "uid": "DS_CENSPROBE_PG"},
       "targets": [
         {
-          "rawSql": "SELECT DISTINCT category, verdict, method, COUNT(*) AS count FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND verdict IN ('BLOCKED','DNS_BLOCKED','DOH_BLOCKED','DNS_POISONING','IP_DROPPED','RST_INJECTED','REFUSED','THROTTLED','YOUTUBE_SNI_THROTTLED') GROUP BY category, verdict, method ORDER BY count DESC LIMIT 50",
+          "rawSql": "SELECT array_to_string(recommended_protocols, ', ') AS \"Protocols\" FROM test_runs WHERE test_id = ${test_id:sqlstring} LIMIT 1",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
           "rawQuery": true,
-          "datasource": {
-            "type": "postgres",
-            "uid": "DS_CENSPROBE_PG"
-          }
+          "datasource": {"type": "postgres", "uid": "DS_CENSPROBE_PG"}
         }
-      ]
+      ],
+      "options": {"colorMode": "none"}
     },
     {
       "id": 9,
-      "title": "Results by Category (Verdict Distribution)",
-      "type": "piechart",
-      "gridPos": {
-        "x": 0,
-        "y": 18,
-        "w": 12,
-        "h": 8
-      },
-      "datasource": {
-        "type": "postgres",
-        "uid": "DS_CENSPROBE_PG"
-      },
+      "title": "Detected Censorship Techniques",
+      "description": "Aggregated count of blocking verdicts per category and method.",
+      "type": "table",
+      "gridPos": {"x": 0, "y": 16, "w": 24, "h": 5},
+      "datasource": {"type": "postgres", "uid": "DS_CENSPROBE_PG"},
       "targets": [
         {
-          "rawSql": "SELECT category || ' / ' || verdict AS label, COUNT(*) AS count FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} GROUP BY category, verdict ORDER BY count DESC",
+          "rawSql": "SELECT category, verdict, method, COUNT(*) AS count FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND verdict IN ('BLOCKED','DNS_BLOCKED','DOH_BLOCKED','DNS_POISONING','IP_DROPPED','RST_INJECTED','REFUSED','THROTTLED','YOUTUBE_SNI_THROTTLED') GROUP BY category, verdict, method ORDER BY count DESC LIMIT 50",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
           "rawQuery": true,
-          "datasource": {
-            "type": "postgres",
-            "uid": "DS_CENSPROBE_PG"
-          }
+          "datasource": {"type": "postgres", "uid": "DS_CENSPROBE_PG"}
         }
       ]
     },
     {
       "id": 10,
-      "title": "Recommended Protocols & Detected Techniques",
-      "description": "Pulled from test_runs.recommended_protocols / detected_techniques (Postgres text[] columns).",
-      "type": "table",
-      "gridPos": {
-        "x": 12,
-        "y": 18,
-        "w": 12,
-        "h": 8
-      },
-      "datasource": {
-        "type": "postgres",
-        "uid": "DS_CENSPROBE_PG"
-      },
+      "title": "Uplink Quality by Category",
+      "description": "OK vs blocked test counts per category — shows which test domains/protocols are censored.",
+      "type": "barchart",
+      "gridPos": {"x": 0, "y": 21, "w": 12, "h": 7},
+      "datasource": {"type": "postgres", "uid": "DS_CENSPROBE_PG"},
       "targets": [
         {
-          "rawSql": "SELECT array_to_string(recommended_protocols, ', ') AS \"Recommended\", array_to_string(detected_techniques, ', ') AS \"Detected techniques\" FROM test_runs WHERE test_id = ${test_id:sqlstring} LIMIT 1",
+          "rawSql": "SELECT category, COUNT(*) FILTER (WHERE verdict = 'OK') AS ok, COUNT(*) FILTER (WHERE verdict IN ('BLOCKED','DNS_BLOCKED','DOH_BLOCKED','DNS_POISONING','IP_DROPPED','RST_INJECTED','REFUSED','THROTTLED','YOUTUBE_SNI_THROTTLED')) AS blocked FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} GROUP BY category ORDER BY category",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
           "rawQuery": true,
-          "datasource": {
-            "type": "postgres",
-            "uid": "DS_CENSPROBE_PG"
-          }
+          "datasource": {"type": "postgres", "uid": "DS_CENSPROBE_PG"}
         }
       ],
       "options": {
-        "showHeader": true
+        "xField": "category",
+        "stacking": {"mode": "normal"}
+      }
+    },
+    {
+      "id": 11,
+      "title": "Verdict Distribution (all categories)",
+      "description": "Aggregate of all probe verdicts. Big green slice = healthy server.",
+      "type": "piechart",
+      "gridPos": {"x": 12, "y": 21, "w": 12, "h": 7},
+      "datasource": {"type": "postgres", "uid": "DS_CENSPROBE_PG"},
+      "targets": [
+        {
+          "rawSql": "SELECT verdict, COUNT(*) AS count FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} GROUP BY verdict ORDER BY count DESC",
+          "format": "table",
+          "refId": "A",
+          "editorMode": "code",
+          "rawQuery": true,
+          "datasource": {"type": "postgres", "uid": "DS_CENSPROBE_PG"}
+        }
+      ],
+      "fieldConfig": {
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "OK"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "green"}}]},
+          {"matcher": {"id": "byName", "options": "BLOCKED"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "red"}}]},
+          {"matcher": {"id": "byName", "options": "INCONCLUSIVE"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "blue"}}]},
+          {"matcher": {"id": "byName", "options": "ANOMALY"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "yellow"}}]},
+          {"matcher": {"id": "byName", "options": "THROTTLED"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "orange"}}]}
+        ]
       }
     }
   ]
