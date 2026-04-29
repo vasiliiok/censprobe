@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import random
 import sys
 from pathlib import Path
@@ -50,7 +49,7 @@ logging.basicConfig(
 logger = logging.getLogger("censprobe.client")
 console = Console()
 
-WORKSPACE = Path(os.getenv("WORKSPACE", "/workspace"))
+WORKSPACE = Path("/workspace")
 _DISCLAIMER = """
 [yellow]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/yellow]
  This tool tests VPN protocol reachability from

@@ -45,7 +45,7 @@ logging.basicConfig(
 logger = logging.getLogger("censprobe.control")
 console = Console()
 
-WORKSPACE = Path(os.getenv("WORKSPACE", "/workspace"))
+WORKSPACE = Path("/workspace")
 CONTROL_ID = os.getenv("CONTROL_ID", "control-de-01")
 
 

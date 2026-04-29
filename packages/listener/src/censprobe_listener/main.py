@@ -60,7 +60,7 @@ logging.basicConfig(
 logger = logging.getLogger("censprobe.listener")
 console = Console()
 
-WORKSPACE = Path(os.getenv("WORKSPACE", "/workspace"))
+WORKSPACE = Path("/workspace")
 
 # Hard ceiling on graceful-shutdown time. Any responder still inside its
 # stop() coroutine after this many seconds gets cancelled so the listener

@@ -62,7 +62,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 # only change required to keep them in lockstep.
 SERVICE_VERSION = "0.4.0"
 
-WORKSPACE = Path(os.environ.get("WORKSPACE", "/workspace"))
+WORKSPACE = Path("/workspace")
 IMPORT_INTERVAL_SEC = float(os.environ.get("CENSPROBE_IMPORT_INTERVAL_SEC", "60"))
 
 

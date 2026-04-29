@@ -20,7 +20,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -48,7 +47,7 @@ logging.basicConfig(
 logger = logging.getLogger("censprobe.solo")
 
 console = Console()
-WORKSPACE = Path(os.getenv("WORKSPACE", "/workspace"))
+WORKSPACE = Path("/workspace")
 
 
 @click.command()

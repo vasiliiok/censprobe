@@ -23,7 +23,7 @@ from typing import Iterator
 
 logger = logging.getLogger(__name__)
 
-WORKSPACE = Path(os.getenv("WORKSPACE", "/workspace"))
+WORKSPACE = Path("/workspace")
 
 # Path for a process-global advisory lock around any git operation.
 # /workspace is bind-mounted and shared between solo / listener / sync-api
