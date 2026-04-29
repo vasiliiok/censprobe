@@ -5,8 +5,11 @@ __pycache__/
 venv/
 dist/
 build/
-#.env
-#*.env
+# Local secrets — must NEVER enter git history. The negation below keeps
+# the documented placeholder template (.env.example) tracked.
+.env
+*.env
+!.env.example
 *.log
 .DS_Store
 .idea/

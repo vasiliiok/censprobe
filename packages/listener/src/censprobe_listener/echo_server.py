@@ -34,21 +34,31 @@ class EchoServer:
         self.bytes_counts: dict[str, int] = {p: 0 for p in self.ports}
 
     async def start(self) -> None:
-        for proto, port in self.ports.items():
-            # `reuse_address=True` lets us rebind to the same port even
-            # if the previous listener died with sockets still in
-            # TIME_WAIT — without it, a fast restart hits "address
-            # already in use". asyncio enables it by default on POSIX
-            # but we set it explicitly so the behaviour doesn't depend
-            # on platform defaults.
-            srv = await asyncio.start_server(
-                lambda r, w, p=proto: self._handle(r, w, p),
-                host="127.0.0.1",
-                port=port,
-                reuse_address=True,
-            )
-            self._servers.append(srv)
-            logger.info("echo server: %s on 127.0.0.1:%d", proto, port)
+        # Bring up each port; on partial failure (e.g. one of the loopback
+        # ports already busy from a leaked previous run) tear down everything
+        # we did manage to start so we don't leak listening sockets that
+        # block the next start_server() retry. The listener's main.py
+        # treats any exception here as "no echo server" and continues —
+        # without this rollback, those orphan servers would survive.
+        try:
+            for proto, port in self.ports.items():
+                # `reuse_address=True` lets us rebind to the same port even
+                # if the previous listener died with sockets still in
+                # TIME_WAIT — without it, a fast restart hits "address
+                # already in use". asyncio enables it by default on POSIX
+                # but we set it explicitly so the behaviour doesn't depend
+                # on platform defaults.
+                srv = await asyncio.start_server(
+                    lambda r, w, p=proto: self._handle(r, w, p),
+                    host="127.0.0.1",
+                    port=port,
+                    reuse_address=True,
+                )
+                self._servers.append(srv)
+                logger.info("echo server: %s on 127.0.0.1:%d", proto, port)
+        except Exception:
+            await self.stop()
+            raise
 
     async def _handle(
         self,

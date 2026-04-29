@@ -114,7 +114,7 @@ def parse_listener_report(
             "protocol": str(protocol),
             "verdict": str(pr.get("verdict") or "BLOCKED"),
             "handshake_count": _to_int(pr.get("handshake_count"), default=0),
-            "data_transfer_ok": bool(pr.get("data_transfer_ok") or False),
+            "data_transfer_ok": bool(pr.get("data_transfer_ok")),
             "avg_rtt_ms": _to_float(pr.get("avg_rtt_ms"), default=None),
             "from_asn": pr.get("from_asn"),
         })

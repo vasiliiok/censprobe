@@ -511,6 +511,7 @@ async def _test_ech(domain: str) -> Optional[TestResult]:
     verdict: Verdict
     method: Optional[BlockingMethod] = None
     notes: Optional[str] = None
+    confidence: float = 1.0
     if rc == 0:
         verdict = Verdict.OK
     elif any(p in stderr_low for p in ECH_NOT_AVAILABLE_PHRASES):
@@ -521,8 +522,10 @@ async def _test_ech(domain: str) -> Optional[TestResult]:
         method = BlockingMethod.ECH_BLOCKED
     else:
         # Unrecognised non-zero — be conservative and flag as anomaly,
-        # not blocked, to avoid false positives.
+        # not blocked, to avoid false positives. Lower confidence so the
+        # dashboard / scoring treats this catch-all bucket as soft signal.
         verdict = Verdict.ANOMALY
+        confidence = 0.4
 
     return TestResult(
         test=test_name,
@@ -530,6 +533,7 @@ async def _test_ech(domain: str) -> Optional[TestResult]:
         target=domain,
         verdict=verdict,
         method=method,
+        confidence=confidence,
         evidence={
             "curl_returncode": rc,
             "ech_config_source": "https_record_doh",
