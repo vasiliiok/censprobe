@@ -23,7 +23,6 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from censprobe_core.models import Verdict
 
@@ -55,8 +54,8 @@ class ProbeResult:
     verdict: Verdict = Verdict.BLOCKED
     handshake_ok: bool = False
     data_ok: bool = False
-    rtt_ms: Optional[float] = None
-    error: Optional[str] = None
+    rtt_ms: float | None = None
+    error: str | None = None
 
 
 async def run_cmd(cmd: list[str], timeout: float = PROBE_TIMEOUT) -> tuple[int, str, str]:
@@ -120,7 +119,7 @@ async def _start_log_drain(
     proc: asyncio.subprocess.Process,
     buf: bytearray,
     max_bytes: int = 65536,
-) -> Optional[asyncio.Task]:
+) -> asyncio.Task | None:
     """Drain proc.stdout continuously so the child never blocks on a full pipe.
 
     Linux pipes are ~64 KiB. If the tunnel binary (sing-box / xray /
@@ -154,7 +153,7 @@ async def _start_log_drain(
     return asyncio.create_task(_drain())
 
 
-async def _stop_log_drain(task: Optional[asyncio.Task]) -> None:
+async def _stop_log_drain(task: asyncio.Task | None) -> None:
     if task is None or task.done():
         return
     task.cancel()
@@ -309,7 +308,7 @@ async def proxy_echo(
     proxy_type: str = "socks5h",
     timeout: float = 5.0,
     socks_ready: bool = True,
-) -> tuple[str, Optional[float]]:
+) -> tuple[str, float | None]:
     """Run a single curl through the local SOCKS proxy.
 
     `socks_ready` should be True when the caller has already confirmed the

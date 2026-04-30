@@ -154,7 +154,7 @@ services:
       dockerfile: packages/dashboard/sync-api/Dockerfile
     environment:
       DATABASE_URL: postgresql+asyncpg://censprobe:${DB_PASSWORD:?DB_PASSWORD is required}@postgres/censprobe
-      WORKSPACE: /workspace
+      CENSPROBE_IMPORT_INTERVAL_SEC: ${CENSPROBE_IMPORT_INTERVAL_SEC:-60}
     volumes:
       - ./:/workspace
     # Bind to loopback only — the API has no authentication, and the only

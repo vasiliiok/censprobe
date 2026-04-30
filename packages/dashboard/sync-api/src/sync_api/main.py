@@ -25,7 +25,7 @@ import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import AsyncIterator, Optional
+from typing import AsyncIterator
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -54,7 +54,7 @@ from sync_api.parser import (
     parse_solo_report,
 )
 
-logger = logging.getLogger("censprobe.sync_api")
+logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 # Single source of truth for the API/version metadata. Used in both the FastAPI
@@ -62,8 +62,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 # only change required to keep them in lockstep.
 SERVICE_VERSION = "0.4.0"
 
-WORKSPACE = Path(os.environ.get("WORKSPACE", "/workspace"))
-IMPORT_INTERVAL_SEC = float(os.environ.get("CENSPROBE_IMPORT_INTERVAL_SEC", "60"))
+WORKSPACE = Path("/workspace")
+IMPORT_INTERVAL_SEC = float(os.getenv("CENSPROBE_IMPORT_INTERVAL_SEC", "60"))
 
 
 @asynccontextmanager
@@ -302,8 +302,8 @@ async def get_test_run(
 @app.get("/results/{test_id}")
 async def get_results(
     test_id: str,
-    category: Optional[str] = Query(None),
-    verdict: Optional[str] = Query(None),
+    category: str | None = Query(None),
+    verdict: str | None = Query(None),
     limit: int = Query(500, le=2000),
     offset: int = Query(0),
     session: AsyncSession = Depends(get_session),
@@ -350,7 +350,7 @@ async def get_protocol_matrix(
 # Baseline metadata
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _read_baseline_sync(baseline_path: Path) -> Optional[dict]:
+def _read_baseline_sync(baseline_path: Path) -> dict | None:
     """Blocking baseline reader — exists/read/parse."""
     if not baseline_path.exists():
         return None
@@ -401,7 +401,7 @@ def _read_meta_yaml(meta_path: Path) -> dict:
 
 async def _get_or_create_test_run(
     session: AsyncSession, test_id: str, meta_path: Path
-) -> Optional[TestRun]:
+) -> TestRun | None:
     """Find or create a TestRun row for a test_id."""
     row = (
         await session.execute(select(TestRun).where(TestRun.test_id == test_id))

@@ -21,7 +21,6 @@ Formulas from Часть 11.2:
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from censprobe_core.models import (
     ListenerReport,
@@ -52,7 +51,7 @@ BLOCKING_VERDICTS: frozenset[Verdict] = frozenset({
 
 def compute_scores(
     solo_results: list[TestResult],
-    listener_reports: Optional[list[ListenerReport]] = None,
+    listener_reports: list[ListenerReport] | None = None,
 ) -> ServerScores:
     """
     Compute server suitability scores from solo (and optionally listener) results.
@@ -170,7 +169,7 @@ def _ok_pct(results: list[TestResult]) -> float:
 
 
 def _protocol_reachability(
-    listener_reports: Optional[list[ListenerReport]],
+    listener_reports: list[ListenerReport] | None,
 ) -> float:
     """
     Compute average protocol reachability fraction [0.0–1.0] from all listener sessions.
@@ -221,7 +220,7 @@ def _latency_to_score(rtts: list[float]) -> float:
 
 def _recommend_protocols(
     solo_results: list[TestResult],
-    listener_reports: Optional[list[ListenerReport]],
+    listener_reports: list[ListenerReport] | None,
 ) -> list[str]:
     """
     Suggest which VPN protocols are likely to work.

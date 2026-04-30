@@ -18,6 +18,7 @@ import asyncio
 import logging
 import os
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -42,10 +43,10 @@ logging.basicConfig(
     format="%(message)s",
     datefmt="[%H:%M:%S]",
 )
-logger = logging.getLogger("censprobe.control")
+logger = logging.getLogger(__name__)
 console = Console()
 
-WORKSPACE = Path(os.getenv("WORKSPACE", "/workspace"))
+WORKSPACE = Path("/workspace")
 CONTROL_ID = os.getenv("CONTROL_ID", "control-de-01")
 
 
@@ -134,7 +135,7 @@ async def _async_main(runs: int, skip_push: bool) -> None:
 
     if not all_run_results:
         console.print("[red]All probe rounds failed — cannot build baseline.[/red]")
-        raise SystemExit(1)
+        sys.exit(1)
 
     # Refuse to ship a baseline that was built from a too-small sample of
     # successful rounds: a baseline aggregated from only 1–2 surviving runs
@@ -146,7 +147,7 @@ async def _async_main(runs: int, skip_push: bool) -> None:
             f"[red]{failed_rounds}/{runs} rounds failed (≥70%). "
             "Refusing to publish a baseline built from this little data.[/red]"
         )
-        raise SystemExit(2)
+        sys.exit(2)
     if failed_rounds:
         console.print(
             f"[yellow]Warning: {failed_rounds}/{runs} rounds failed; "

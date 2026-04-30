@@ -11,7 +11,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +133,7 @@ def is_listener_report(filename: str) -> bool:
     return filename.startswith("server-listener-") and filename.endswith(".json")
 
 
-def load_json(path: Path) -> Optional[dict]:
+def load_json(path: Path) -> dict | None:
     """Load a .json file into a dict.
 
     Returns None on any I/O / decode failure so callers can short-circuit
@@ -159,7 +159,7 @@ def load_json(path: Path) -> Optional[dict]:
         return None
 
 
-def _to_float(value: Any, default: Optional[float]) -> Optional[float]:
+def _to_float(value: Any, default: float | None) -> float | None:
     """Coerce a JSON value to float, accepting None/strings/missing."""
     if value is None or value == "":
         return default
@@ -182,7 +182,7 @@ def _to_int(value: Any, default: int) -> int:
             return default
 
 
-def _parse_dt(value: Any) -> Optional[datetime]:
+def _parse_dt(value: Any) -> datetime | None:
     """Parse an ISO datetime string into a timezone-aware datetime."""
     if not value:
         return None

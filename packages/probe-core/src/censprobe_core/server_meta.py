@@ -19,7 +19,6 @@ import os
 import platform
 import socket
 from pathlib import Path
-from typing import Optional
 
 import httpx
 
@@ -30,7 +29,7 @@ logger = logging.getLogger(__name__)
 # Timeout for external requests
 _TIMEOUT = httpx.Timeout(10.0)
 
-_IPAPI_IS_KEY = os.environ.get("IPAPI_IS_KEY", "")
+_IPAPI_IS_KEY = os.getenv("IPAPI_IS_KEY", "")
 _IPAPI_IS_URL = "https://api.ipapi.is/"
 
 
@@ -73,7 +72,7 @@ async def detect_server_meta() -> ServerMeta:
     return meta
 
 
-async def _detect_exit_ip(client: httpx.AsyncClient) -> Optional[str]:
+async def _detect_exit_ip(client: httpx.AsyncClient) -> str | None:
     """Detect external IP via Cloudflare trace (primary) and icanhazip.com (fallback)."""
     # Primary: Cloudflare CDN-CGI trace
     try:
@@ -96,7 +95,7 @@ async def _detect_exit_ip(client: httpx.AsyncClient) -> Optional[str]:
     return None
 
 
-async def _detect_asn(client: httpx.AsyncClient, ip: str) -> Optional[dict]:
+async def _detect_asn(client: httpx.AsyncClient, ip: str) -> dict | None:
     """
     Detect ASN, AS name, and city for an IP via ipapi.is (HTTPS, keyed).
 
@@ -196,7 +195,7 @@ def detect_distro() -> str:
     return platform.system()
 
 
-def _guess_provider(as_name: str) -> Optional[str]:
+def _guess_provider(as_name: str) -> str | None:
     """Guess VPS provider name from AS name string."""
     as_lower = as_name.lower()
     mapping = {

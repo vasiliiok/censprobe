@@ -18,7 +18,6 @@ import logging
 import random
 import socket
 import string
-from typing import Optional
 
 from censprobe_core.models import TestResult, Verdict, BlockingMethod
 
@@ -117,7 +116,7 @@ async def _test_header_manipulation() -> list[TestResult]:
             # typically return 200 (its own block page), a reset, or a
             # status code from its own HTTP parser — those are anomalies.
             status_line = response_head.split("\r\n", 1)[0] if response_head else ""
-            status_code: Optional[int] = None
+            status_code: int | None = None
             parts = status_line.split(maxsplit=2)
             if len(parts) >= 2 and parts[0].startswith("HTTP/"):
                 try:
@@ -165,7 +164,7 @@ async def _raw_http_request(
     port: int,
     path: str,
     headers: list[tuple[str, str]],
-) -> tuple[str, Optional[str]]:
+) -> tuple[str, str | None]:
     """Send an HTTP/1.1 GET over a raw socket and return the response head.
 
     Returns (head_text, error_or_None). The point is to preserve the
@@ -174,7 +173,7 @@ async def _raw_http_request(
     """
     loop = asyncio.get_running_loop()
 
-    def _send() -> tuple[str, Optional[str]]:
+    def _send() -> tuple[str, str | None]:
         try:
             request = f"GET {path} HTTP/1.1\r\n"
             for name, value in headers:
@@ -200,7 +199,7 @@ async def _raw_http_request(
 # Test 2: HTTP Invalid Request Line
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def _test_invalid_request_line() -> Optional[TestResult]:
+async def _test_invalid_request_line() -> TestResult | None:
     """
     Send an HTTP request with a non-standard method.
     A direct origin returns 400 Bad Request or 501 Not Implemented (per RFC).
@@ -217,7 +216,7 @@ async def _test_invalid_request_line() -> Optional[TestResult]:
     try:
         loop = asyncio.get_running_loop()
 
-        def _send_raw() -> tuple[str, Optional[str]]:
+        def _send_raw() -> tuple[str, str | None]:
             try:
                 # Use plain HTTP to avoid TLS complexity
                 with socket.create_connection((target_host, 80), timeout=_TIMEOUT) as s:
@@ -257,7 +256,7 @@ async def _test_invalid_request_line() -> Optional[TestResult]:
         # Parse the actual HTTP status code instead of substring-matching
         # "400" anywhere in the head — the previous heuristic also matched
         # bytes inside Date/timestamp headers and produced false positives.
-        status_code: Optional[int] = None
+        status_code: int | None = None
         parts = status_line.split(maxsplit=2)
         if len(parts) >= 2 and parts[0].startswith("HTTP/"):
             try:
@@ -301,7 +300,7 @@ async def _test_invalid_request_line() -> Optional[TestResult]:
 # Test 3: TCP Fragmentation of TLS ClientHello
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def _test_tcp_fragmentation() -> Optional[TestResult]:
+async def _test_tcp_fragmentation() -> TestResult | None:
     """
     TCP-fragmentation circumvention test.
 

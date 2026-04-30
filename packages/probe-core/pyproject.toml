@@ -16,14 +16,7 @@ dependencies = [
     "pyyaml>=6.0",
     "click>=8.1",
     "rich>=13.7",
-    "tenacity>=8.3",
-    "psutil>=5.9",
-    "aiofiles>=23.2",
-    "anyio>=4.4",
 ]
-
-[project.optional-dependencies]
-control = []
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/censprobe_core"]

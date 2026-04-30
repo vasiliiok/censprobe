@@ -11,7 +11,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 
@@ -27,7 +27,7 @@ from censprobe_core.scoring import BLOCKING_VERDICTS
 
 logger = logging.getLogger(__name__)
 
-_WORKSPACE = Path("/workspace")
+WORKSPACE = Path("/workspace")
 
 
 class ProbeRunner:
@@ -42,7 +42,7 @@ class ProbeRunner:
 
     def __init__(
         self,
-        workspace: Path = _WORKSPACE,
+        workspace: Path = WORKSPACE,
         test_id: str = "unknown",
         mode: str = "solo",  # solo | control
     ) -> None:
@@ -244,8 +244,8 @@ class ProbeRunner:
     def save_report(
         self,
         results: list[TestResult],
-        server_meta: Optional[ServerMeta] = None,
-        output_path: Optional[Path] = None,
+        server_meta: ServerMeta | None = None,
+        output_path: Path | None = None,
     ) -> Path:
         """
         Serialize results as pretty JSON and save.
@@ -291,7 +291,7 @@ class ProbeRunner:
         return output_path
 
 
-def _summarize(results: list[TestResult], module_failures: Optional[list[str]] = None) -> dict:
+def _summarize(results: list[TestResult], module_failures: list[str] | None = None) -> dict:
     """Quick summary statistics for the report.
 
     ``module_failures`` lists modules that raised before producing any

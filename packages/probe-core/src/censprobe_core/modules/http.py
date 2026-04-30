@@ -18,7 +18,6 @@ import hashlib
 import logging
 import socket
 import ssl
-from typing import Optional
 from urllib.parse import urlparse
 
 import httpx
@@ -69,8 +68,8 @@ def _verdict_from_response(
     *,
     status: int,
     tls_ok: bool,
-    expected_status: Optional[int],
-) -> tuple[Verdict, Optional[BlockingMethod]]:
+    expected_status: int | None,
+) -> tuple[Verdict, BlockingMethod | None]:
     """Decide the HTTP verdict from response signals alone.
 
     Order matters:
@@ -98,7 +97,7 @@ async def _test_url(
     """Fetch a URL and analyze the response. Retries on transient failures."""
     domain = target.get("domain", url)
     test_name = f"http_{_slug(domain)}"
-    last_error: Optional[TestResult] = None
+    last_error: TestResult | None = None
 
     for attempt in range(1, repeats + 1):
         try:
@@ -221,7 +220,7 @@ async def _extract_cert_sha256(response_url: str, url: str) -> list[str]:
     host = parsed.hostname
     port = parsed.port or 443
 
-    def _fetch_cert() -> Optional[bytes]:
+    def _fetch_cert() -> bytes | None:
         ctx = ssl.create_default_context()
         # We want the server's cert even if its chain is not trusted locally
         # (e.g. internal CA, expired cert) — verification is NOT our goal

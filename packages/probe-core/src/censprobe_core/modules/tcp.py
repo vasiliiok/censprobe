@@ -25,7 +25,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Optional
 
 from censprobe_core.models import TestResult, Verdict, BlockingMethod
 
@@ -72,7 +71,7 @@ async def _test_tcp(ip: str, port: int, repeats: int) -> TestResult:
 
     # Aggregate: majority wins
     final_verdict = _majority(verdicts)
-    method: Optional[BlockingMethod] = None
+    method: BlockingMethod | None = None
 
     if final_verdict == Verdict.RST_INJECTED:
         method = BlockingMethod.TCP_RST_INJECTION

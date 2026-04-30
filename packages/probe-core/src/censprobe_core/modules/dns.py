@@ -24,7 +24,6 @@ import logging
 import os
 import socket
 import ssl
-from typing import Optional
 
 import dns.asyncresolver
 import dns.exception
@@ -40,14 +39,14 @@ logger = logging.getLogger(__name__)
 # whole probe run — fresh httpx.AsyncClient per call meant a new TLS
 # handshake to 1.1.1.1/dns.google for every domain, which inflated DNS
 # RTT readings (we measure them inside the same path).
-_DOH_CLIENT: Optional[httpx.AsyncClient] = None
-_ASN_CLIENT: Optional[httpx.AsyncClient] = None
+_DOH_CLIENT: httpx.AsyncClient | None = None
+_ASN_CLIENT: httpx.AsyncClient | None = None
 
 # All geo/ASN lookups go over HTTPS — see server_meta.py opsec note: an
 # on-path observer must not be able to cheaply link this server's IP to
 # censorship-measurement activity. Plain-HTTP probes to ip-api.com would
 # leak the queried IP plus our return path in cleartext.
-_IPAPI_IS_KEY = os.environ.get("IPAPI_IS_KEY", "")
+_IPAPI_IS_KEY = os.getenv("IPAPI_IS_KEY", "")
 _IPAPI_IS_URL = "https://api.ipapi.is/"
 
 
@@ -271,7 +270,7 @@ async def _test_domain(
     ip_overlap = bool(sys_set & doh_set) if sys_set and doh_set else False
 
     verdict: Verdict
-    method: Optional[BlockingMethod] = None
+    method: BlockingMethod | None = None
     confidence: float
 
     if cert_valid is False:
@@ -344,7 +343,7 @@ async def _test_domain(
 
 async def _resolve_system_with_ttl(
     domain: str,
-) -> tuple[list[str], Optional[int], str]:
+) -> tuple[list[str], int | None, str]:
     """Resolve via system resolver, returning (ips, ttl, status).
 
     status is one of:
@@ -518,14 +517,14 @@ async def _resolve_dot(domain: str, host: str, port: int = 853) -> list[str]:
         return []
 
 
-async def _validate_cert(domain: str, ip: str) -> Optional[bool]:
+async def _validate_cert(domain: str, ip: str) -> bool | None:
     """
     Connect to IP:443 with SNI=domain and check if cert is valid for domain.
     Returns True/False/None (None = connection failed, inconclusive).
     """
     ctx = ssl.create_default_context()
 
-    def _check() -> Optional[bool]:
+    def _check() -> bool | None:
         try:
             with socket.create_connection((ip, 443), timeout=5) as raw:
                 with ctx.wrap_socket(raw, server_hostname=domain) as s:
@@ -549,11 +548,11 @@ async def _validate_cert(domain: str, ip: str) -> Optional[bool]:
         return None
 
 
-_ASN_CACHE: dict[str, Optional[str]] = {}
+_ASN_CACHE: dict[str, str | None] = {}
 _ASN_BACKOFF_UNTIL: float = 0.0
 
 
-async def _ip_to_asn(ip: str) -> Optional[str]:
+async def _ip_to_asn(ip: str) -> str | None:
     """Look up ASN for an IP via ipapi.is over HTTPS, with process-local caching.
 
     Why HTTPS / ipapi.is: server_meta.py already uses the same provider
@@ -603,7 +602,7 @@ async def _ip_to_asn(ip: str) -> Optional[str]:
     return None
 
 
-def _get_isp_resolver() -> Optional[str]:
+def _get_isp_resolver() -> str | None:
     """Get first nameserver from /etc/resolv.conf."""
     try:
         from pathlib import Path

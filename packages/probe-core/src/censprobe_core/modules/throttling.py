@@ -22,7 +22,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Optional
 
 from censprobe_core.models import TestResult, Verdict, BlockingMethod
 from censprobe_core.baseline import BaselineComparator
@@ -255,7 +254,7 @@ def _detect_burst_drop(profile: list[float]) -> bool:
 # Method B — SNI throttling probe via curl --connect-to
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def _run_method_b_sni_probe() -> Optional[TestResult]:
+async def _run_method_b_sni_probe() -> TestResult | None:
     """
     Method B: Three curl runs to selectel.ru IP with different SNIs.
 

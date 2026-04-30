@@ -31,7 +31,7 @@ from sqlalchemy.orm import DeclarativeBase, relationship
 
 import urllib.parse as _urlparse
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
+DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError(
         "DATABASE_URL environment variable is required. "
