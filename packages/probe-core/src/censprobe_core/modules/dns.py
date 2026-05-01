@@ -46,7 +46,9 @@ _ASN_CLIENT: httpx.AsyncClient | None = None
 # on-path observer must not be able to cheaply link this server's IP to
 # censorship-measurement activity. Plain-HTTP probes to ip-api.com would
 # leak the queried IP plus our return path in cleartext.
-_IPAPI_IS_KEY = os.getenv("IPAPI_IS_KEY", "")
+# Same source-of-truth contract as server_meta.py: empty string means
+# "free tier", missing env var is a deployment bug.
+_IPAPI_IS_KEY = os.environ["IPAPI_IS_KEY"]
 _IPAPI_IS_URL = "https://api.ipapi.is/"
 
 

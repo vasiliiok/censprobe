@@ -72,7 +72,7 @@ _DISCLAIMER = """
 @click.option("--test-id", envvar="TEST_ID", required=True, help="Test identifier (must match listener)")
 @click.option("--session-id", envvar="SESSION_ID", required=True, help="Your session label, e.g. client-home-rt-spb")
 @click.option("--server-host", envvar="SERVER_HOST", required=True, help="IP address of the server running listener")
-@click.option("--creds-port", envvar="CREDS_PORT", default=8443, show_default=True, type=int, help="Listener credentials HTTPS port")
+@click.option("--creds-port", envvar="CREDS_PORT", required=True, type=int, help="Listener credentials HTTPS port (set via CREDS_PORT in .env)")
 @click.option("--creds-token", envvar="CREDS_TOKEN", required=True, help="One-shot bearer token (printed by listener)")
 @click.option("--creds-cert-sha256", envvar="CREDS_CERT_SHA256", required=True, help="SHA-256 fingerprint of listener's self-signed cert (cert pinning)")
 @click.option("--no-jitter", is_flag=True, default=False, help="Disable opsec jitter between probes (faster, less stealthy)")

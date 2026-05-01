@@ -50,7 +50,7 @@ WORKSPACE = Path("/workspace")
 
 @click.command()
 @click.option("--test-id", envvar="TEST_ID", required=True, help="Test identifier (e.g. selectel-spb-001)")
-@click.option("--repeats", envvar="RUNS_COUNT", default=3, show_default=True, help="Number of test repeats per measurement")
+@click.option("--repeats", envvar="RUNS_COUNT", required=True, type=int, help="Number of test repeats per measurement (set via RUNS_COUNT in .env)")
 @click.option("--verbose", "-v", is_flag=True, default=False)
 def main(test_id: str, repeats: int, verbose: bool) -> None:
     """

@@ -197,23 +197,32 @@ git push origin main
 
 ## Переменные окружения
 
-Все переменные хранятся в `.env` (закоммичен в репо как набор дефолтов). Локальные правки в файле не пушатся автоматически — это ваше рабочее дерево.
+`.env` — **единственный источник истины** для всех runtime-параметров. Файл закоммичен в репо со значениями по умолчанию; редактируете локально, чтобы переопределить. Никаких fallback'ов в коде или compose: если ключ удалили из `.env`, контейнер упадёт явной ошибкой, а не запустится с тихим дефолтом.
 
-| Переменная | Профили | Описание |
+Параметры делятся на две группы:
+
+**Постоянные (с дефолтами в `.env`)** — оставляйте как есть или меняйте под свой деплой:
+
+| Переменная | Профили | Дефолт | Описание |
+|------------|---------|--------|----------|
+| `DOCKERHUB_USERNAME` | все | `outtakes` | Docker Hub username, из которого берутся образы (поменяйте на свой при fork'е) |
+| `DOCKERHUB_TAG` | все | `main` | Тег образа |
+| `DB_PASSWORD` | dashboard | `<random>` | Пароль PostgreSQL (loopback-only сервис) |
+| `GRAFANA_PASSWORD` | dashboard | `admin` | Пароль admin Grafana (`127.0.0.1:3000`) |
+| `RUNS_COUNT` | solo | `3` | Количество повторных замеров |
+| `CREDS_PORT` | listener, client | `8443` | Порт credentials-эндпоинта на listener'е |
+| `CENSPROBE_IMPORT_INTERVAL_SEC` | dashboard | `60` | Интервал импорта отчётов в Postgres (с) |
+| `IPAPI_IS_KEY` | solo, listener | `<key>` | API-ключ ipapi.is для ASN/geo (пустая строка — бесплатный tier) |
+
+**Per-run (пустые в `.env`)** — задаются на командной строке при `docker compose up`:
+
+| Переменная | Профили | Источник |
 |------------|---------|----------|
-| `DOCKERHUB_USERNAME` | все | Docker Hub username, из которого берутся образы (по умолчанию — публичный аккаунт maintainer'а) |
-| `DOCKERHUB_TAG` | все | Тег образа (по умолчанию: `main`) |
-| `DB_PASSWORD` | dashboard | Пароль PostgreSQL (loopback-only сервис) |
-| `GRAFANA_PASSWORD` | dashboard | Пароль admin Grafana (`127.0.0.1:3000`) |
-| `TEST_ID` | solo, listener, client | Идентификатор сервера (например, `selectel-spb-001`) |
-| `SESSION_ID` | listener, client | Идентификатор клиентской сети (например, `client-home-rt-spb`) |
-| `SERVER_HOST` | client | IPv4-адрес сервера с Listener |
-| `CREDS_PORT` | client | Порт listener'овского credentials-эндпоинта (по умолчанию: `8443`) |
-| `CREDS_TOKEN` | client | One-time bearer token, печатается listener'ом при старте |
-| `CREDS_CERT_SHA256` | client | SHA-256 fingerprint self-signed cert listener'а (cert pinning) |
-| `RUNS_COUNT` | solo | Количество повторных замеров (по умолчанию: 3) |
-| `IPAPI_IS_KEY` | solo, listener | API-ключ ipapi.is для ASN/geo (без ключа — бесплатный tier) |
-| `CENSPROBE_IMPORT_INTERVAL_SEC` | dashboard | Интервал импорта отчётов в Postgres (по умолчанию: 60 с) |
+| `TEST_ID` | solo, listener, client | Вы задаёте, например `selectel-spb-001` |
+| `SESSION_ID` | listener, client | Вы задаёте, например `client-home-rt-spb` |
+| `SERVER_HOST` | client | IPv4 listener'а — печатается в команде запуска client'а |
+| `CREDS_TOKEN` | client | Генерируется listener'ом при старте |
+| `CREDS_CERT_SHA256` | client | SHA-256 self-signed cert listener'а (cert pinning) |
 
 Контейнеры не имеют git/SSH зависимостей — `git push` запускаете вы сами с хоста, когда готовы публиковать отчёты.
 

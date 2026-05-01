@@ -29,7 +29,11 @@ logger = logging.getLogger(__name__)
 # Timeout for external requests
 _TIMEOUT = httpx.Timeout(10.0)
 
-_IPAPI_IS_KEY = os.getenv("IPAPI_IS_KEY", "")
+# Single source of truth: .env (always present, may be empty for free tier)
+# → docker-compose env injection. An empty string here is a valid runtime
+# state ("no key, use ipapi.is free tier"); a missing env var is a
+# contract violation and we fail loudly rather than silently degrade.
+_IPAPI_IS_KEY = os.environ["IPAPI_IS_KEY"]
 _IPAPI_IS_URL = "https://api.ipapi.is/"
 
 

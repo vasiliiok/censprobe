@@ -15,7 +15,7 @@ services:
   # ─────────────────────────────────────────────────────────────────
   solo:
     profiles: [solo]
-    image: ${DOCKERHUB_USERNAME}/censprobe-solo:${DOCKERHUB_TAG:-main}
+    image: ${DOCKERHUB_USERNAME}/censprobe-solo:${DOCKERHUB_TAG}
     pull_policy: missing
     build:
       context: .
@@ -23,9 +23,9 @@ services:
     network_mode: host
     cap_add: [NET_RAW, NET_ADMIN]
     environment:
-      TEST_ID: ${TEST_ID:-}
-      RUNS_COUNT: ${RUNS_COUNT:-3}
-      IPAPI_IS_KEY: ${IPAPI_IS_KEY:-}
+      TEST_ID: ${TEST_ID}
+      RUNS_COUNT: ${RUNS_COUNT}
+      IPAPI_IS_KEY: ${IPAPI_IS_KEY}
     volumes:
       - ./:/workspace
       # systemd-resolved upstreams — when /etc/resolv.conf points at the
@@ -45,7 +45,7 @@ services:
   # ─────────────────────────────────────────────────────────────────
   listener:
     profiles: [listener]
-    image: ${DOCKERHUB_USERNAME}/censprobe-listener:${DOCKERHUB_TAG:-main}
+    image: ${DOCKERHUB_USERNAME}/censprobe-listener:${DOCKERHUB_TAG}
     pull_policy: missing
     build:
       context: .
@@ -60,9 +60,10 @@ services:
     devices:
       - "/dev/net/tun:/dev/net/tun"
     environment:
-      TEST_ID: ${TEST_ID:-}
-      SESSION_ID: ${SESSION_ID:-}
-      IPAPI_IS_KEY: ${IPAPI_IS_KEY:-}
+      TEST_ID: ${TEST_ID}
+      SESSION_ID: ${SESSION_ID}
+      CREDS_PORT: ${CREDS_PORT}
+      IPAPI_IS_KEY: ${IPAPI_IS_KEY}
     volumes:
       - ./:/workspace
     working_dir: /workspace
@@ -79,7 +80,7 @@ services:
   # ─────────────────────────────────────────────────────────────────
   client:
     profiles: [client]
-    image: ${DOCKERHUB_USERNAME}/censprobe-client:${DOCKERHUB_TAG:-main}
+    image: ${DOCKERHUB_USERNAME}/censprobe-client:${DOCKERHUB_TAG}
     pull_policy: missing
     build:
       context: .
@@ -91,12 +92,12 @@ services:
     devices:
       - "/dev/net/tun:/dev/net/tun"
     environment:
-      TEST_ID: ${TEST_ID:-}
-      SESSION_ID: ${SESSION_ID:-}
-      SERVER_HOST: ${SERVER_HOST:-}
-      CREDS_PORT: ${CREDS_PORT:-8443}
-      CREDS_TOKEN: ${CREDS_TOKEN:-}
-      CREDS_CERT_SHA256: ${CREDS_CERT_SHA256:-}
+      TEST_ID: ${TEST_ID}
+      SESSION_ID: ${SESSION_ID}
+      SERVER_HOST: ${SERVER_HOST}
+      CREDS_PORT: ${CREDS_PORT}
+      CREDS_TOKEN: ${CREDS_TOKEN}
+      CREDS_CERT_SHA256: ${CREDS_CERT_SHA256}
     restart: "no"
 
   # ─────────────────────────────────────────────────────────────────
@@ -129,14 +130,14 @@ services:
 
   sync-api:
     profiles: [dashboard]
-    image: ${DOCKERHUB_USERNAME}/censprobe-sync-api:${DOCKERHUB_TAG:-main}
+    image: ${DOCKERHUB_USERNAME}/censprobe-sync-api:${DOCKERHUB_TAG}
     pull_policy: missing
     build:
       context: .
       dockerfile: packages/dashboard/sync-api/Dockerfile
     environment:
       DATABASE_URL: postgresql+asyncpg://censprobe:${DB_PASSWORD}@postgres/censprobe
-      CENSPROBE_IMPORT_INTERVAL_SEC: ${CENSPROBE_IMPORT_INTERVAL_SEC:-60}
+      CENSPROBE_IMPORT_INTERVAL_SEC: ${CENSPROBE_IMPORT_INTERVAL_SEC}
     volumes:
       - ./:/workspace
     # Bind to loopback only — the API has no authentication, and the only
@@ -169,7 +170,7 @@ services:
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
       GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s:%(http_port)s/"
-      DB_PASSWORD: ${DB_PASSWORD:-censprobe}
+      DB_PASSWORD: ${DB_PASSWORD}
       # ── strip Grafana to dashboards only ──────────────────────────────
       # We use Grafana solely as a viewer over the censprobe Postgres
       # datasource. Everything below disables features we don't use,

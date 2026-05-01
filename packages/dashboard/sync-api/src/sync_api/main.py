@@ -61,7 +61,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 SERVICE_VERSION = "0.4.0"
 
 WORKSPACE = Path("/workspace")
-IMPORT_INTERVAL_SEC = float(os.getenv("CENSPROBE_IMPORT_INTERVAL_SEC", "60"))
+# Single source of truth: .env (committed) + docker-compose env injection.
+# No code-side fallback — a missing key surfaces as an explicit KeyError
+# at startup rather than a silent "60s by accident" deployment.
+IMPORT_INTERVAL_SEC = float(os.environ["CENSPROBE_IMPORT_INTERVAL_SEC"])
 
 
 @asynccontextmanager

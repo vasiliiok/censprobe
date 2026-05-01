@@ -70,19 +70,16 @@ WORKSPACE = Path("/workspace")
 # margin for the synchronous JSON write that follows responder shutdown.
 _STOP_TIMEOUT_SEC = 20.0
 
-# Default port for the credentials HTTPS endpoint. Plays nicely with the
-# rest of the protocol set: 8443 is the highest-numbered MASQUE-fallback
-# port that real Cloudflare WARP infrastructure binds, so it is unlikely
-# to be ISP-blocked outbound; both VLESS+Reality and Hysteria 2 use 443
-# directly so we can't reuse it.
-_CREDS_PORT = 8443
-
-
 @click.command()
 @click.option("--test-id", envvar="TEST_ID", required=True, help="Test identifier")
 @click.option("--session-id", envvar="SESSION_ID", required=True, help="Client network session identifier, e.g. client-home-rt-spb")
+# CREDS_PORT lives in .env (default 8443 there). 8443 is the highest
+# MASQUE-fallback port real Cloudflare WARP binds, so it's unlikely to be
+# blocked outbound by an ISP; VLESS+Reality and Hysteria 2 already
+# squat 443 so we can't reuse it.
+@click.option("--creds-port", envvar="CREDS_PORT", required=True, type=int, help="Port for the credentials HTTPS endpoint")
 @click.option("--verbose", "-v", is_flag=True, default=False)
-def main(test_id: str, session_id: str, verbose: bool) -> None:
+def main(test_id: str, session_id: str, creds_port: int, verbose: bool) -> None:
     """
     Censprobe Listener — expose VPN handshake endpoints, record what clients can reach.
 
@@ -101,10 +98,10 @@ def main(test_id: str, session_id: str, verbose: bool) -> None:
         title="Starting listener",
     ))
 
-    asyncio.run(_async_main(test_id, session_id))
+    asyncio.run(_async_main(test_id, session_id, creds_port))
 
 
-async def _async_main(test_id: str, session_id: str) -> None:
+async def _async_main(test_id: str, session_id: str, creds_port: int) -> None:
     # ── Step 1: Generate fresh credentials in memory ──────────────────────────
     # Each session gets its own one-time credential set; nothing is written
     # to disk. The cred_server below hands them to the client over a
@@ -115,13 +112,13 @@ async def _async_main(test_id: str, session_id: str) -> None:
     # ── Step 2: Start the credentials HTTPS endpoint ──────────────────────────
     cred_server = CredServer(
         creds_yaml=creds_to_yaml(creds),
-        port=_CREDS_PORT,
+        port=creds_port,
     )
     try:
         cred_server.start()
     except OSError as e:
         console.print(
-            f"[red]Could not bind credentials port {_CREDS_PORT}: {e}[/red]\n"
+            f"[red]Could not bind credentials port {creds_port}: {e}[/red]\n"
             f"[yellow]Another process is already listening on that port. "
             "Stop it (or set CREDS_PORT to a free one) and re-run.[/yellow]"
         )
