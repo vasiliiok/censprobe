@@ -5,8 +5,6 @@ __pycache__/
 venv/
 dist/
 build/
-#.env
-#*.env
 *.log
 .DS_Store
 .idea/
@@ -16,17 +14,15 @@ build/
 # Docker volumes (local dev)
 pgdata/
 
-# SSH keys — never commit
+# Stray secrets — defensive guardrail; censprobe itself never writes these
 *.pem
 *.key
 id_rsa
 id_ed25519
 
-# Listener server-only secret sidecar (WG/AWG server private keys,
-# Reality server private key). Sits next to the committed protocols.yaml
-# in reports/<test_id>/ but must NEVER enter git history.
-*.secret.yaml
-
-# Reports are tracked (they're the product)
-# baseline is tracked
-# targets/ is tracked
+# .env is intentionally tracked — it ships safe defaults that work out of
+# the box (localhost-only services). Local edits live in your working
+# tree; only push them if you really mean to publish them.
+# reports/ and targets/ are tracked (they're the product).
+# Credentials never touch disk (cred_server hands them over a one-shot
+# TLS endpoint), so no per-protocol-yaml ignore rule is needed.

@@ -1,20 +1,19 @@
 """
 credentials.py — Generate per-test-session VPN credentials.
 
-Generates one-time credentials for all 6 VPN protocols and writes
-them to reports/<test_id>/protocols.yaml so the client container
-can read them via git pull.
+Generates one-time credentials for all 6 VPN protocols. Persistence is
+deliberately not provided: every listener start handed off to a single
+``SESSION_ID`` produces a fresh set, the credentials live only in
+memory, and ``cred_server.CredServer`` exposes them to the client over a
+dedicated TLS endpoint. Old per-test-id files in ``reports/<id>/`` are
+no longer written or read, eliminating the protocols.yaml git-history
+exposure that earlier versions relied on.
 
 Credentials are single-use test keys — not production VPN credentials.
-Both server and client sides read the same file, so server-only secrets
-(WG server private keys, Reality private key, OpenVPN PEM PSK) are
-persisted too; otherwise a listener restart on the next SESSION_ID
-would load empty strings and the VPN binaries would refuse to start.
 """
 from __future__ import annotations
 
 import base64
-import contextlib
 import logging
 import os
 import secrets
@@ -140,30 +139,18 @@ def generate_credentials() -> ProtocolCredentials:
     return creds
 
 
-# Sidecar filename for server-only secrets (WG/AWG server private keys
-# and the Reality server private key). Lives next to protocols.yaml so
-# they're easy to relate, but the `.secret.yaml` suffix is gitignored
-# (see top-level .gitignore) so these files never enter git history.
-SERVER_SECRETS_SUFFIX = "protocols-server.secret.yaml"
+def creds_to_yaml(creds: ProtocolCredentials) -> str:
+    """Serialise the full credential set (server + client material) for the
+    one-shot HTTPS endpoint.
 
-
-def server_secrets_path(protocols_yaml_path: Path) -> Path:
-    """Return the sidecar path for server-only secrets next to protocols.yaml."""
-    return protocols_yaml_path.parent / SERVER_SECRETS_SUFFIX
-
-
-def save_protocols_yaml(creds: ProtocolCredentials, path: Path) -> None:
-    """Write client-facing credentials to reports/<test_id>/protocols.yaml.
-
-    Server-only secrets (WG/AWG server private keys, Reality server
-    private key) are deliberately *omitted* from this file because it
-    gets committed to git so the client container can pull it. They
-    live in a sibling `protocols-server.secret.yaml` (gitignored, mode
-    0o600) which the listener loads at startup if it exists.
-
-    Symmetric secrets (OpenVPN PSK, Shadowsocks password, Hysteria 2
-    auth + obfs) and client-side private keys (WG/AWG client_private)
-    remain in the committed file because both sides need them.
+    Server-private keys (WG/AWG server_private, Reality private_key) are
+    intentionally INCLUDED. The earlier file-based flow split them into a
+    gitignored sidecar because protocols.yaml was committed to a public
+    repo; the cred-server delivers everything over a TLS pinned channel
+    to a single client per session, so there is no shared persistence
+    surface for them to leak through. The client itself never uses the
+    server-private fields — they are emitted here only because both
+    sides parse the same YAML schema.
     """
     data: dict[str, Any] = {
         "_note": "One-time test credentials. Do not use for production VPN.",
@@ -213,149 +200,7 @@ def save_protocols_yaml(creds: ProtocolCredentials, path: Path) -> None:
             "obfs_password": creds.hy2_obfs_password,
         },
     }
-    path.parent.mkdir(parents=True, exist_ok=True)
-    content = yaml.dump(data, allow_unicode=True, sort_keys=False)
-    # Atomic write: if the process is killed mid-write the original file
-    # (if any) stays intact; only a successful rename makes the new version live.
-    tmp_path = path.with_suffix(".yaml.tmp")
-    tmp_path.write_text(content, encoding="utf-8")
-    tmp_path.replace(path)
-    logger.info("Protocols written to %s", path)
-
-
-def save_server_secrets(creds: ProtocolCredentials, path: Path) -> None:
-    """Persist server-only private keys to a local 0o600 sidecar file.
-
-    Written into the same dir as `protocols.yaml` but with a name that
-    matches the gitignore pattern `*.secret.yaml`. Mode 0o600 so even
-    on a multi-tenant host the file is readable only by its owner.
-    """
-    data: dict[str, Any] = {
-        "_note": (
-            "Server-only secrets for censprobe-listener. "
-            "Never commit. Regenerated together with protocols.yaml."
-        ),
-        "wireguard": {
-            "server_private_key": creds.wg_server_private,
-        },
-        "amneziawg": {
-            "server_private_key": creds.awg_server_private,
-        },
-        "vless_reality": {
-            "private_key": creds.vless_pvk,
-        },
-    }
-    path.parent.mkdir(parents=True, exist_ok=True)
-    blob = yaml.dump(data, allow_unicode=True, sort_keys=False)
-    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(blob)
-    except BaseException:
-        # os.fdopen() failed before taking ownership of fd — close it manually.
-        with contextlib.suppress(OSError):
-            os.close(fd)
-        raise
-    logger.info("Server secrets written to %s (mode 0600, gitignored)", path)
-
-
-def load_server_secrets(path: Path, creds: ProtocolCredentials) -> bool:
-    """Populate server-only private keys from the sidecar file.
-
-    Returns True iff the file existed and at least one server private
-    key was loaded. The caller (listener main) treats a missing file
-    on a previously-initialised TEST_ID as a fatal regeneration trigger.
-    """
-    if not path.exists():
-        return False
-    raw = yaml.safe_load(path.read_text()) or {}
-    if not isinstance(raw, dict):
-        return False
-    found_any = False
-    wg = raw.get("wireguard") or {}
-    if wg.get("server_private_key"):
-        creds.wg_server_private = wg["server_private_key"]
-        found_any = True
-    awg = raw.get("amneziawg") or {}
-    if awg.get("server_private_key"):
-        creds.awg_server_private = awg["server_private_key"]
-        found_any = True
-    vless = raw.get("vless_reality") or {}
-    if vless.get("private_key"):
-        creds.vless_pvk = vless["private_key"]
-        found_any = True
-    return found_any
-
-
-def load_protocols_yaml(path: Path) -> ProtocolCredentials:
-    """Load client-facing credentials from an existing protocols.yaml.
-
-    Note: server-only private keys (wg_server_private, awg_server_private,
-    vless_pvk) are NOT supposed to be in this file — load them separately
-    via `load_server_secrets()` which reads the gitignored sidecar.
-
-    For backwards compatibility, if a legacy protocols.yaml still embeds
-    those server-private fields (older listener versions did), they are
-    surfaced into the returned object so the caller (listener main) can
-    migrate them into the secrets sidecar and rewrite the public file
-    without them. Without this migration path, upgrading the listener on
-    an existing TEST_ID would discard the old server keys entirely.
-    """
-    parsed = yaml.safe_load(path.read_text())
-    raw: dict[str, Any] = parsed if isinstance(parsed, dict) else {}
-    c = ProtocolCredentials()
-
-    ovpn = raw.get("openvpn", {})
-    c.openvpn_psk_pem = ovpn.get("psk_pem", "")
-    c.openvpn_port = ovpn.get("port", 1194)
-
-    wg = raw.get("wireguard", {})
-    c.wg_server_public = wg.get("server_public_key", "")
-    # Legacy field — kept ONLY for the rewrite-on-load migration.
-    c.wg_server_private = wg.get("server_private_key", "")
-    c.wg_client_private = wg.get("client_private_key", "")
-    c.wg_client_public = wg.get("client_public_key", "")
-    c.wg_preshared_key = wg.get("preshared_key", "")
-    c.wg_port = wg.get("port", 51820)
-
-    awg = raw.get("amneziawg", {})
-    c.awg_server_public = awg.get("server_public_key", "")
-    # Legacy field — kept ONLY for the rewrite-on-load migration.
-    c.awg_server_private = awg.get("server_private_key", "")
-    c.awg_port = awg.get("port", 51821)
-    c.awg_client_private = awg.get("client_private_key", "")
-    c.awg_client_public = awg.get("client_public_key", "")
-    c.awg_preshared_key = awg.get("preshared_key", "")
-    c.awg_jc = awg.get("jc", 4)
-    c.awg_jmin = awg.get("jmin", 40)
-    c.awg_jmax = awg.get("jmax", 70)
-    c.awg_s1 = awg.get("s1", 0)
-    c.awg_s2 = awg.get("s2", 0)
-    c.awg_h1 = awg.get("h1", 0)
-    c.awg_h2 = awg.get("h2", 0)
-    c.awg_h3 = awg.get("h3", 0)
-    c.awg_h4 = awg.get("h4", 0)
-
-    ss = raw.get("shadowsocks", {})
-    c.ss_port = ss.get("port", 8388)
-    c.ss_method = ss.get("method", "2022-blake3-aes-256-gcm")
-    c.ss_password_b64 = ss.get("password_b64", "")
-
-    vless = raw.get("vless_reality", {})
-    c.vless_port = vless.get("port", 443)
-    c.vless_uuid = vless.get("uuid", "")
-    # Legacy field — kept ONLY for the rewrite-on-load migration.
-    c.vless_pvk = vless.get("private_key", "")
-    c.vless_pbk = vless.get("public_key", "")
-    c.vless_short_id = vless.get("short_id", "")
-    c.vless_server_name = vless.get("server_name", "apimaps.yandex.ru")
-
-    hy2 = raw.get("hysteria2", {})
-    c.hy2_port = hy2.get("port", 443)
-    c.hy2_auth = hy2.get("auth", "")
-    c.hy2_obfs_password = hy2.get("obfs_password", "")
-
-    return c
+    return yaml.dump(data, allow_unicode=True, sort_keys=False)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -14,14 +14,16 @@ targets:
       - https://novayagazeta.eu/
     expected_status: 200
     category: news
-    notes: "Novaya Gazeta Europe, blocked in RU"
+    ech_advertised: true
+    notes: "Novaya Gazeta Europe, blocked in RU; advertises ECH via HTTPS-RR"
 
   - domain: mediazona.ca
     urls:
       - https://mediazona.ca/
     expected_status: 200
     category: news
-    notes: "Mediazona Canada mirror"
+    ech_advertised: true
+    notes: "Mediazona Canada mirror; advertises ECH via HTTPS-RR"
 
   - domain: tvrain.ru
     urls:

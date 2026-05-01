@@ -1,13 +1,13 @@
 """
-credentials_reader.py — Read protocols.yaml into a simple namespace.
+credentials_reader.py — Parse protocols YAML into a simple namespace.
 
-Used by client container to load listener-generated credentials
-without depending on censprobe_listener package.
+Used by the client container to load listener-generated credentials
+fetched over the one-shot HTTPS endpoint, without depending on the
+censprobe_listener package.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 import yaml
@@ -15,7 +15,7 @@ import yaml
 
 @dataclass
 class ProtocolCredentials:
-    """Loaded credentials from protocols.yaml."""
+    """Parsed credentials YAML received from the listener cred-server."""
     openvpn_psk_pem: str = ""
     openvpn_port: int = 1194
 
@@ -55,12 +55,14 @@ class ProtocolCredentials:
     hy2_obfs_password: str = ""
 
 
-def load_protocols_yaml(path: Path) -> ProtocolCredentials:
-    """Load credentials from a protocols.yaml file."""
-    parsed = yaml.safe_load(path.read_text())
-    # An empty file → None, a YAML scalar → str/int/list. Either way calling
-    # .get() on it would explode at the first access — coerce to {} so the
-    # caller transparently gets all-default credentials instead of a crash.
+def parse_protocols_yaml(text: str) -> ProtocolCredentials:
+    """Parse the credentials YAML body served by the listener cred-server.
+
+    An empty body → None, a YAML scalar → str/int/list. Either way calling
+    .get() on it would explode at the first access — coerce to {} so the
+    caller transparently gets all-default credentials instead of a crash.
+    """
+    parsed = yaml.safe_load(text)
     raw: dict[str, Any] = parsed if isinstance(parsed, dict) else {}
     c = ProtocolCredentials()
 

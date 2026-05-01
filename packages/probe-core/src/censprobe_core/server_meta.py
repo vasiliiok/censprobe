@@ -51,9 +51,6 @@ async def detect_server_meta() -> ServerMeta:
                 meta.asn = asn_info.get("asn")
                 meta.as_name = asn_info.get("as_name")
                 meta.location = asn_info.get("city")
-                # `country` is recorded too — control orchestrator now
-                # threads it into BaselineControlPoint instead of falling
-                # back to a hardcoded "DE".
                 meta.country = asn_info.get("country")
                 meta.provider = _guess_provider(asn_info.get("as_name", ""))
         else:
@@ -123,11 +120,7 @@ async def _detect_asn(client: httpx.AsyncClient, ip: str) -> dict | None:
 
         asn_num = asn_block.get("asn")
         asn_str = f"AS{asn_num}" if asn_num else None
-        as_name = (
-            asn_block.get("org")
-            or company_block.get("name")
-            or data.get("company", {}).get("name")
-        )
+        as_name = asn_block.get("org") or company_block.get("name")
 
         return {
             "asn": asn_str,

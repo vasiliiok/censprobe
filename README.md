@@ -2,45 +2,38 @@
 
 Censprobe — инструмент измерения цензуры и оценки устойчивости серверов к сетевым блокировкам в России. Автоматически проверяет достижимость публичных ресурсов с аплинка сервера, тестирует протоколы обхода цензуры через DPI и оценивает наличие троттлинга и SNI-блокировок.
 
-Все тесты работают автономно через Docker Compose, а результаты агрегируются в git-репозиторий для визуализации в Grafana.
+Все тесты работают автономно через Docker Compose, а результаты сохраняются в `reports/<TEST_ID>/` локально — публикация в git-репозиторий выполняется вручную, и Grafana собирает дашборды из импортированных отчётов.
 
 ## Архитектура развертывания
 
-Система состоит из 5 независимых компонентов (профилей Docker), запускаемых на разных машинах:
+Система состоит из 4 независимых компонентов (профилей Docker), запускаемых на разных машинах:
 
 | Профиль | Где запускается | Назначение |
 |-----------|-----------------|------------|
 | `solo` | RU-сервер | Тестирует видимость публичных ресурсов с аплинка сервера |
 | `listener` | RU-сервер | Запускает dummy-респондеры 6 протоколов для приёма handshake от клиента |
 | `client` | Клиентское устройство | Пытается подключиться к listener по 6 протоколам |
-| `control` | Чистый EU-сервер | Генерирует эталонный baseline |
 | `dashboard` | Любая машина | Локальная аналитика в Grafana |
+
+Все вердикты считаются inline:
+- **DNS** — CERTainty (PETS 2023): валидность TLS-сертификата + согласие с DoH/DoT.
+- **TLS** — системный trust store; SNI attribution через neutral-SNI control в том же запуске.
+- **HTTP** — `expected_status` из `targets/*.yaml` + отдельный `GEOBLOCK_NOT_CENSORSHIP` вердикт для 403/451 с валидным TLS.
+- **SNI throttling (Method B)** — относительная разница bandwidth между correct/trigger/typo SNI **внутри одного запуска** (устойчиво к разной ширине uplink).
+- **Telegram reconcile** — cdn1/cdn5 серверы globally broken (отдают cert на `*.t.me` вместо хоста). Если cert chain валиден И SAN/CN попадает в `owned_cert_patterns` (`*.telegram.org`/`*.t.me`/`*.cdn-telegram.org`) — это аутентичный Telegram-эндпоинт с misrouted cert, не цензура (ТСПУ не может подделать публично-подписанный cert). Reclassified BLOCKED → INCONCLUSIVE.
 
 ---
 
 ## Первоначальная настройка
 
-Выполните один раз на каждой машине перед первым запуском:
-
 ```bash
 git clone https://github.com/<YOUR_GITHUB_USERNAME>/censprobe.git
 cd censprobe
-
-cp .env.example .env
-# Отредактируйте .env: задайте DOCKERHUB_USERNAME, DB_PASSWORD, GRAFANA_PASSWORD
 ```
 
-Минимально необходимые переменные в `.env`:
-
-```bash
-DOCKERHUB_USERNAME=your-dockerhub-username  # username на Docker Hub (откуда берутся образы)
-DB_PASSWORD=<strong-password>               # пароль PostgreSQL (используется dashboard)
-GRAFANA_PASSWORD=<strong-password>          # пароль admin в Grafana
-```
+Готово. Файл `.env` уже лежит в репозитории с дефолтами, которые работают «из коробки»: passwords для localhost-only сервисов (Postgres/Grafana), `DOCKERHUB_USERNAME` указывает на публичные образы maintainer'а. Если хотите свои значения — отредактируйте `.env` локально, ничего больше делать не нужно.
 
 > Образы публикуются в публичный репозиторий Docker Hub — `docker login` для pull не требуется.
-
-Для генерации паролей: `openssl rand -base64 32`
 
 ---
 
@@ -56,45 +49,40 @@ GRAFANA_PASSWORD=<strong-password>          # пароль admin в Grafana
 TEST_ID=selectel-spb-001 docker compose --profile solo up
 ```
 
-> Дождитесь завершения. Отчёт загрузится в репозиторий автоматически.
+> Дождитесь завершения. Отчёт сохранится в `reports/<TEST_ID>/server-solo-<timestamp>.json`. Контейнер ничего не пушит — публикация ручная (см. ниже).
 
 ### Шаг 2. Ожидание подключений (Listener)
 
-Запускается на тестируемом RU-сервере **после** solo. Слушает порты протоколов (OpenVPN, WireGuard, AmneziaWG, Shadowsocks, VLESS+Reality, Hysteria 2).
+Запускается на тестируемом RU-сервере **после** solo. Слушает порты протоколов (OpenVPN, WireGuard, AmneziaWG, Shadowsocks, VLESS+Reality, Hysteria 2) и поднимает одноразовый HTTPS-эндпоинт `8443/tcp` для выдачи credentials клиенту.
 
 ```bash
 TEST_ID=selectel-spb-001 SESSION_ID=client-home-rt-spb \
   docker compose --profile listener up
 ```
 
-> Listener генерирует credentials и ожидает подключений от Client. После того как Client отработал, нажмите `Ctrl+C` — Listener сохранит и запушит результаты.
+> Listener генерирует одноразовые credentials в памяти, выдаёт self-signed cert + bearer token и **печатает готовую команду** для запуска client'а на клиентской машине. Скопируйте её — она содержит `TEST_ID`, `SESSION_ID`, `SERVER_HOST`, `CREDS_TOKEN` и `CREDS_CERT_SHA256`.
+>
+> Открытый порт **8443/tcp** должен быть доступен с клиентской сети. После того как Client отработал, нажмите `Ctrl+C` — Listener сохранит отчёт в `reports/<TEST_ID>/`. Credentials живут только в памяти процесса и не записываются на диск.
 
 ### Шаг 3. Имитация подключения (Client)
 
-Запускается на клиентской машине (ноутбук, мобильный интернет).
+На клиентской машине (ноутбук, мобильный интернет) откройте локальную копию репозитория и **вставьте команду, напечатанную listener'ом**. Она выглядит так:
 
 ```bash
-TEST_ID=selectel-spb-001 SESSION_ID=client-home-rt-spb \
+TEST_ID=selectel-spb-001 \
+  SESSION_ID=client-home-rt-spb \
   SERVER_HOST=1.2.3.4 \
+  CREDS_PORT=8443 \
+  CREDS_TOKEN=<one-time-token> \
+  CREDS_CERT_SHA256=<sha256-fingerprint> \
   docker compose --profile client up
 ```
 
-> **SERVER_HOST** — IP-адрес тестируемого RU-сервера. Client попробует подключиться по 6 протоколам. После завершения перейдите в терминал сервера и нажмите `Ctrl+C` в процессе Listener.
+> Client тянет credentials с listener'а через TLS-pinning (cert проверяется по SHA-256), проверяет bearer-token и пробует 6 протоколов. По завершении возвращайтесь в терминал сервера и нажмите `Ctrl+C` в процессе Listener.
 
 ### Шаг 4 (опционально). Тестирование другой клиентской сети
 
-Для каждой дополнительной сети listener перезапускается с новым `SESSION_ID`:
-
-```bash
-# На сервере — новая сессия:
-TEST_ID=selectel-spb-001 SESSION_ID=client-mob-mts-msk \
-  docker compose --profile listener up
-
-# На клиентской машине (переключитесь на другой интернет):
-TEST_ID=selectel-spb-001 SESSION_ID=client-mob-mts-msk \
-  SERVER_HOST=1.2.3.4 \
-  docker compose --profile client up
-```
+Для каждой дополнительной сети просто перезапустите listener с новым `SESSION_ID` — он напечатает свежую команду с новыми credentials/cert/token, скопируйте её на клиентскую машину.
 
 Формат `SESSION_ID`: `client-<тип>-<провайдер>-<город>`. Примеры:
 - `client-home-rt-spb` — домашний Ростелеком, СПб
@@ -119,10 +107,9 @@ TEST_ID=selectel-spb-001 SESSION_ID=client-mob-mts-msk \
 
 1. Откройте нужный файл в `targets/`.
 2. Добавьте домен по аналогии с существующими.
-3. Сделайте `git commit` и `git push`.
-4. Перегенерация baseline (`control`) **нужна только** если добавили Telegram-эндпоинт или цель для Method A throttling — для DNS/TLS/HTTP вердикты считаются inline и baseline не используется.
+3. Сделайте `git commit` и `git push` локально, когда готовы поделиться изменениями.
 
-Параметры VPN-протоколов (порты, ключи, AmneziaWG-обфускация) генерируются `listener` per-test в `reports/<test_id>/protocols.yaml`.
+Параметры VPN-протоколов (порты, ключи, AmneziaWG-обфускация) генерируются `listener` в памяти при каждом старте и передаются клиенту через одноразовый TLS-pinned эндпоинт. На диск ничего не пишется и в git ничего не коммитится.
 
 ---
 
@@ -154,93 +141,81 @@ docker compose --profile dashboard up -d
 
 ---
 
-## Эталонный Baseline (Control)
+## Публикация результатов
 
-Baseline — это снимок с чистого зарубежного сервера, который Censprobe использует **только** в двух случаях:
-
-1. **Telegram reconcile.** Часть эндпоинтов Telegram (порт `2001`, `k.web.telegram.org`/`a.web.telegram.org` отвечают NXDOMAIN извне РФ, CDN `cdn1..5` отдают «не тот» сертификат) и без эталона с EU-сервера на нейтральном VPS они выглядят как «заблокировано». Baseline помечает их `INCONCLUSIVE` (reason: `baseline_also_unreachable`).
-2. **Method A throttling.** Для верификации замеров YouTube/CDN bandwidth используется порог `< baseline_p10 × 0.3` → `THROTTLED`.
-
-Для DNS/TLS/HTTP и Method B SNI-throttling baseline **не используется**:
-
-- DNS — подход CERTainty (PETS 2023): валидность TLS-сертификата + согласие с DoH/DoT.
-- TLS — системный trust store; cert-chain hash-сравнение убрано (ложные срабатывания на CDN-rotation).
-- HTTP — сигнатуры блок-страниц + `expected_status` из `targets/*.yaml`.
-- Method B — относительная разница bandwidth между correct/trigger/typo SNI внутри одного запуска (устойчиво к разной ширине uplink).
-
-Baseline генерируется профилем **control** на чистом EU/DE-сервере:
+Контейнеры пишут отчёты в `reports/<TEST_ID>/` на хосте и больше ничего не делают. Публикация — ручная: вы сами решаете, когда и куда коммитить и пушить.
 
 ```bash
-# Выполнять на DE/NL сервере, минимум раз в 1–2 недели
-docker compose --profile control up
+git add reports/<TEST_ID>/
+git commit -m "reports: <TEST_ID> ..."
+git push
 ```
 
-`CONTROL_ID` и `CONTROL_COUNTRY` задаются в `.env` (по умолчанию: `control-de-01` и `DE`). Количество повторных замеров — `RUNS_COUNT` (по умолчанию: 5).
+Если GitHub недоступен с тестируемой машины (бывает, особенно при тестах из RU-сетей), скопируйте каталог отчёта на любой хост с доступом и опубликуйте оттуда:
 
-Эталон сохранится в `baseline/latest.json` (≈9 КБ — только две секции: `telegram` и `throttling`). Запуск solo без актуального baseline допустим: DNS/TLS/HTTP всё равно дадут полноценные вердикты, потеряются только Telegram-reconcile (NXDOMAIN/wrong-cert эндпоинты вернут `BLOCKED` вместо `INCONCLUSIVE`) и Method A throttling (вернёт `INCONCLUSIVE`). Обновлять baseline имеет смысл при добавлении новых Telegram/throttling-целей или раз в 1–2 недели для актуализации Telegram DC reachability.
+```bash
+# С тестового сервера:
+scp -r reports/<TEST_ID>/ user@other-host:~/censprobe/reports/
+
+# На машине с доступом к GitHub:
+cd ~/censprobe
+git add reports/<TEST_ID>/
+git commit -m "reports: <TEST_ID> from <node>"
+git push
+```
 
 ---
 
-## Ручная публикация результатов (при недоступности GitHub)
+## Контрибуция отчётов через PR
 
-Если `git push` не удаётся (GitHub заблокирован из текущей сети), система уведомит вас и предложит действия. Все результаты всегда сохраняются локально.
-
-### Вариант 1: Повторный push
-
-Результаты зафиксированы в локальном git-коммите. При восстановлении связи:
+Если вы хотите, чтобы ваш отчёт попал в основной публичный реестр — сделайте fork репозитория и пришлите Pull Request:
 
 ```bash
-cd /workspace   # или каталог репозитория
-git push
-```
+# 1. Fork через GitHub UI, затем у себя локально:
+git clone https://github.com/<YOUR_GITHUB_USERNAME>/censprobe.git
+cd censprobe
 
-### Вариант 2: Ручное копирование файлов
+# 2. Запустите тесты — отчёты появятся в reports/<TEST_ID>/.
+TEST_ID=<provider>-<city>-<NN> docker compose --profile solo up
+TEST_ID=<provider>-<city>-<NN> SESSION_ID=client-<...> docker compose --profile listener up
+# (плюс client на клиентской машине — см. Шаг 3)
 
-```bash
-# С тестового сервера (solo/listener):
-scp -r /workspace/reports/<TEST_ID>/ user@other-host:~/censprobe/reports/
-
-# На другой машине (с доступом к GitHub):
-cd ~/censprobe
+# 3. Закоммитьте и откройте PR против main upstream-репозитория.
 git add reports/<TEST_ID>/
-git commit -m "manual: add reports for <TEST_ID>"
-git push
+git commit -m "reports: <TEST_ID>"
+git push origin main
+# затем gh pr create или через GitHub UI
 ```
 
-### Вариант 3: Передача credentials для клиента
+Соглашения по `TEST_ID`: `<provider>-<city>-<NN>` (например `selectel-spb-001`, `vultr-frankfurt-002`). По `SESSION_ID`: `client-<тип>-<провайдер>-<город>` (`client-home-rt-spb`, `client-mob-mts-msk`).
 
-Если listener запушил credentials (`protocols.yaml`), но клиент не может сделать `git pull`:
+> **Что review-ится в PR**: путь `reports/<TEST_ID>/` (новые файлы), целостность JSON, разумность `meta.yaml`. Изменения в коде/`targets/` обсуждаются отдельно — желательно открывать на них отдельные PR.
 
-```bash
-# Скопируйте файл с сервера listener на клиент:
-scp /workspace/reports/<TEST_ID>/protocols.yaml \
-  user@client-host:~/censprobe/reports/<TEST_ID>/protocols.yaml
-```
+> **Workflow в форках**: `.github/workflows/build.yml` не запускается на форках (guard `if: github.repository == 'vasiliiok/censprobe'`) — это убирает шум красных CI у контрибуторов без `DOCKERHUB_TOKEN`. Если форкер хочет собирать свои образы — снимает guard и ставит свои `vars.DOCKERHUB_USERNAME` + `secrets.DOCKERHUB_TOKEN`.
 
 ---
 
 ## Переменные окружения
 
-Все переменные задаются в `.env` (скопируйте из `.env.example`). Переменные с пометкой **required** обязательны — без них контейнеры не запустятся.
+Все переменные хранятся в `.env` (закоммичен в репо как набор дефолтов). Локальные правки в файле не пушатся автоматически — это ваше рабочее дерево.
 
 | Переменная | Профили | Описание |
 |------------|---------|----------|
-| `DOCKERHUB_USERNAME` | все | **required** — Docker Hub username, из которого берутся образы |
-| `DB_PASSWORD` | dashboard | **required** — пароль PostgreSQL |
-| `GRAFANA_PASSWORD` | dashboard | **required** — пароль admin Grafana |
+| `DOCKERHUB_USERNAME` | все | Docker Hub username, из которого берутся образы (по умолчанию — публичный аккаунт maintainer'а) |
+| `DOCKERHUB_TAG` | все | Тег образа (по умолчанию: `main`) |
+| `DB_PASSWORD` | dashboard | Пароль PostgreSQL (loopback-only сервис) |
+| `GRAFANA_PASSWORD` | dashboard | Пароль admin Grafana (`127.0.0.1:3000`) |
 | `TEST_ID` | solo, listener, client | Идентификатор сервера (например, `selectel-spb-001`) |
 | `SESSION_ID` | listener, client | Идентификатор клиентской сети (например, `client-home-rt-spb`) |
 | `SERVER_HOST` | client | IPv4-адрес сервера с Listener |
-| `RUNS_COUNT` | solo, control | Количество повторных замеров (solo: 3, control: 5) |
-| `DOCKERHUB_TAG` | все | Тег образа (по умолчанию: `main`) |
-| `CONTROL_ID` | control | Идентификатор эталонного сервера (по умолчанию: `control-de-01`) |
-| `CONTROL_COUNTRY` | control | Страна эталонного сервера (по умолчанию: `DE`) |
-| `IPAPI_IS_KEY` | solo, listener, client, control | API-ключ ipapi.is для ASN/geo (без ключа — бесплатный tier) |
-| `CENSPROBE_GIT_EMAIL` | solo, listener, client, control | Email git-коммитов внутри контейнеров (по умолчанию: `noreply@censprobe.local`) |
-| `CENSPROBE_GIT_NAME` | solo, listener, client, control | Имя автора git-коммитов (по умолчанию: `censprobe-bot`) |
+| `CREDS_PORT` | client | Порт listener'овского credentials-эндпоинта (по умолчанию: `8443`) |
+| `CREDS_TOKEN` | client | One-time bearer token, печатается listener'ом при старте |
+| `CREDS_CERT_SHA256` | client | SHA-256 fingerprint self-signed cert listener'а (cert pinning) |
+| `RUNS_COUNT` | solo | Количество повторных замеров (по умолчанию: 3) |
+| `IPAPI_IS_KEY` | solo, listener | API-ключ ipapi.is для ASN/geo (без ключа — бесплатный tier) |
 | `CENSPROBE_IMPORT_INTERVAL_SEC` | dashboard | Интервал импорта отчётов в Postgres (по умолчанию: 60 с) |
 
-SSH-ключи монтируются через volume: `~/.ssh:/root/.ssh:ro`.
+Контейнеры не имеют git/SSH зависимостей — `git push` запускаете вы сами с хоста, когда готовы публиковать отчёты.
 
 ---
 
@@ -248,22 +223,17 @@ SSH-ключи монтируются через volume: `~/.ssh:/root/.ssh:ro`.
 
 ```
 censprobe/
-├── .env.example                # шаблон для .env
-├── docker-compose.yml          # профили: solo, listener, client, control, dashboard
+├── .env                        # коммитнутые дефолты (можно править локально)
+├── docker-compose.yml          # профили: solo, listener, client, dashboard
 ├── packages/                   # исходный код всех контейнеров
 │   ├── probe-core/             # общая библиотека измерений (censprobe_core)
 │   ├── solo/                   # запуск solo-тестирования
 │   ├── listener/               # протокол-респондеры + listener
 │   ├── client/                 # клиентские пробы
-│   ├── control/                # генератор baseline
 │   └── dashboard/              # Grafana + sync-api + PostgreSQL
 ├── targets/                    # что тестировать (YAML)
-├── baseline/                   # эталон от control-контейнера
-│   ├── latest.json
-│   └── archive/
 ├── reports/                    # результаты тестирований
 │   └── <test_id>/
-│       ├── meta.yaml
-│       ├── protocols.yaml      # credentials (генерируется listener)
-│       └── *.json              # результаты тестов
+│       ├── meta.yaml           # auto-detected server info
+│       └── *.json              # solo + listener отчёты
 ```

@@ -89,10 +89,12 @@ RUN /opt/curl-ech/bin/curl -V \
 FROM python:3.12-slim@sha256:46cb7cc2877e60fbd5e21a9ae6115c30ace7a077b9f8772da879e4590c18c2e3
 
 # Install system dependencies. Only what the Python code actually needs:
-#   git + openssh-client + curl/wget — for git pull/push over SSH+HTTPS
+#   curl + wget — used by probe modules at runtime (curl-ech is added below)
 #   ca-certificates — TLS to httpx targets
+# No git or openssh-client: the container never pushes or pulls anything
+# from a remote — operators run `git push` from the host on demand.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git curl wget openssh-client ca-certificates \
+    curl wget ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Drop the ECH-capable curl alongside the system curl. The probe code
@@ -111,26 +113,4 @@ RUN pip install --no-cache-dir \
     /tmp/probe-core \
     /tmp/solo
 
-# Build-time fallback committer identity. git_io.py reads
-# CENSPROBE_GIT_EMAIL / CENSPROBE_GIT_NAME at runtime and overrides
-# this when invoking git, so operators can keep their own identity
-# without rebuilding the image.
-ARG CENSPROBE_GIT_EMAIL=noreply@censprobe.local
-ARG CENSPROBE_GIT_NAME=censprobe-bot
-RUN git config --global user.email "${CENSPROBE_GIT_EMAIL}" && \
-    git config --global user.name "${CENSPROBE_GIT_NAME}" && \
-    git config --global init.defaultBranch main && \
-    git config --global pull.rebase true && \
-    git config --global --add safe.directory '*'
-
-# SSH known hosts for GitHub.
-# Also seed a writable copy at /tmp/censprobe_known_hosts — /root/.ssh is
-# typically bind-mounted read-only from the host, which prevents SSH from
-# appending accept-new entries and can break git over SSH.
-RUN mkdir -p /root/.ssh && \
-    ssh-keyscan github.com >> /root/.ssh/known_hosts 2>/dev/null && \
-    ssh-keyscan github.com > /tmp/censprobe_known_hosts 2>/dev/null && \
-    chmod 0644 /tmp/censprobe_known_hosts
-
-# Entrypoint
 ENTRYPOINT ["python", "-m", "censprobe_solo.main"]

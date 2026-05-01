@@ -7,7 +7,6 @@ Endpoints:
   GET  /test-runs/{id}     — single test run details
   GET  /results/{id}       — paginated test results for a test_id
   GET  /protocols/{id}     — protocol reachability matrix for a test_id
-  GET  /baseline           — current baseline metadata
 
 Update flow: an operator runs ``git pull`` on the workspace manually.
 A background task scans the reports tree every IMPORT_INTERVAL seconds
@@ -19,7 +18,6 @@ Grafana connects to Postgres directly via the Postgres datasource plugin.
 from __future__ import annotations
 
 import asyncio
-import json as _json
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -347,44 +345,6 @@ async def get_protocol_matrix(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Baseline metadata
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _read_baseline_sync(baseline_path: Path) -> dict | None:
-    """Blocking baseline reader — exists/read/parse."""
-    if not baseline_path.exists():
-        return None
-    return _json.loads(baseline_path.read_text(encoding="utf-8"))
-
-
-@app.get("/baseline")
-async def get_baseline() -> dict:
-    """Return current baseline metadata (not the full data, just meta)."""
-    baseline_path = WORKSPACE / "baseline" / "latest.json"
-    try:
-        raw = await asyncio.to_thread(_read_baseline_sync, baseline_path)
-    except Exception as e:
-        return {"status": "error", "error": str(e)}
-    if raw is None:
-        return {"status": "missing"}
-    if not isinstance(raw, dict):
-        return {"status": "error", "error": "baseline is not a JSON object"}
-    # Only `telegram` (reconcile) and `throttling` (Method A p10) sections
-    # are populated by the control container — dns/tls/http verdicts are
-    # decided inline in the probe modules and never aggregated here.
-    return {
-        "status": "ok",
-        "version": raw.get("version", "unknown"),
-        "generated_at": raw.get("generated_at"),
-        "validity_until": raw.get("validity_until"),
-        "runs_count": raw.get("runs_count", 0),
-        "generated_from": raw.get("generated_from", {}),
-        "telegram_count": len(raw.get("telegram", {}) or {}),
-        "throttling_count": len(raw.get("throttling", {}) or {}),
-    }
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Internal helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -419,7 +379,7 @@ async def _get_or_create_test_run(
         asn=server.get("asn"),
         as_name=server.get("as_name"),
         location=server.get("location"),
-        ipv4=server.get("ipv4") or server.get("ipv4_masked"),
+        ipv4=server.get("ipv4"),
         ipv6_available=bool(server.get("ipv6_available", False)),
         provider=server.get("provider"),
         kernel=server.get("kernel"),

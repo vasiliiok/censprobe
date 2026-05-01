@@ -12,10 +12,10 @@ Tests (per domain from targets/):
 Verdicts:
   OK               — all resolvers consistent, cert valid
   DNS_POISONING    — system/ISP returns different IP with invalid cert
-  DNS_BLOCKED      — NXDOMAIN from ISP, correct from DoH/control
+  DNS_BLOCKED      — NXDOMAIN from ISP, correct from DoH
   DOH_BLOCKED      — cannot connect to DoH endpoint
   ANOMALY          — inconsistency without clear attribution
-  INCONCLUSIVE     — baseline unavailable
+  INCONCLUSIVE     — cert handshake failed, can't determine
 """
 from __future__ import annotations
 
@@ -219,8 +219,8 @@ async def _test_domain(
         else:
             # All resolvers (ISP + DoH + public) return NXDOMAIN — the domain
             # may legitimately not exist rather than being blocked. Return
-            # INCONCLUSIVE; the Telegram module handles these CDN/web subdomains
-            # separately by comparing against the control baseline.
+            # INCONCLUSIVE; the Telegram module handles wrong-cert CDN
+            # subdomains separately via inline cert-pattern validation.
             results.append(TestResult(
                 test=f"dns_{_slug(domain)}_system",
                 category="dns",
@@ -261,7 +261,7 @@ async def _test_domain(
 
     # 7. CERTainty-style verdict: cert validity + DoH consensus.
     #    ASN is collected for forensics only — comparing against a static
-    #    baseline ASN list misclassifies CDN regional rotation as poisoning.
+    #    expected-ASN list misclassifies CDN regional rotation as poisoning.
     resolved_asn = await _ip_to_asn(sys_ips[0]) if sys_ips else None
     cert_valid = await _validate_cert(domain, sys_ips[0]) if sys_ips else None
 
@@ -297,8 +297,8 @@ async def _test_domain(
             confidence = 0.9
     elif cert_valid is True:
         # System resolver returns an IP that serves a valid cert for the
-        # domain. Whether the ASN matches the baseline is irrelevant —
-        # the destination is authentically the domain.
+        # domain. Whether the ASN matches a hard-coded expected list is
+        # irrelevant — the destination is authentically the domain.
         verdict = Verdict.OK
         confidence = 0.9
     else:
@@ -563,9 +563,9 @@ async def _ip_to_asn(ip: str) -> str | None:
     cleartext.
 
     Caching: the free tier of ipapi.is is rate-limited (1k/day without a
-    key); a single control run easily issues 30+ domains × 5 rounds.
-    We cache per-IP in-process and enter a global 90-second backoff the
-    moment the server signals 429 to avoid melting the rest of the suite.
+    key); a single solo run issues 30+ domains × N rounds. We cache per-IP
+    in-process and enter a global 90-second backoff the moment the server
+    signals 429 to avoid melting the rest of the suite.
     """
     import time as _time
     if ip in _ASN_CACHE:
@@ -602,18 +602,54 @@ async def _ip_to_asn(ip: str) -> str | None:
     return None
 
 
-def _get_isp_resolver() -> str | None:
-    """Get first nameserver from /etc/resolv.conf."""
-    try:
-        from pathlib import Path
-        content = Path("/etc/resolv.conf").read_text()
-        for line in content.splitlines():
-            line = line.strip()
-            if line.startswith("nameserver "):
-                return line.split()[1]
-    except Exception:
-        pass
+# Loopback addresses used by local DNS stubs (systemd-resolved on
+# 127.0.0.53, dnsmasq on 127.0.0.1, NetworkManager on 127.0.0.54). When we
+# see one in /etc/resolv.conf, the file points at a forwarder, not at the
+# real ISP/upstream resolver — and resolving through it gives the same
+# answers as the system call already produced, eliminating the cross-check.
+_LOCAL_STUB_ADDRESSES = {"127.0.0.53", "127.0.0.54", "127.0.0.1", "::1"}
+
+
+def _parse_first_nameserver(content: str) -> str | None:
+    """Return the first ``nameserver <ip>`` line value from a resolv.conf body."""
+    for line in content.splitlines():
+        line = line.strip()
+        if line.startswith("nameserver "):
+            parts = line.split()
+            if len(parts) >= 2:
+                return parts[1]
     return None
+
+
+def _get_isp_resolver() -> str | None:
+    """Get the first real upstream resolver visible to this host.
+
+    On distributions running systemd-resolved (Ubuntu 18.04+, Fedora,
+    modern Debian on cloud images), ``/etc/resolv.conf`` points at the
+    127.0.0.53 stub-listener — useless for cross-checking against the
+    system resolver because every query goes through the same path. The
+    upstream the stub forwards to is recorded in
+    ``/run/systemd/resolve/resolv.conf``; prefer that when the primary
+    resolv.conf lists only a known local stub address.
+    """
+    from pathlib import Path
+    try:
+        primary = _parse_first_nameserver(Path("/etc/resolv.conf").read_text())
+    except OSError:
+        primary = None
+
+    if primary and primary not in _LOCAL_STUB_ADDRESSES:
+        return primary
+
+    # systemd-resolved fallback: the real upstreams the stub forwards to.
+    try:
+        upstream = _parse_first_nameserver(
+            Path("/run/systemd/resolve/resolv.conf").read_text()
+        )
+    except OSError:
+        upstream = None
+
+    return upstream or primary
 
 
 def _slug(domain: str) -> str:

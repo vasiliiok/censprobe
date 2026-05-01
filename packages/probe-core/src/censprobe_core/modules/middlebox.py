@@ -23,9 +23,10 @@ from censprobe_core.models import TestResult, Verdict, BlockingMethod
 
 logger = logging.getLogger(__name__)
 
-# Echo server on control-point that reflects back all headers as-is
-# For initial M1 implementation, we use httpbin.org as fallback
-_ECHO_URL = "https://httpbin.org/headers"
+# Targets are wired inline below: 1.1.1.1:80 (Cloudflare raw edge — does not
+# normalize header casing, so a tampered request shows up as a non-400 reply)
+# and httpbin.org:80 (echoes the request method back, which lets us spot a
+# middlebox that rewrites random methods to GET).
 _TIMEOUT = 10.0
 
 

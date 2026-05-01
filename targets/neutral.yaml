@@ -43,51 +43,26 @@ targets:
       - https://crypto.cloudflare.com/cdn-cgi/trace
     expected_status: 200
     category: neutral
+    ech_advertised: true
     notes: "ECH reference: Cloudflare domain that advertises ECH in its HTTPS record. Used to detect ТСПУ ECH blocking — should be OK from clean jurisdictions, BLOCKED if ТСПУ drops ECH ClientHellos."
 
-# Speed test endpoints for bandwidth baseline
-speed_test_endpoints:
-  - host: speedtest.selectel.ru
-    url: "https://speedtest.selectel.ru/"
-    notes: "Russian datacenter — no throttling expected, used in Method B SNI probe"
+# Cross-vendor TCP reachability targets — used by modules/tcp.py to compute
+# raw uplink connectivity (relay_score in scoring.py). Public DNS resolvers are
+# the most stable choice: each provider owns its anycast IPs, so blocking any
+# one of them is a deliberate per-vendor decision and signals exactly that.
+# Telegram DC TCP probes live in modules/telegram.py — keeping them out of
+# here avoids double-counting Telegram reachability into the TCP score.
+tcp_targets:
+  - {ip: "1.1.1.1",  port: 443, name: "cloudflare_dns_443"}
+  - {ip: "1.1.1.1",  port: 853, name: "cloudflare_dot_853"}
+  - {ip: "8.8.8.8",  port: 443, name: "google_dns_443"}
+  - {ip: "8.8.8.8",  port: 853, name: "google_dot_853"}
+  - {ip: "9.9.9.9",  port: 443, name: "quad9_dns_443"}
+  - {ip: "77.88.8.8", port: 443, name: "yandex_dns_443"}
 
-  - host: speed.cloudflare.com
-    url: "https://speed.cloudflare.com/__down?bytes=10000000"
-    notes: "Cloudflare speed test — 10MB download"
-
-# DoH/DoT resolvers to test
-doh_resolvers:
-  - name: cloudflare
-    url: "https://cloudflare-dns.com/dns-query"
-    ip: 1.1.1.1
-
-  - name: google
-    url: "https://dns.google/dns-query"
-    ip: 8.8.8.8
-
-  - name: mozilla_cloudflare
-    url: "https://mozilla.cloudflare-dns.com/dns-query"
-
-dot_resolvers:
-  - name: cloudflare
-    host: "1.1.1.1"
-    port: 853
-
-  - name: google
-    host: "8.8.8.8"
-    port: 853
-
-# Alternative public DNS resolvers to compare
-public_dns:
-  - name: google_1
-    ip: 8.8.8.8
-  - name: google_2
-    ip: 8.8.4.4
-  - name: cloudflare_1
-    ip: 1.1.1.1
-  - name: cloudflare_2
-    ip: 1.0.0.1
-  - name: yandex
-    ip: 77.88.8.8
-  - name: quad9
-    ip: 9.9.9.9
+# Note: DNS resolver lists (PUBLIC_RESOLVERS / DOH_RESOLVERS / DOT_RESOLVERS)
+# live in modules/dns.py as constants — wiring them through YAML would be
+# pointless overhead since changing the resolvers requires a code release
+# anyway (verdict logic is tied to the specific providers).
+#
+# Method-B throttling endpoints live in modules/throttling.py:_METHOD_B_CONFIG.

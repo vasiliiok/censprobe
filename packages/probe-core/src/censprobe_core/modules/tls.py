@@ -1,24 +1,27 @@
 """
 modules/tls.py — TLS/SNI measurement module.
 
-Tests multiple SNI scenarios against a single IP to attribute censorship:
+For every target (IP, domain) we try three handshakes:
 
-Scenarios (Часть 2.5.3):
-  sni_blocked    — blocked domain SNI → fail expected if SNI-blocking active
-  sni_ok         — neutral SNI (cloudflare.com) → should succeed
-  sni_empty      — empty SNI → varies
-  sni_fake_ok    — neutral SNI but IP from blocked service → success means IP not blocked
-  ech_on         — ECH extension → fail if ECH blocked (via curl subprocess)
-  esni_legacy    — ESNI draft → fail if ESNI blocked
+  ``tls_<domain>_sni_blocked`` — handshake with SNI=domain, verifying the
+    chain via the system trust store. ТСПУ SNI-blocking surfaces here as
+    connection_reset / timeout while a clean network completes.
 
-Attribution logic:
-  TCP connects but TLS fails only with blocked SNI → tcp_rst_after_tls_ch (SNI block)
-  TLS fails with any SNI → ip_dropped or tls_handshake_failure
+  ``tls_<domain>_sni_neutral`` — handshake with SNI="cloudflare.com" against
+    the same IP, no cert verification. Used to prove the IP itself is
+    reachable and isolate SNI-level filtering from IP-level dropping.
+
+  ``tls_<domain>_ech`` — emitted only when ``ech_advertised: true`` is set
+    on the target's YAML entry. Uses the ECH-capable curl-ech binary plus
+    the server's published ECHConfigList (HTTPS-RR fetched via DoH).
+
+Attribution: blocked-SNI failure + neutral-SNI TCP success →
+tcp_rst_after_tls_ch (the SNI is what tripped the censor). Failure on both
+SNIs collapses to ip_dropped / tls_handshake_failure.
 """
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
 import socket
 import ssl
@@ -60,6 +63,7 @@ async def run_tls_tests(
             domain = t["domain"]
             ip = t.get("ip")
             blocked_sni = t.get("blocked_sni", domain)
+            ech_advertised = bool(t.get("ech_advertised", False))
 
             if not ip:
                 ip = await _resolve_ip(domain)
@@ -72,7 +76,9 @@ async def run_tls_tests(
                     evidence={"reason": "could_not_resolve_ip"},
                 )]
 
-            return await _test_sni_scenarios(domain, ip, blocked_sni, repeats)
+            return await _test_sni_scenarios(
+                domain, ip, blocked_sni, repeats, ech_advertised=ech_advertised,
+            )
 
     grouped = await asyncio.gather(*[_one(t) for t in targets])
     results: list[TestResult] = []
@@ -111,8 +117,17 @@ async def _test_sni_scenarios(
     ip: str,
     blocked_sni: str,
     repeats: int,
+    *,
+    ech_advertised: bool = False,
 ) -> list[TestResult]:
-    """Test multiple SNI scenarios against one IP."""
+    """Test multiple SNI scenarios against one IP.
+
+    The ECH scenario only runs when the target's YAML entry has
+    ``ech_advertised: true``. Domains without an ECHConfig in their HTTPS DNS
+    record otherwise emit a permanent INCONCLUSIVE on every run; gating the
+    test by the YAML flag turns those into "not tested" instead of "tested
+    and noise" — operators audit the flag list, not the dashboard.
+    """
     results = []
 
     # Scenario 1: correct/blocked SNI (with retries). verify=True means the
@@ -192,10 +207,13 @@ async def _test_sni_scenarios(
                      "but blocked SNI fails → likely SNI-level blocking"
             )
 
-    # Scenario 3: ECH (via curl if available)
-    ech_result = await _test_ech(domain)
-    if ech_result:
-        results.append(ech_result)
+    # Scenario 3: ECH — only when the YAML entry says the domain advertises
+    # an ECHConfig. Without this gate, every non-ECH domain emits a permanent
+    # INCONCLUSIVE/no_ech_in_https_record line on every run.
+    if ech_advertised:
+        ech_result = await _test_ech(domain)
+        if ech_result:
+            results.append(ech_result)
 
     return results
 
@@ -227,11 +245,7 @@ async def _tls_connect(
                     rtt_connect = (time.monotonic() - t0) * 1000
                     with ctx.wrap_socket(raw, server_hostname=sni) as tls:
                         cert = tls.getpeercert()
-                        cert_der = tls.getpeercert(binary_form=True)
                         alpn = tls.selected_alpn_protocol()
-                        leaf_sha256 = (
-                            hashlib.sha256(cert_der).hexdigest() if cert_der else None
-                        )
                         return {
                             "ok": True,
                             "rtt_connect_ms": rtt_connect,
@@ -239,8 +253,6 @@ async def _tls_connect(
                             "alpn": alpn,
                             "cert_subject_cn": _extract_cn(cert.get("subject")) if cert else None,
                             "cert_issuer_cn": _extract_cn(cert.get("issuer")) if cert else None,
-                            # Only the leaf cert — ssl stdlib doesn't expose the full chain.
-                            "cert_chain_sha256": [leaf_sha256] if leaf_sha256 else [],
                         }
             except ssl.SSLCertVerificationError as e:
                 return {"ok": False, "error": "cert_verification_failed", "detail": str(e)}

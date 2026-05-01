@@ -2,19 +2,24 @@
 censprobe-listener — Main entrypoint.
 
 Lifecycle:
-  1. Read TEST_ID and SESSION_ID from env
-  2. git pull to get latest protocols.yaml (or generate new one if first session)
-  3. Start all 6 VPN protocol responders
-  4. Wait for SIGINT (Ctrl+C) or SIGTERM
-  5. Stop all responders
-  6. Finalize results: compute verdicts per protocol
-  7. Save report as reports/<TEST_ID>/server-listener-<SESSION_ID>-<ts>.json
-  8. git add && git commit && git push
-  9. Exit
+  1. Read TEST_ID and SESSION_ID from env.
+  2. Generate fresh in-memory credentials (one-time per session).
+  3. Start a one-shot HTTPS endpoint (cred_server) that hands the YAML to
+     the client when it presents the right bearer token. Print a ready-to-
+     paste ``docker compose ... up`` command for the operator to send to
+     the client machine.
+  4. Start all 6 VPN protocol responders.
+  5. Wait for SIGINT (Ctrl+C) or SIGTERM.
+  6. Stop all responders + the cred endpoint.
+  7. Finalize verdicts and save report as
+     reports/<TEST_ID>/server-listener-<SESSION_ID>-<ts>.json.
+  8. Exit. Publishing is manual: `git add reports/ && git push` from the
+     host when you're ready to share results.
 
 Security note:
   All protocols run in test/dummy mode. No real traffic forwarding.
-  Credentials are one-time per test session.
+  Credentials are one-time per session and live only in memory + on the
+  TLS-pinned channel between this listener and the client.
 """
 from __future__ import annotations
 
@@ -33,16 +38,12 @@ from rich.logging import RichHandler
 from rich.panel import Panel
 from rich.table import Table
 
-from censprobe_core.git_io import git_add_commit_push, git_pull
 from censprobe_core.models import ListenerReport, ProtocolResult, Verdict
+from censprobe_listener.cred_server import CredServer, detect_external_ip
 from censprobe_listener.credentials import (
     ProtocolCredentials,
+    creds_to_yaml,
     generate_credentials,
-    load_protocols_yaml,
-    load_server_secrets,
-    save_protocols_yaml,
-    save_server_secrets,
-    server_secrets_path,
 )
 from censprobe_listener.echo_server import EchoServer
 from censprobe_listener.openvpn_responder import OpenVPNResponder
@@ -65,22 +66,28 @@ WORKSPACE = Path("/workspace")
 # Hard ceiling on graceful-shutdown time. Any responder still inside its
 # stop() coroutine after this many seconds gets cancelled so the listener
 # can finish writing its report and exit. docker-compose gives us
-# `stop_grace_period: 60s` before sending SIGKILL, so we leave a small
-# margin for the report-writing/git-push that follows shutdown.
-_STOP_TIMEOUT_SEC = 30.0
+# `stop_grace_period: 30s` before sending SIGKILL, so we leave ~10s of
+# margin for the synchronous JSON write that follows responder shutdown.
+_STOP_TIMEOUT_SEC = 20.0
+
+# Default port for the credentials HTTPS endpoint. Plays nicely with the
+# rest of the protocol set: 8443 is the highest-numbered MASQUE-fallback
+# port that real Cloudflare WARP infrastructure binds, so it is unlikely
+# to be ISP-blocked outbound; both VLESS+Reality and Hysteria 2 use 443
+# directly so we can't reuse it.
+_CREDS_PORT = 8443
 
 
 @click.command()
 @click.option("--test-id", envvar="TEST_ID", required=True, help="Test identifier")
 @click.option("--session-id", envvar="SESSION_ID", required=True, help="Client network session identifier, e.g. client-home-rt-spb")
-@click.option("--skip-push", is_flag=True, default=False, help="Skip git push (local dev)")
 @click.option("--verbose", "-v", is_flag=True, default=False)
-def main(test_id: str, session_id: str, skip_push: bool, verbose: bool) -> None:
+def main(test_id: str, session_id: str, verbose: bool) -> None:
     """
     Censprobe Listener — expose VPN handshake endpoints, record what clients can reach.
 
     Run: TEST_ID=selectel-spb-001 SESSION_ID=client-home-rt-spb docker compose --profile listener up
-    Stop: Ctrl+C → results saved and pushed automatically.
+    Stop: Ctrl+C → results saved to reports/<TEST_ID>/.
     """
     if verbose:
         logging.getLogger().setLevel(logging.DEBUG)
@@ -94,105 +101,41 @@ def main(test_id: str, session_id: str, skip_push: bool, verbose: bool) -> None:
         title="Starting listener",
     ))
 
-    asyncio.run(_async_main(test_id, session_id, skip_push))
+    asyncio.run(_async_main(test_id, session_id))
 
 
-async def _async_main(test_id: str, session_id: str, skip_push: bool) -> None:
-    # ── Step 1: git pull ──────────────────────────────────────────────────────
+async def _async_main(test_id: str, session_id: str) -> None:
+    # ── Step 1: Generate fresh credentials in memory ──────────────────────────
+    # Each session gets its own one-time credential set; nothing is written
+    # to disk. The cred_server below hands them to the client over a
+    # TLS-pinned channel and is shut down on Ctrl+C.
+    console.print("[dim]Generating one-time credentials...[/dim]")
+    creds = generate_credentials()
+
+    # ── Step 2: Start the credentials HTTPS endpoint ──────────────────────────
+    cred_server = CredServer(
+        creds_yaml=creds_to_yaml(creds),
+        port=_CREDS_PORT,
+    )
     try:
-        git_pull()
-    except Exception as e:
-        console.print(f"[yellow]Warning: git pull failed: {e}[/yellow]")
-
-    # ── Step 2: Load or generate credentials ─────────────────────────────────
-    # Two files now:
-    #   protocols.yaml             — committed, client-facing material only
-    #   protocols-server.secret.yaml — gitignored 0o600 sidecar with WG/AWG
-    #                                  server private keys + Reality private key
-    protocols_path = WORKSPACE / "reports" / test_id / "protocols.yaml"
-    secrets_path = server_secrets_path(protocols_path)
-
-    if not protocols_path.exists():
-        # First run for this TEST_ID — generate a fresh credential set.
-        console.print("[dim]Generating credentials for first session...[/dim]")
-        creds = generate_credentials()
-        # Server private keys go to the local-only sidecar FIRST so a
-        # crash between the two writes can't leave us with a committed
-        # protocols.yaml whose matching server keys are nowhere on disk.
-        save_server_secrets(creds, secrets_path)
-        save_protocols_yaml(creds, protocols_path)
-        if not skip_push:
-            try:
-                git_add_commit_push(
-                    message=f"listener: credentials for {test_id}",
-                    paths=[str(protocols_path)],
-                )
-                console.print("[green]Credentials pushed. Client can now run 'git pull' to obtain them.[/green]")
-            except Exception as e:
-                console.print(f"[red]Credentials push failed: {e}[/red]")
-                console.print(
-                    "[yellow]Client will not be able to obtain credentials via git pull.\n"
-                    "To transfer credentials manually, copy the file:[/yellow]\n"
-                    f"  [bold]{protocols_path}[/bold]\n"
-                    "[yellow]to the client machine at the same relative path in the repository.[/yellow]"
-                )
-    else:
-        # protocols.yaml already on disk. Three sub-cases:
-        #   (a) sidecar exists                        → ordinary resume
-        #   (b) legacy file has embedded server keys  → migrate them out
-        #   (c) sidecar gone AND no legacy keys       → can't keep using
-        #       this TEST_ID with empty server keys → regenerate it all
-        console.print("[dim]Loading existing credentials...[/dim]")
-        creds = load_protocols_yaml(protocols_path)
-
-        legacy_present = bool(
-            creds.wg_server_private
-            or creds.awg_server_private
-            or creds.vless_pvk
+        cred_server.start()
+    except OSError as e:
+        console.print(
+            f"[red]Could not bind credentials port {_CREDS_PORT}: {e}[/red]\n"
+            f"[yellow]Another process is already listening on that port. "
+            "Stop it (or set CREDS_PORT to a free one) and re-run.[/yellow]"
         )
-        sidecar_loaded = load_server_secrets(secrets_path, creds)
+        sys.exit(1)
 
-        if legacy_present and not sidecar_loaded:
-            # (b) Lift the embedded server-private fields into the
-            # gitignored sidecar and rewrite the public yaml without
-            # them. This does NOT erase the previously-committed git
-            # history; the user should rotate keys after this commit if
-            # the repo was ever accessible to anyone untrusted.
-            console.print(
-                "[yellow]Detected legacy protocols.yaml with embedded server "
-                "private keys; migrating to sidecar...[/yellow]"
-            )
-            save_server_secrets(creds, secrets_path)
-            save_protocols_yaml(creds, protocols_path)
-            if not skip_push:
-                try:
-                    git_add_commit_push(
-                        message=(
-                            f"listener: strip server-private keys from "
-                            f"protocols.yaml ({test_id})"
-                        ),
-                        paths=[str(protocols_path)],
-                    )
-                except Exception as e:
-                    console.print(
-                        f"[red]Migration push failed: {e}[/red]\n"
-                        "[yellow]The local file is fixed; please push "
-                        "manually so other clones see the redacted version.[/yellow]"
-                    )
-        elif not sidecar_loaded:
-            # (c) No way to obtain the server private keys for the
-            # already-published protocols.yaml. Fail loudly rather than
-            # silently bringing the WG/AWG/Reality responders up with
-            # empty keys (which would either break startup or — worse —
-            # make the listener accept anyone matching the always-zero
-            # configured keys).
-            console.print(
-                f"[red]Server-secrets sidecar at {secrets_path} is missing or invalid, "
-                "and protocols.yaml has no embedded fallback keys.[/red]\n"
-                f"[yellow]Delete {protocols_path} (and {secrets_path} if present) "
-                "to force a fresh credential set, then re-run this command.[/yellow]"
-            )
-            sys.exit(1)
+    server_host = detect_external_ip() or "<your-server-ip>"
+    _print_client_run_command(
+        test_id=test_id,
+        session_id=session_id,
+        server_host=server_host,
+        creds_port=_CREDS_PORT,
+        creds_token=cred_server.token,
+        creds_cert_sha256=cred_server.cert_sha256,
+    )
 
     # ── Step 3a: Start local echo server for SS/VLESS/Hy2 data phase ──────────
     echo_server = EchoServer()
@@ -209,6 +152,7 @@ async def _async_main(test_id: str, session_id: str, skip_push: bool) -> None:
         console.print("[red]All responders failed to start. Exiting.[/red]")
         for name, err in start_errors.items():
             console.print(f"  [red]{name}:[/red] {err}")
+        cred_server.stop()
         sys.exit(1)
 
     # Print status
@@ -267,6 +211,11 @@ async def _async_main(test_id: str, session_id: str, skip_push: bool) -> None:
             logger.warning("Echo server stop timed out after 5s; continuing")
         except Exception as e:
             logger.warning("Echo server stop error: %s", e)
+    # Tear down the credentials endpoint last so a slow client retry can
+    # still complete during the responder-shutdown window. cred_server.stop
+    # is synchronous and doesn't wait for in-flight handlers, so this is
+    # cheap and bounded.
+    cred_server.stop()
 
     # ── Step 6: Finalize verdicts from snapshotted state ─────────────────────
     results: dict[str, ProtocolResult] = {}
@@ -287,27 +236,11 @@ async def _async_main(test_id: str, session_id: str, skip_push: bool) -> None:
         results=results,
     )
     report_path = _save_listener_report(report, test_id, session_id)
-    console.print(f"[green]Report saved:[/green] {report_path.name}")
-
-    # ── Step 8: git push ──────────────────────────────────────────────────────
-    if not skip_push:
-        try:
-            ts = stopped_at.strftime("%Y-%m-%dT%H:%M:%SZ")
-            git_add_commit_push(
-                message=f"listener: {test_id} session={session_id} at {ts}",
-                paths=[str(WORKSPACE / "reports" / test_id)],
-            )
-            console.print("[green bold]Results pushed to GitHub successfully.[/green bold]")
-        except Exception as e:
-            console.print(f"[red]Push failed: {e}[/red]")
-            console.print(
-                "[yellow]The report has been committed locally. To publish results manually:[/yellow]\n"
-                f"  [bold]cd {WORKSPACE} && git push[/bold]\n"
-                "[yellow]Alternatively, copy the report file from:[/yellow]\n"
-                f"  [bold]{WORKSPACE / 'reports' / test_id}/[/bold]"
-            )
-    else:
-        console.print("[yellow]--skip-push: skipped git push[/yellow]")
+    console.print(f"[green]Report saved:[/green] {report_path}")
+    console.print(
+        "[dim]Publishing is manual: review the file, then "
+        "`git add reports/ && git commit && git push` from the host.[/dim]"
+    )
 
     console.print(Panel.fit(
         f"[bold green]Session complete.[/bold green]\n"
@@ -464,6 +397,41 @@ def _save_listener_report(report: ListenerReport, test_id: str, session_id: str)
 # ─────────────────────────────────────────────────────────────────────────────
 # Rich display
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _print_client_run_command(
+    test_id: str,
+    session_id: str,
+    server_host: str,
+    creds_port: int,
+    creds_token: str,
+    creds_cert_sha256: str,
+) -> None:
+    """Print the one-liner the operator pastes into the client machine.
+
+    The whole point of the cred_server: hand the operator a ready-made
+    ``docker compose ... up`` invocation that fully bootstraps the
+    client. SERVER_HOST may be a placeholder if external-IP detection
+    failed (the network panel above prints what the listener thinks the
+    address is); the operator edits it on paste in that case.
+    """
+    cmd = (
+        f"TEST_ID={test_id} \\\n"
+        f"  SESSION_ID={session_id} \\\n"
+        f"  SERVER_HOST={server_host} \\\n"
+        f"  CREDS_PORT={creds_port} \\\n"
+        f"  CREDS_TOKEN={creds_token} \\\n"
+        f"  CREDS_CERT_SHA256={creds_cert_sha256} \\\n"
+        f"  docker compose --profile client up"
+    )
+    console.print(Panel.fit(
+        "[bold]Run this on the client machine[/bold] (in your local clone):\n\n"
+        f"[cyan]{cmd}[/cyan]\n\n"
+        "[dim]The credentials are served once over a TLS-pinned channel "
+        "(self-signed cert, fingerprint above). Token is single-use.[/dim]",
+        title="Client setup command",
+        border_style="green",
+    ))
+
 
 def _print_responder_status(responders: dict, errors: dict, creds: ProtocolCredentials) -> None:
     table = Table(title="Listener Status", show_header=True, header_style="bold cyan")

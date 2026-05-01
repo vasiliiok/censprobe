@@ -2,7 +2,7 @@
 modules/http.py — HTTP/HTTPS fetch and reachability classification.
 
 Tests:
-  - HTTPS fetch: status, body length, TLS cert chain
+  - HTTPS fetch: status, body length, TLS reachability (handshake by httpx)
   - Geoblocking vs censorship distinction: 403/451 + valid cert → GEOBLOCK_NOT_CENSORSHIP
   - Network-level interference attribution: TLS handshake failure, RST, IP drop
 
@@ -16,7 +16,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-import socket
 import ssl
 from urllib.parse import urlparse
 
@@ -77,9 +76,9 @@ def _verdict_from_response(
       2. expected_status from targets/*.yaml → OK on match, ANOMALY otherwise.
       3. No expected_status: status==200 is OK, anything else is ANOMALY.
 
-    Static body-length-range comparison from the control baseline was
-    removed — modern sites (news, social) drift in body size between
-    edges and revisions, producing false ANOMALY verdicts.
+    Static body-length-range comparison was deliberately not implemented:
+    modern sites (news, social) drift in body size between edges and
+    revisions, producing false ANOMALY verdicts.
     """
     if status in (403, 451) and tls_ok:
         return Verdict.GEOBLOCK_NOT_CENSORSHIP, None
@@ -96,7 +95,7 @@ async def _test_url(
 ) -> TestResult:
     """Fetch a URL and analyze the response. Retries on transient failures."""
     domain = target.get("domain", url)
-    test_name = f"http_{_slug(domain)}"
+    test_name = _http_test_name(domain, url)
     last_error: TestResult | None = None
 
     for attempt in range(1, repeats + 1):
@@ -120,18 +119,12 @@ async def _test_url(
             # fire, so TLS *did* succeed. Reusing that boolean below for the
             # "geoblock vs censorship" attribution.
             tls_ok = url.startswith("https://")
-            cert_sha256_list = await _extract_cert_sha256(final_url, url)
 
             verdict, method = _verdict_from_response(
                 status=status,
                 tls_ok=tls_ok,
                 expected_status=target.get("expected_status"),
             )
-
-            # cert SHA is collected for forensics but never compared. CDN
-            # leaf certs rotate per edge — any control-vs-solo mismatch is
-            # normal, not MITM. tls_ok=True already means the system trust
-            # store accepted the chain.
 
             return TestResult(
                 test=test_name,
@@ -144,7 +137,6 @@ async def _test_url(
                     "status": status,
                     "body_length": body_length,
                     "tls_ok": tls_ok,
-                    "cert_chain_sha256": cert_sha256_list,
                     "final_url": final_url,
                     "content_type": content_type,
                 },
@@ -200,56 +192,31 @@ async def _test_url(
     return last_error or _timeout_result(test_name, url, attempts=repeats)
 
 
-async def _extract_cert_sha256(response_url: str, url: str) -> list[str]:
+def _http_test_name(domain: str, url: str) -> str:
+    """Build a stable, unique test name for a given (domain, url) pair.
+
+    A target in YAML can list multiple URLs for the same domain (e.g.
+    twitter.com + x.com under domain="twitter.com", or ru/en wikipedia.org),
+    and using slug(domain) alone collides them on the same Postgres key.
+
+    The canonical form ``https://<domain>/`` keeps the bare ``http_<slug>``
+    name so existing dashboards and saved baselines don't break. Any other
+    URL gets a 6-char content hash suffix — stable across runs, unaffected
+    by reordering URLs in YAML.
     """
-    Extract leaf-cert SHA-256 for a response's TLS endpoint.
-
-    Recorded only as forensic evidence on the result — there is no
-    baseline cert-chain comparison anymore (CDN edges rotate certs too
-    fast for hash-equality to be a reliable MITM signal). httpx doesn't
-    expose the peer cert, so we run a minimal TLS handshake to the same
-    host:port and hash the server cert in DER form.
-
-    Returns:
-        [hex_sha256] on success, or [] on non-HTTPS / network failure.
-    """
-    parsed = urlparse(response_url or url)
-    if parsed.scheme != "https" or not parsed.hostname:
-        return []
-
-    host = parsed.hostname
-    port = parsed.port or 443
-
-    def _fetch_cert() -> bytes | None:
-        ctx = ssl.create_default_context()
-        # We want the server's cert even if its chain is not trusted locally
-        # (e.g. internal CA, expired cert) — verification is NOT our goal
-        # here; we are hashing the leaf for baseline comparison.
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        # Advertise ALPN so CDNs/WAFs that reset bare-TLS connections
-        # (Cloudflare, Akamai) still complete the handshake and hand us a
-        # cert. Without this the cert-fingerprint check silently becomes
-        # a blind spot on modern endpoints.
-        try:
-            ctx.set_alpn_protocols(["h2", "http/1.1"])
-        except (NotImplementedError, ssl.SSLError):
-            pass
-        try:
-            with socket.create_connection((host, port), timeout=5.0) as sock:
-                with ctx.wrap_socket(sock, server_hostname=host) as tls_sock:
-                    return tls_sock.getpeercert(binary_form=True)
-        except Exception:
-            return None
-
-    try:
-        der = await asyncio.wait_for(asyncio.to_thread(_fetch_cert), timeout=7.0)
-    except asyncio.TimeoutError:
-        return []
-
-    if not der:
-        return []
-    return [hashlib.sha256(der).hexdigest()]
+    base = f"http_{_slug(domain)}"
+    parsed = urlparse(url)
+    is_canonical = (
+        parsed.scheme == "https"
+        and parsed.hostname == domain
+        and parsed.path in ("", "/")
+        and not parsed.query
+        and not parsed.fragment
+    )
+    if is_canonical:
+        return base
+    suffix = hashlib.sha1(url.encode("utf-8")).hexdigest()[:6]
+    return f"{base}__{suffix}"
 
 
 def _timeout_result(test_name: str, url: str, attempts: int = 1) -> TestResult:

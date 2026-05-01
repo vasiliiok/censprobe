@@ -18,18 +18,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential libmnl-dev pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
+# AmneziaWG upstream commits — pinned so a future force-push or breaking
+# change to master can't silently switch the build to a different tree.
+# Keep in sync with packages/listener/Dockerfile: both ends speak to each
+# other on the wire, and a silent version skew between client and
+# listener AWG userspace would break handshakes for non-obvious reasons.
+ARG AWG_TOOLS_COMMIT=5d6179a6d0842e98dfb349c28cf1bd8e4b9d1079
+ARG AWG_GO_COMMIT=12a012205e3c444be02aba91a840455f74c127e1
+
 # Build amneziawg-tools → /usr/local/bin/awg + awg-quick.
 # A wg-quick fallback is NOT acceptable: vanilla wg rejects the obfuscation
 # directives (Jc/Jmin/Jmax/S1/S2/H1-H4) with "Line unrecognized", so AWG
 # would be silently non-functional while reporting success.
-RUN git clone --depth 1 https://github.com/amnezia-vpn/amneziawg-tools.git /tmp/awg-tools && \
+RUN git clone https://github.com/amnezia-vpn/amneziawg-tools.git /tmp/awg-tools && \
+    git -C /tmp/awg-tools checkout "${AWG_TOOLS_COMMIT}" && \
     make -C /tmp/awg-tools/src -j"$(nproc)" && \
     install -m 0755 /tmp/awg-tools/src/wg /usr/local/bin/awg && \
     install -m 0755 /tmp/awg-tools/src/wg-quick/linux.bash /usr/local/bin/awg-quick && \
     rm -rf /tmp/awg-tools
 
 # Build amneziawg-go → /usr/local/bin/amneziawg-go.
-RUN git clone --depth 1 https://github.com/amnezia-vpn/amneziawg-go.git /tmp/awg-go && \
+RUN git clone https://github.com/amnezia-vpn/amneziawg-go.git /tmp/awg-go && \
+    git -C /tmp/awg-go checkout "${AWG_GO_COMMIT}" && \
     cd /tmp/awg-go && make && \
     install -m 0755 amneziawg-go /usr/local/bin/amneziawg-go && \
     rm -rf /tmp/awg-go /root/.cache/go-build /root/go
@@ -37,10 +47,12 @@ RUN git clone --depth 1 https://github.com/amnezia-vpn/amneziawg-go.git /tmp/awg
 # ── Stage 2: runtime image ───────────────────────────────────────────────────
 FROM python:3.12-slim@sha256:46cb7cc2877e60fbd5e21a9ae6115c30ace7a077b9f8772da879e4590c18c2e3
 
-# Runtime tools only — no Go, no build-essential.
+# Runtime tools only — no Go, no build-essential, no git/ssh: the
+# client no longer pulls anything from a git remote, it fetches
+# credentials directly from the listener over a TLS-pinned channel.
 # iputils-ping: needed for WG/OpenVPN tunnel data-phase verification.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git openssh-client curl wget iproute2 net-tools iputils-ping \
+    curl wget iproute2 net-tools iputils-ping \
     wireguard-tools iptables openssl openvpn \
     ca-certificates unzip \
     && rm -rf /var/lib/apt/lists/*
@@ -107,20 +119,9 @@ COPY --from=awg-builder \
 
 ENV WG_QUICK_USERSPACE_IMPLEMENTATION=amneziawg-go
 
-WORKDIR /workspace
+WORKDIR /tmp
 COPY packages/probe-core /tmp/probe-core
 COPY packages/client /tmp/client
 RUN pip install --no-cache-dir /tmp/probe-core /tmp/client
-
-ARG CENSPROBE_GIT_EMAIL=noreply@censprobe.local
-ARG CENSPROBE_GIT_NAME=censprobe-bot
-RUN git config --global user.email "${CENSPROBE_GIT_EMAIL}" && \
-    git config --global user.name "${CENSPROBE_GIT_NAME}" && \
-    git config --global pull.rebase true && \
-    git config --global --add safe.directory '*' && \
-    mkdir -p /root/.ssh && \
-    ssh-keyscan github.com >> /root/.ssh/known_hosts 2>/dev/null && \
-    ssh-keyscan github.com > /tmp/censprobe_known_hosts 2>/dev/null && \
-    chmod 0644 /tmp/censprobe_known_hosts
 
 ENTRYPOINT ["python", "-m", "censprobe_client.main"]

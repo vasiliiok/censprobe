@@ -11,7 +11,7 @@
 #   2. Cloudflare WARP control plane — engage / connectivity / zero-trust
 #      hostnames on TCP 443.
 #   3. WARP MASQUE anycast (162.159.197.0/24) — UDP 443 primary, with UDP
-#      fallbacks on 4443/8443/8095 and a TCP 443 fallback path.
+#      fallbacks on 500/1701/4500/4443/8443/8095 and a TCP 443 fallback path.
 #   4. WARP WireGuard anycast (162.159.193.0/24) — legacy fallback protocol;
 #      UDP 2408 default, UDP 500/1701/4500 fallbacks.
 #   5. workers.dev / pages.dev — Cloudflare-hosted content sometimes blocked by RKN.
@@ -20,6 +20,11 @@
 # UDP 443 / QUIC probe targets
 # We send a QUIC Version Negotiation trigger and wait for any server response.
 # Timeout → TSPU is dropping UDP 443 (QUIC_DROPPED).
+#
+# Cross-vendor coverage: Cloudflare AS13335, Google AS15169, Quad9 AS19281.
+# A simultaneous timeout across all three signals UDP-443 blocking that is
+# not specific to one provider; a single-vendor failure points at targeted
+# blocking (e.g. RU restrictions on Cloudflare ranges only).
 quic_targets:
   - host: "1.1.1.1"
     port: 443
@@ -35,6 +40,16 @@ quic_targets:
     port: 443
     name: "cloudflare_quic_warp_masque"
     notes: "WARP MASQUE anycast (162.159.197.0/24) — UDP 443 to WARP infra specifically"
+
+  - host: "8.8.8.8"
+    port: 443
+    name: "google_quic_dns"
+    notes: "Google DNS anycast (AS15169) — cross-vendor UDP 443 control; isolates Cloudflare-specific blocking"
+
+  - host: "9.9.9.9"
+    port: 443
+    name: "quad9_quic_dns"
+    notes: "Quad9 DNS anycast (AS19281) — third UDP 443 vendor; corroborates universal vs targeted blocking"
 
 # Cloudflare WARP endpoints — TCP probes
 # WARP control plane uses HTTPS (TCP 443). Reachability per endpoint:
@@ -81,7 +96,7 @@ warp_targets:
 # silent timeout; BLOCKED only on explicit ICMP/socket rejection.
 #
 # MASQUE UDP fallback ladder (per Cloudflare One firewall docs):
-#   default 443, fallbacks 500, 1701, 4500, 4443, 8443, 8095
+#   default UDP 443; fallbacks UDP 500, 1701, 4500, 4443, 8443, 8095; TCP 443.
 # We probe the most distinctive of these — UDP 443 is already covered by the
 # `cloudflare_quic_warp_masque` test in quic_targets, so here we cover the
 # fallback ports a real client would try when UDP 443 is blocked (the RU TSPU

@@ -56,16 +56,13 @@ import logging
 import os
 import socket
 import time
-from pathlib import Path
 
 import httpx
-import yaml
 
 from censprobe_core.models import TestResult, Verdict, BlockingMethod
 
 logger = logging.getLogger(__name__)
 
-WORKSPACE = Path("/workspace")
 _CONNECT_TIMEOUT = 10.0
 _QUIC_TIMEOUT    = 3.0   # seconds to wait for QUIC VN response
 _WG_UDP_TIMEOUT  = 2.0   # seconds — WG won't respond to invalid handshake anyway
@@ -75,9 +72,15 @@ _WG_UDP_TIMEOUT  = 2.0   # seconds — WG won't respond to invalid handshake any
 # Public entry point
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def run_cloudflare_tests() -> list[TestResult]:
-    """Run all Cloudflare infrastructure probes."""
-    cfg = _load_config()
+async def run_cloudflare_tests(cfg: dict | None = None) -> list[TestResult]:
+    """Run all Cloudflare infrastructure probes.
+
+    ``cfg`` is the parsed contents of ``targets/cloudflare.yaml``; the
+    runner pre-loads it and passes it in so this module stays free of
+    any workspace/path knowledge. ``None`` is treated as an empty config
+    — every for-loop below becomes a no-op rather than crashing.
+    """
+    cfg = cfg or {}
     results: list[TestResult] = []
 
     tasks: list[asyncio.Task] = []
@@ -613,14 +616,3 @@ async def _test_http(domain: str, url: str, expected_status: int) -> TestResult:
         )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Config loader
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _load_config() -> dict:
-    path = WORKSPACE / "targets" / "cloudflare.yaml"
-    try:
-        return yaml.safe_load(path.read_text()) or {}
-    except Exception as e:
-        logger.warning("Could not load targets/cloudflare.yaml: %s", e)
-        return {}

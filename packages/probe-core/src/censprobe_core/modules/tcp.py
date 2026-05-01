@@ -79,7 +79,7 @@ async def _test_tcp(ip: str, port: int, repeats: int) -> TestResult:
         method = BlockingMethod.IP_DROPPED
 
     # RST_INJECTED is only a timing heuristic here — flag that explicitly
-    # in evidence and lower confidence so baseline/scoring can discount it.
+    # in evidence and lower confidence so scoring can discount it.
     is_heuristic_rst = final_verdict == Verdict.RST_INJECTED
     return TestResult(
         test=f"tcp_{_slug(ip)}_{port}",

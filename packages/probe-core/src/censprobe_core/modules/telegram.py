@@ -1,102 +1,110 @@
 """
-modules/telegram.py — Full Telegram connectivity measurement (Часть 2.5.7).
+modules/telegram.py — Telegram connectivity measurement (Часть 2.5.7).
 
-5 blocks implemented (6 and 7 are placeholders):
-  1. DC reachability — 5 DCs × {v4,v6} × {443,80,5222,2001}
+Blocks:
+  1. DC reachability — 5 DCs × {v4,v6} × {443,80,5222}
      Each DC: TCP connect + MTProto ReqPqMulti init → valid response?
-  2. Web — web.telegram.org, k.web.telegram.org, a.web.telegram.org
+     v6 endpoints are skipped on probe hosts without IPv6; a single
+     ``telegram_ipv6_skipped`` result is emitted so the dashboard can
+     surface the skip instead of silently dropping ~25 v6 probes.
+  2. Web — web.telegram.org, webk.telegram.org, weba.telegram.org
   3. Auxiliary domains — core, my, translations, t.me, telegram.org, etc.
-  4. CDN — cdn1–cdn5.cdn-telegram.org
-  5. Voice — UDP to DC IPs on voice ports + STUN binding
-  6. Throttling — CDN bandwidth vs baseline (not implemented; throttle_score=1.0)
-  7. MTProxy — if configured (not implemented)
+  4. CDN — cdn.telegram.org + cdn1/cdn4/cdn5.cdn-telegram.org
 
-Telegram health score = weighted_avg(dc:40%, web:20%, cdn:15%, voice:15%, throttling:10%)
+Reconcile of broken Telegram endpoints (cdn1/cdn5 serve *.t.me cert →
+fail hostname check) is decided inline via cert-pattern validation: if
+the presented cert chains to a system-trusted CA AND its SAN/CN matches
+``owned_cert_patterns`` from telegram.yaml, the failure is reclassified
+BLOCKED → INCONCLUSIVE (authentic-but-misrouted Telegram cert, not a
+censor MITM). TSPU cannot forge a valid Let's Encrypt / Sectigo
+signature for *.t.me, so this check is robust against in-path actors.
+
+Telegram health score = weighted_avg(dc:55%, web:25%, cdn:20%).
+Voice (STUN/UDP) and throttling weights were removed: STUN to Telegram VoIP
+ports never produces a positive signal (Telegram uses MTProto/UDP, not RFC
+5389 STUN), and Method-A throttling was retired in favour of within-run
+relative SNI throttling (Method B in modules/throttling.py).
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import socket
 import ssl
 import struct
 import time
-from pathlib import Path
 
 import httpx
-import yaml
+from cryptography import x509
+from cryptography.hazmat.backends import default_backend
 
-from censprobe_core.baseline import BaselineComparator
 from censprobe_core.models import BlockingMethod, TestResult, Verdict
 
 logger = logging.getLogger(__name__)
 
-WORKSPACE = Path("/workspace")
 _TIMEOUT = 8.0
 
 
-def _load_telegram_config() -> dict:
-    path = WORKSPACE / "targets" / "telegram.yaml"
-    try:
-        return yaml.safe_load(path.read_text()) or {}
-    except Exception:
-        return {}
+async def run_telegram_tests(cfg: dict | None = None) -> list[TestResult]:
+    """Run all Telegram test blocks.
 
-
-async def run_telegram_tests(
-    comparator: BaselineComparator,
-    test_voice: bool = True,
-) -> list[TestResult]:
-    """Run all Telegram test blocks."""
-    cfg = _load_telegram_config()
+    ``cfg`` is the parsed contents of ``targets/telegram.yaml``; the runner
+    pre-loads it and passes it in so this module stays free of any
+    workspace/path knowledge. ``None`` is treated as an empty config — all
+    DC/web/CDN blocks then degrade to no-op rather than crashing, and the
+    dashboard surfaces the missing data as zero results.
+    """
+    cfg = cfg or {}
     results: list[TestResult] = []
 
+    owned_patterns = _compile_owned_patterns(cfg.get("owned_cert_patterns", []))
+
+    # Probe-host IPv6 capability: gates the DC v6 ladder. We do this once
+    # per run rather than catching EAFNOSUPPORT N times inside _test_dc_port,
+    # so the dashboard sees a single explicit "v6 skipped" marker instead of
+    # ~25 indistinguishable INCONCLUSIVE entries that hide the real reason.
+    ipv6_available = await _host_has_ipv6()
+    if not ipv6_available:
+        logger.info(
+            "[telegram] Probe host has no IPv6 — skipping all DC v6 endpoints. "
+            "Emitting telegram_ipv6_skipped marker for dashboard visibility."
+        )
+        results.append(TestResult(
+            test="telegram_ipv6_skipped",
+            category="telegram",
+            target="ipv6",
+            verdict=Verdict.INCONCLUSIVE,
+            evidence={
+                "reason": "host_has_no_ipv6",
+                "skipped_endpoints": _count_v6_endpoints(cfg.get("api_datacenters", [])),
+            },
+            notes="IPv6 unavailable on probe host — DC v6 endpoints not tested.",
+            confidence=0.0,
+        ))
+
     # Block 1: DC reachability
-    dc_results = await _test_dc_reachability(cfg.get("api_datacenters", []))
+    dc_results = await _test_dc_reachability(
+        cfg.get("api_datacenters", []),
+        skip_ipv6=not ipv6_available,
+    )
     results.extend(dc_results)
 
     # Block 2: Web
-    web_results = await _test_https_domains(cfg.get("web", []), "telegram_web")
+    web_results = await _test_https_domains(cfg.get("web", []), "telegram_web", owned_patterns)
     results.extend(web_results)
 
     # Block 3: Auxiliary
-    aux_results = await _test_https_domains(cfg.get("auxiliary", []), "telegram_aux")
+    aux_results = await _test_https_domains(cfg.get("auxiliary", []), "telegram_aux", owned_patterns)
     results.extend(aux_results)
 
     # Block 4: CDN
-    cdn_results = await _test_https_domains(cfg.get("cdn", []), "telegram_cdn")
+    cdn_results = await _test_https_domains(cfg.get("cdn", []), "telegram_cdn", owned_patterns)
     results.extend(cdn_results)
 
-    # Block 5: Voice (UDP + STUN)
-    if test_voice:
-        voice_results = await _test_voice(cfg.get("api_datacenters", []))
-        results.extend(voice_results)
-
-    # Reconcile BLOCKED results against the baseline: convert BLOCKED→INCONCLUSIVE
-    # when the control baseline ALSO shows the endpoint unreachable. This handles:
-    #   • port 2001 — unreachable from most networks (not just Russia)
-    #   • cdn1/cdn2/cdn3/cdn5 — serve wrong cert or NXDOMAIN from DE
-    #   • k.web / a.web — NXDOMAIN outside Russia
-    # compare_telegram() returns OK when both solo AND baseline are unreachable
-    # (i.e., the situation is consistent — no new blocking).
-    reconciled: list[TestResult] = []
-    for r in results:
-        if r.verdict == Verdict.BLOCKED:
-            cmp_verdict = comparator.compare_telegram(r.test, reachable=False, rtt_ms=None)
-            if cmp_verdict == Verdict.OK:
-                r = r.model_copy(update={
-                    "verdict": Verdict.INCONCLUSIVE,
-                    "confidence": 0.0,
-                    "evidence": {**r.evidence, "reason": "baseline_also_unreachable"},
-                    "notes": "Unreachable from control baseline too — not censorship.",
-                })
-        reconciled.append(r)
-    results = reconciled
-
-    # Compute health score. THROTTLED specifically means bandwidth was
-    # measured low, NOT "partial reachability" — using it here would
-    # mis-attribute the technique. Use ANOMALY for the partially-reachable
-    # band.
+    # Compute health score. ANOMALY (not BLOCKED) covers the
+    # partially-reachable band so a single dead CDN doesn't tip the whole
+    # server into "blocked".
     health = _compute_health_score(results, cfg.get("health_weights", {}))
     if health >= 0.7:
         health_verdict = Verdict.OK
@@ -122,14 +130,24 @@ async def run_telegram_tests(
 # Block 1: DC reachability
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def _test_dc_reachability(dcs: list[dict]) -> list[TestResult]:
-    """Test each DC on all IP versions and MTProto ports."""
+async def _test_dc_reachability(
+    dcs: list[dict],
+    skip_ipv6: bool = False,
+) -> list[TestResult]:
+    """Test each DC on all IP versions and MTProto ports.
+
+    skip_ipv6: when the probe host has no IPv6, omit v6 endpoints entirely
+    instead of emitting INCONCLUSIVE per (DC × port). The summary marker is
+    emitted by the caller (run_telegram_tests).
+    """
     results = []
     tasks = []
 
     for dc in dcs:
         dc_id = dc["id"]
         for ip_ver, ip_key in [("v4", "ipv4"), ("v6", "ipv6")]:
+            if ip_ver == "v6" and skip_ipv6:
+                continue
             ip = dc.get(ip_key)
             if not ip:
                 continue
@@ -265,8 +283,19 @@ async def _test_dc_port(dc_id: int, ip_ver: str, ip: str, port: int) -> TestResu
 # Blocks 2/3/4: HTTPS domains
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def _test_https_domains(domains: list[str], prefix: str) -> list[TestResult]:
-    """Test HTTPS connectivity to a list of domains in parallel."""
+async def _test_https_domains(
+    domains: list[str],
+    prefix: str,
+    owned_patterns: list[re.Pattern],
+) -> list[TestResult]:
+    """Test HTTPS connectivity to a list of domains in parallel.
+
+    On a TLS failure we re-handshake without verification and check the
+    presented cert against ``owned_patterns``: a system-trusted cert with
+    a SAN/CN matching the Telegram-owned family means the endpoint is
+    authentically Telegram (just misrouted) rather than a censor MITM,
+    so the verdict is reclassified BLOCKED → INCONCLUSIVE.
+    """
     async with httpx.AsyncClient(
         timeout=httpx.Timeout(_TIMEOUT),
         http2=True,
@@ -303,13 +332,14 @@ async def _test_https_domains(domains: list[str], prefix: str) -> list[TestResul
                     isinstance(getattr(e, "__cause__", None), ssl.SSLError)
                     or "ssl" in err_msg or "certificate" in err_msg
                 )
-                method = (
-                    BlockingMethod.TLS_HANDSHAKE_FAILURE if is_tls
-                    else BlockingMethod.IP_DROPPED
-                )
+                if is_tls:
+                    return await _classify_tls_failure(
+                        test_name, url, domain, owned_patterns, err_msg=str(e),
+                    )
                 return TestResult(
                     test=test_name, category="telegram", target=url,
-                    verdict=Verdict.BLOCKED, method=method,
+                    verdict=Verdict.BLOCKED,
+                    method=BlockingMethod.IP_DROPPED,
                     evidence={"error": str(e)},
                 )
             except Exception as e:
@@ -321,118 +351,207 @@ async def _test_https_domains(domains: list[str], prefix: str) -> list[TestResul
         return list(await asyncio.gather(*[_probe(d) for d in domains]))
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Block 5: Voice (UDP + STUN)
-# ─────────────────────────────────────────────────────────────────────────────
+async def _classify_tls_failure(
+    test_name: str,
+    url: str,
+    domain: str,
+    owned_patterns: list[re.Pattern],
+    err_msg: str,
+) -> TestResult:
+    """On TLS failure, distinguish authentic-but-misrouted Telegram cert
+    from a censor MITM.
 
-# Telegram voice ports (approximate — RTP over UDP)
-_VOICE_PORTS = [7670, 7680, 9085, 9086]
+    Procedure:
+      1. Re-handshake to the resolved IP with verify=False to capture the
+         server's cert.
+      2. Validate the chain through the system trust store independently
+         of hostname (so a wrong-host cert from a real CA still passes
+         this step).
+      3. Compare cert SAN/CN against the ``*.telegram.org`` family.
 
-
-async def _test_voice(dcs: list[dict]) -> list[TestResult]:
+    Pass step 2 + 3 → INCONCLUSIVE (Telegram serving wrong cert, not a
+    censor: TSPU cannot mint a chain to a public CA for *.t.me).
+    Otherwise BLOCKED tls_handshake_failure.
     """
-    Test UDP connectivity for Telegram voice calls.
-    Sends STUN Binding Request to DC IPs on voice ports.
+    blocked_result = TestResult(
+        test=test_name, category="telegram", target=url,
+        verdict=Verdict.BLOCKED,
+        method=BlockingMethod.TLS_HANDSHAKE_FAILURE,
+        evidence={"error": err_msg},
+    )
 
-    Runs probes in parallel — they all use independent UDP sockets and
-    each blocks for at most ~3 s on receive, so serializing them just
-    multiplies the total wall-clock time without any benefit.
-    """
-    tasks: list = []
-    for dc in dcs[:2]:  # Test first 2 DCs only to avoid too many UDP probes
-        dc_id = dc["id"]
-        ip = dc.get("ipv4")
-        if not ip:
-            continue
-        for port in _VOICE_PORTS[:2]:  # 2 ports per DC
-            tasks.append(_stun_probe(dc_id, ip, port))
+    cert_der, chain_valid = await _capture_cert(domain)
+    if cert_der is None:
+        return blocked_result
 
-    if not tasks:
-        return []
-
-    completed = await asyncio.gather(*tasks, return_exceptions=True)
-    results: list[TestResult] = []
-    for r in completed:
-        if isinstance(r, TestResult):
-            results.append(r)
-        elif isinstance(r, Exception):
-            logger.debug("Voice probe failed: %s", r)
-    return results
-
-
-async def _stun_probe(dc_id: int, ip: str, port: int) -> TestResult:
-    """Send STUN Binding Request and check for response.
-
-    Note: Telegram VoIP uses its own MTProto-over-UDP protocol, not RFC
-    5389 STUN. A standard STUN binding request is silently dropped by
-    the DC regardless of censorship, so "no reply" is NOT evidence of
-    blocking — treat it as INCONCLUSIVE with a marker. A valid STUN
-    reply would be an active positive signal (e.g. middlebox answering
-    on our behalf); we keep the parser for that case.
-    """
-    test_name = f"telegram_voice_dc{dc_id}_udp_{port}"
-    target = f"{ip}:{port}/udp"
-
-    # STUN Binding Request: type=0x0001, length=0, magic=0x2112A442, txid=random
-    import os
-    txid = os.urandom(12)
-    stun_req = struct.pack(">HHI", 0x0001, 0x0000, 0x2112A442) + txid
-
-    loop = asyncio.get_running_loop()
-    t0 = time.monotonic()
-
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.setblocking(False)
-    try:
-        await loop.sock_sendto(sock, stun_req, (ip, port))
-
-        try:
-            data, _ = await asyncio.wait_for(
-                loop.sock_recvfrom(sock, 512),
-                timeout=3.0,
-            )
-            rtt = (time.monotonic() - t0) * 1000
-            # STUN Binding Response type = 0x0101 AND magic cookie must match our txid transaction.
-            is_stun_response = (
-                len(data) >= 20
-                and struct.unpack(">H", data[:2])[0] == 0x0101
-                and data[4:8] == b"\x21\x12\xa4\x42"
-                and data[8:20] == txid
-            )
-            # A valid STUN Binding Response means an intermediate device answered
-            # on Telegram's behalf (unlikely but a positive reachability signal).
-            # Any other data → the port is reachable but Telegram sent MTProto/UDP
-            # back (or junk) — treat as INCONCLUSIVE, NOT ANOMALY, because
-            # "got bytes but not a STUN reply" is the expected on-path behaviour.
-            if is_stun_response:
-                verdict = Verdict.OK
-            else:
-                verdict = Verdict.INCONCLUSIVE
-            return TestResult(
-                test=test_name, category="telegram", target=target,
-                verdict=verdict,
-                rtt_ms=rtt,
-                evidence={"stun_response": is_stun_response, "bytes_received": len(data)},
-            )
-        except asyncio.TimeoutError:
-            return TestResult(
-                test=test_name, category="telegram", target=target,
-                verdict=Verdict.INCONCLUSIVE, confidence=0.1,
-                evidence={
-                    "status": "no_reply_expected",
-                    "reason": "Telegram VoIP uses MTProto/UDP, not STUN; "
-                              "timeout is not evidence of censorship.",
-                },
-                notes="STUN probe to Telegram VoIP port is informational only.",
-            )
-
-    except Exception as e:
+    matched_name = _match_owned_cert(cert_der, owned_patterns)
+    if chain_valid and matched_name is not None:
         return TestResult(
-            test=test_name, category="telegram", target=target,
-            verdict=Verdict.ERROR, evidence={"error": str(e)},
+            test=test_name, category="telegram", target=url,
+            verdict=Verdict.INCONCLUSIVE,
+            confidence=0.0,
+            evidence={
+                "error": err_msg,
+                "reason": "wrong_cert_owned_family",
+                "cert_san_match": matched_name,
+            },
+            notes=(
+                "TLS hostname check failed but cert is system-trusted and "
+                "belongs to the Telegram-owned domain family — authentic "
+                "but misrouted endpoint, not censorship."
+            ),
         )
+
+    return blocked_result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# IPv6 capability check
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def _host_has_ipv6() -> bool:
+    """Quick check: can this host establish an IPv6 TCP connection?
+
+    Mirrors server_meta._check_ipv6 but kept module-local to avoid coupling
+    the telegram module to detect_server_meta. Used to decide whether to
+    skip the DC v6 ladder entirely.
+    """
+    try:
+        sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+    except OSError:
+        return False
+    try:
+        loop = asyncio.get_running_loop()
+        sock.settimeout(3.0)
+        await loop.run_in_executor(
+            None,
+            lambda: sock.connect(("2606:4700:4700::1111", 80)),
+        )
+        return True
+    except Exception:
+        return False
     finally:
         sock.close()
+
+
+def _count_v6_endpoints(dcs: list[dict]) -> int:
+    """How many (DC, port) v6 endpoints are skipped when IPv6 is unavailable?
+
+    Used as evidence on the telegram_ipv6_skipped marker so dashboards can
+    show "N v6 probes skipped on this host" rather than guessing.
+    """
+    n = 0
+    for dc in dcs:
+        if dc.get("ipv6"):
+            n += len(dc.get("ports", [443]))
+    return n
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Cert-pattern reconcile (replaces the old baseline-comparator approach)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _compile_owned_patterns(patterns: list[str]) -> list[re.Pattern]:
+    """Compile glob-style patterns from telegram.yaml into anchored regexes.
+
+    "*" matches a single DNS label (any chars except dot). "*.t.me" therefore
+    matches "cdn.t.me" but not "evil.example.t.me", which is the standard
+    cert-wildcard semantics (RFC 6125).
+    """
+    compiled: list[re.Pattern] = []
+    for p in patterns:
+        regex = re.escape(p).replace(r"\*", r"[^.]+")
+        compiled.append(re.compile(f"^{regex}$", re.IGNORECASE))
+    return compiled
+
+
+async def _capture_cert(domain: str) -> tuple[bytes | None, bool]:
+    """Re-handshake with verify=False; return (cert_der, chain_valid).
+
+    Two TLS contexts are used so we can answer the chain-trust question
+    *without* the hostname check that just rejected the original handshake:
+
+      * cert_der: from a verify=False handshake, captures whatever the
+        server presented even if hostname/chain were wrong.
+      * chain_valid: a separate handshake with verify_mode=CERT_REQUIRED
+        but check_hostname=False; reports whether the chain itself is
+        trusted by the system CA bundle.
+
+    Returns (None, False) on connect/handshake errors that prevent
+    capturing any cert at all.
+    """
+    loop = asyncio.get_running_loop()
+
+    def _do_capture() -> tuple[bytes | None, bool]:
+        # Resolve once via getaddrinfo (DoH-poisoning is decided in dns module).
+        try:
+            ip = socket.gethostbyname(domain)
+        except OSError:
+            return None, False
+
+        # Pass 1: capture cert bytes regardless of validity.
+        cert_der: bytes | None = None
+        try:
+            ctx_capture = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            ctx_capture.check_hostname = False
+            ctx_capture.verify_mode = ssl.CERT_NONE
+            with socket.create_connection((ip, 443), timeout=5.0) as raw:
+                with ctx_capture.wrap_socket(raw, server_hostname=domain) as tls:
+                    cert_der = tls.getpeercert(binary_form=True)
+        except Exception:
+            return None, False
+
+        if not cert_der:
+            return None, False
+
+        # Pass 2: ask the system trust store whether the chain validates,
+        # ignoring hostname mismatch. A separate handshake is the cleanest
+        # way: stdlib doesn't expose a "verify chain only" API on an
+        # already-completed handshake.
+        chain_valid = False
+        try:
+            ctx_chain = ssl.create_default_context()
+            ctx_chain.check_hostname = False
+            with socket.create_connection((ip, 443), timeout=5.0) as raw:
+                with ctx_chain.wrap_socket(raw, server_hostname=domain):
+                    chain_valid = True
+        except ssl.SSLCertVerificationError:
+            chain_valid = False
+        except Exception:
+            chain_valid = False
+
+        return cert_der, chain_valid
+
+    try:
+        return await asyncio.wait_for(asyncio.to_thread(_do_capture), timeout=12.0)
+    except Exception:
+        return None, False
+
+
+def _match_owned_cert(cert_der: bytes, patterns: list[re.Pattern]) -> str | None:
+    """Return the first SAN/CN matching any owned pattern, else None."""
+    if not patterns:
+        return None
+    try:
+        cert = x509.load_der_x509_certificate(cert_der, default_backend())
+    except Exception:
+        return None
+
+    candidates: list[str] = []
+    try:
+        san_ext = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName)
+        candidates.extend(san_ext.value.get_values_for_type(x509.DNSName))
+    except x509.ExtensionNotFound:
+        pass
+    for attr in cert.subject:
+        if attr.oid == x509.NameOID.COMMON_NAME:
+            candidates.append(attr.value)
+
+    for name in candidates:
+        for pat in patterns:
+            if pat.match(name):
+                return name
+    return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -442,59 +561,33 @@ async def _stun_probe(dc_id: int, ip: str, port: int) -> TestResult:
 def _compute_health_score(results: list[TestResult], weights: dict) -> float:
     """
     Compute overall Telegram health score [0.0, 1.0].
-    weights from telegram.yaml health_weights section.
+    weights from telegram.yaml health_weights section (dc/web/cdn).
     """
-    w_dc  = weights.get("dc_reachability", 0.40)
-    w_web = weights.get("web_access", 0.20)
-    w_cdn = weights.get("cdn_access", 0.15)
-    w_voice = weights.get("voice_health", 0.15)
-    w_thr = weights.get("throttling_absence", 0.10)
+    w_dc  = weights.get("dc_reachability", 0.55)
+    w_web = weights.get("web_access", 0.25)
+    w_cdn = weights.get("cdn_access", 0.20)
 
-    dc_results   = [r for r in results if r.test.startswith("telegram_dc") and "health" not in r.test]
-    web_results  = [r for r in results if r.test.startswith("telegram_web")]
-    cdn_results  = [r for r in results if r.test.startswith("telegram_cdn")]
-    voice_results = [r for r in results if r.test.startswith("telegram_voice")]
+    dc_results  = [r for r in results if r.test.startswith("telegram_dc")]
+    web_results = [r for r in results if r.test.startswith("telegram_web")]
+    cdn_results = [r for r in results if r.test.startswith("telegram_cdn")]
 
     dc_score  = _ok_ratio(dc_results)
     web_score = _ok_ratio(web_results)
     cdn_score = _ok_ratio(cdn_results)
-    throttle_score = 1.0  # placeholder — throttling module handles this separately
 
-    # Voice probes use STUN which Telegram DCs silently ignore (they expect
-    # MTProto/UDP). All voice results are INCONCLUSIVE by design — they carry
-    # no information about blocking. Redistributing the voice weight across
-    # the other components avoids a permanent 7.5% cap (0.5 × 0.15) that
-    # would otherwise prevent a perfectly healthy server from scoring 100%.
-    voice_decisive = [r for r in voice_results if r.verdict != Verdict.INCONCLUSIVE]
-    if not voice_decisive:
-        # No decisive voice data — fold voice weight into remaining components.
-        active_w = w_dc + w_web + w_cdn + w_thr
-        if active_w == 0:
-            return 1.0
-        total_w = active_w + w_voice
-        return (
-            dc_score * w_dc +
-            web_score * w_web +
-            cdn_score * w_cdn +
-            throttle_score * w_thr
-        ) * (total_w / active_w)
-
-    voice_score = _ok_ratio(voice_results)
-    return (
-        dc_score * w_dc +
-        web_score * w_web +
-        cdn_score * w_cdn +
-        voice_score * w_voice +
-        throttle_score * w_thr
-    )
+    total_w = w_dc + w_web + w_cdn
+    if total_w == 0:
+        return 1.0
+    # Renormalize in case the YAML weights drift from sum=1 (defensive —
+    # otherwise a partial weights dict caps the maximum score below 1.0).
+    return (dc_score * w_dc + web_score * w_web + cdn_score * w_cdn) / total_w
 
 
 def _ok_ratio(results: list[TestResult]) -> float:
-    # INCONCLUSIVE results carry no signal — exclude them from both
-    # numerator and denominator so they don't drag the ratio toward 0.
-    # Voice probes always return INCONCLUSIVE (Telegram ignores STUN),
-    # so without this exclusion the voice block would always score 0.0
-    # and unjustly subtract 7.5 % from every server's health score.
+    # INCONCLUSIVE results carry no signal (e.g. probe host without IPv6,
+    # globally-broken cdn1/cdn5 endpoints reclassified by cert-pattern check)
+    # — exclude them from both numerator and denominator so they don't drag
+    # the ratio toward 0.
     decisive = [r for r in results if r.verdict != Verdict.INCONCLUSIVE]
     if not decisive:
         return 0.5  # no decisive data → neutral

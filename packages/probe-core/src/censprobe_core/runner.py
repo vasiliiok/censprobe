@@ -2,7 +2,8 @@
 runner.py — Async orchestrator for all probe modules.
 
 Runs all measurement modules, collects TestResult objects, handles N repeats.
-Used by solo, client, and control containers.
+Used by the solo container; the listener-side reachability tests live in
+the listener package directly.
 """
 from __future__ import annotations
 
@@ -16,13 +17,8 @@ from typing import Any
 import yaml
 
 from censprobe_core import __version__ as PROBE_CORE_VERSION
-from censprobe_core.baseline import BaselineComparator, load_baseline
-from censprobe_core.models import (
-    BaselineData,
-    ServerMeta,
-    TestResult,
-)
-from censprobe_core.modules import dns, tcp, tls, http, telegram, throttling, middlebox, protocols, cloudflare
+from censprobe_core.models import ServerMeta, TestResult
+from censprobe_core.modules import dns, tcp, tls, http, telegram, throttling, middlebox, cloudflare
 from censprobe_core.scoring import BLOCKING_VERDICTS
 
 logger = logging.getLogger(__name__)
@@ -44,18 +40,9 @@ class ProbeRunner:
         self,
         workspace: Path = WORKSPACE,
         test_id: str = "unknown",
-        mode: str = "solo",  # solo | control
     ) -> None:
         self.workspace = workspace
         self.test_id = test_id
-        self.mode = mode
-        self.baseline: BaselineData = load_baseline(
-            workspace / "baseline" / "latest.json",
-            # Control *builds* the baseline — a stub on its first ever run is
-            # expected; no need to log a warning every round.
-            quiet_if_stub=(mode == "control"),
-        )
-        self.comparator = BaselineComparator(self.baseline)
         self._targets: dict[str, Any] = {}
         self.module_failures: list[str] = []
 
@@ -77,7 +64,9 @@ class ProbeRunner:
 
           phase A (parallel, network I/O — each module has internal
             semaphore throttling, so concurrent execution does not flood
-            the link): DNS, TCP, TLS, HTTP, Telegram, Protocol signatures.
+            the link): DNS, TCP, TLS, HTTP, Telegram, Cloudflare. VPN
+            protocol handshake tests live in the listener container —
+            solo runs from the server's side and has no peer to talk to.
 
           phase B (serial, timing-sensitive — bandwidth and RTT
             measurements must run on a quiet uplink to avoid biasing
@@ -92,13 +81,7 @@ class ProbeRunner:
         results: list[TestResult] = []
         self.module_failures: list[str] = []
 
-        logger.info("[%s] Starting probe run (mode=%s, repeats=%d)", self.test_id, self.mode, repeats)
-
-        # ── Phase A: parallel network I/O ─────────────────────────────────────
-        dns_domains = self._collect_dns_domains()
-        tcp_targets = self._collect_tcp_targets()
-        tls_targets = self._collect_tls_targets()
-        http_targets = self._collect_http_targets()
+        logger.info("[%s] Starting probe run (repeats=%d)", self.test_id, repeats)
 
         async def _run_module(name: str, coro):
             try:
@@ -106,15 +89,20 @@ class ProbeRunner:
             except Exception as e:
                 return name, None, e
 
-        logger.info("[%s] Phase A: running 7 modules in parallel...", self.test_id)
+        # ── Phase A: parallel network I/O ─────────────────────────────────────
+        dns_domains = self._collect_dns_domains()
+        tcp_targets = self._collect_tcp_targets()
+        tls_targets = self._collect_tls_targets()
+        http_targets = self._collect_http_targets()
+
+        logger.info("[%s] Phase A: running 6 modules in parallel...", self.test_id)
         phase_a = await asyncio.gather(
             _run_module("dns", dns.run_dns_tests(dns_domains, repeats)),
             _run_module("tcp", tcp.run_tcp_tests(tcp_targets, repeats)),
             _run_module("tls", tls.run_tls_tests(tls_targets, repeats)),
             _run_module("http", http.run_http_tests(http_targets, repeats)),
-            _run_module("telegram", telegram.run_telegram_tests(self.comparator)),
-            _run_module("protocols", protocols.run_protocol_tests(control_endpoints=None)),
-            _run_module("cloudflare", cloudflare.run_cloudflare_tests()),
+            _run_module("telegram", telegram.run_telegram_tests(self._load_targets("telegram"))),
+            _run_module("cloudflare", cloudflare.run_cloudflare_tests(self._load_targets("cloudflare"))),
         )
         for name, mod_results, err in phase_a:
             if err is not None:
@@ -127,7 +115,7 @@ class ProbeRunner:
         # ── Phase B: timing-sensitive, serial ─────────────────────────────────
         logger.info("[%s] Phase B: running throttling tests...", self.test_id)
         try:
-            thr_results = await throttling.run_throttling_tests(self.comparator)
+            thr_results = await throttling.run_throttling_tests()
             results.extend(thr_results)
             logger.info("[%s] throttling: %d results", self.test_id, len(thr_results))
         except Exception:
@@ -166,44 +154,41 @@ class ProbeRunner:
         return sorted(domains)
 
     def _collect_tcp_targets(self) -> list[tuple[str, int]]:
-        """Collect (ip, port) pairs for TCP reachability tests."""
+        """Collect (ip, port) pairs for TCP reachability tests.
+
+        Targets come from ``targets/neutral.yaml: tcp_targets`` — public DNS
+        anycasts on TCP 443/853. Telegram DC TCP probes are NOT included here:
+        they live in modules/telegram.py, and double-counting their
+        reachability into ``relay_score`` (scoring.py) would tie raw uplink
+        quality to Telegram-specific blocking instead of measuring it
+        independently.
+        """
         targets: list[tuple[str, int]] = []
         seen: set[tuple[str, int]] = set()
 
-        # Telegram DCs — port 2001 is unreachable from most non-Russian networks
-        # and is already tested with baseline comparison in the Telegram module.
-        # Exclude it from raw TCP tests to avoid spurious IP_DROPPED verdicts.
-        _TCP_SKIP_PORTS = {2001}
-        tg = self._load_targets("telegram")
-        for dc in tg.get("api_datacenters", []):
-            for port in dc.get("ports", [443]):
-                if port in _TCP_SKIP_PORTS:
-                    continue
-                if ip := dc.get("ipv4"):
-                    entry = (ip, port)
-                    if entry not in seen:
-                        seen.add(entry)
-                        targets.append(entry)
+        neutral = self._load_targets("neutral")
+        for entry in neutral.get("tcp_targets", []):
+            ip = entry.get("ip")
+            port = entry.get("port")
+            if not ip or not port:
+                continue
+            key = (ip, int(port))
+            if key in seen:
+                continue
+            seen.add(key)
+            targets.append(key)
 
-        # Additional explicit TCP targets from other YAML files
-        for tf in ["news", "social", "messengers"]:
-            data = self._load_targets(tf)
-            for t in data.get("targets", []):
-                for ip_port in t.get("tcp_endpoints", []):
-                    if ":" in str(ip_port):
-                        ip, port_s = str(ip_port).rsplit(":", 1)
-                        try:
-                            entry = (ip, int(port_s))
-                            if entry not in seen:
-                                seen.add(entry)
-                                targets.append(entry)
-                        except ValueError:
-                            pass
-
-        return targets[:30]  # cap to avoid excessive tests
+        return targets
 
     def _collect_tls_targets(self) -> list[dict]:
-        """Collect TLS test targets from all target YAML files."""
+        """Collect TLS test targets from all target YAML files.
+
+        ``ech_advertised`` is propagated into each target dict so the TLS
+        module can skip the ECH probe for domains that don't publish an
+        ECHConfig in their HTTPS DNS record. Without this flag every
+        non-ECH domain emits an INCONCLUSIVE ``no_ech_in_https_record``
+        result on every run, flooding the dashboard with noise.
+        """
         targets = []
         seen_domains: set[str] = set()
 
@@ -217,25 +202,23 @@ class ProbeRunner:
                         "domain": domain,
                         "blocked_sni": domain,
                         "url": t.get("url", f"https://{domain}"),
+                        "ech_advertised": bool(t.get("ech_advertised", False)),
                     })
-
-        # Always include a few known-blocked domains even if not in YAMLs
-        priority = [
-            {"domain": "meduza.io", "blocked_sni": "meduza.io", "url": "https://meduza.io"},
-            {"domain": "instagram.com", "blocked_sni": "instagram.com", "url": "https://instagram.com"},
-            {"domain": "youtube.com", "blocked_sni": "youtube.com", "url": "https://youtube.com"},
-        ]
-        for p in priority:
-            if p["domain"] not in seen_domains:
-                targets.insert(0, p)
-                seen_domains.add(p["domain"])
 
         return targets
 
     def _collect_http_targets(self) -> list[dict]:
-        """Collect HTTP test targets from all target files."""
+        """Collect HTTP test targets from all target files.
+
+        Includes ``vpn.yaml`` even though VPN service websites are not the
+        primary censorship signal: their HTTPS reachability is itself a
+        cheap proxy for whether the operator's network blocks VPN-related
+        domains at the edge (TLS-SNI / DNS RST), which is information the
+        scoring layer can use independently of the dedicated VPN test
+        modules.
+        """
         targets = []
-        for tf in ["news", "social", "messengers", "neutral"]:
+        for tf in ["news", "social", "messengers", "vpn", "neutral"]:
             data = self._load_targets(tf)
             for t in data.get("targets", []):
                 targets.append(t)
@@ -265,18 +248,13 @@ class ProbeRunner:
             ts = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
             reports_dir = self.workspace / "reports" / self.test_id
             reports_dir.mkdir(parents=True, exist_ok=True)
-            # Filename embeds the runner mode so a future caller using the
-            # same helper from control/listener-side doesn't end up with a
-            # misleading "server-solo-*" report on disk.
-            mode_label = self.mode if self.mode in ("solo", "control") else "report"
-            output_path = reports_dir / f"server-{mode_label}-{ts}.json"
+            output_path = reports_dir / f"server-solo-{ts}.json"
 
         report_data = {
             "test_id": self.test_id,
-            "report_type": self.mode,
+            "report_type": "solo",
             "generated_at": datetime.now(tz=timezone.utc).isoformat(),
             "probe_core_version": PROBE_CORE_VERSION,
-            "baseline_version": self.baseline.version,
             "server_meta": server_meta.model_dump() if server_meta else None,
             "results": [r.model_dump(mode="json") for r in results],
             "summary": _summarize(results, module_failures=list(self.module_failures)),

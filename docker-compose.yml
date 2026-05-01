@@ -4,9 +4,8 @@
 ##
 ## Docker Hub images are public — no `docker login` required to pull.
 ##
-## Override defaults via .env or environment:
-##   DOCKERHUB_USERNAME — Docker Hub username (required; set in .env)
-##   DOCKERHUB_TAG      — image tag to pull   (default: main)
+## All defaults live in the committed `.env` at repo root. Edit it locally
+## to override — your working-tree changes won't auto-publish anywhere.
 
 services:
 
@@ -16,7 +15,7 @@ services:
   # ─────────────────────────────────────────────────────────────────
   solo:
     profiles: [solo]
-    image: ${DOCKERHUB_USERNAME:?DOCKERHUB_USERNAME is required — copy .env.example to .env}/censprobe-solo:${DOCKERHUB_TAG:-main}
+    image: ${DOCKERHUB_USERNAME}/censprobe-solo:${DOCKERHUB_TAG:-main}
     pull_policy: missing
     build:
       context: .
@@ -27,11 +26,16 @@ services:
       TEST_ID: ${TEST_ID:-}
       RUNS_COUNT: ${RUNS_COUNT:-3}
       IPAPI_IS_KEY: ${IPAPI_IS_KEY:-}
-      CENSPROBE_GIT_EMAIL: ${CENSPROBE_GIT_EMAIL:-noreply@censprobe.local}
-      CENSPROBE_GIT_NAME: ${CENSPROBE_GIT_NAME:-censprobe-bot}
     volumes:
       - ./:/workspace
-      - ~/.ssh:/root/.ssh:ro
+      # systemd-resolved upstreams — when /etc/resolv.conf points at the
+      # 127.0.0.53 stub (Ubuntu/Debian cloud images), the real ISP/upstream
+      # resolver is recorded here. modules/dns.py:_get_isp_resolver reads
+      # this so the cross-resolver comparison isn't a useless self-check
+      # against the local stub. Bind-mounted read-only; on hosts without
+      # systemd-resolved Docker creates an empty directory and the code
+      # falls back to /etc/resolv.conf's primary entry.
+      - /run/systemd/resolve:/run/systemd/resolve:ro
     working_dir: /workspace
     restart: "no"
 
@@ -41,11 +45,15 @@ services:
   # ─────────────────────────────────────────────────────────────────
   listener:
     profiles: [listener]
-    image: ${DOCKERHUB_USERNAME:?DOCKERHUB_USERNAME is required — copy .env.example to .env}/censprobe-listener:${DOCKERHUB_TAG:-main}
+    image: ${DOCKERHUB_USERNAME}/censprobe-listener:${DOCKERHUB_TAG:-main}
     pull_policy: missing
     build:
       context: .
       dockerfile: packages/listener/Dockerfile
+    # network_mode: host — needed both for the VPN responders (raw UDP
+    # binds, OpenVPN tun device) and for the credentials HTTPS endpoint
+    # on TCP 8443. Make sure the firewall on the test server allows
+    # inbound TCP 8443 from the client network during the session.
     network_mode: host
     cap_add: [NET_ADMIN, NET_RAW]
     # OpenVPN responder needs /dev/net/tun.
@@ -55,22 +63,23 @@ services:
       TEST_ID: ${TEST_ID:-}
       SESSION_ID: ${SESSION_ID:-}
       IPAPI_IS_KEY: ${IPAPI_IS_KEY:-}
-      CENSPROBE_GIT_EMAIL: ${CENSPROBE_GIT_EMAIL:-noreply@censprobe.local}
-      CENSPROBE_GIT_NAME: ${CENSPROBE_GIT_NAME:-censprobe-bot}
     volumes:
       - ./:/workspace
-      - ~/.ssh:/root/.ssh:ro
     working_dir: /workspace
-    stop_grace_period: 60s
+    # 30s covers responder shutdown (parallel, ~1s each) + the synchronous
+    # JSON write that follows. Auto-push is gone, so we no longer need
+    # the wider window earlier deployments allowed for git operations.
+    stop_grace_period: 30s
     restart: "no"
 
   # ─────────────────────────────────────────────────────────────────
   # 3. CLIENT — handshake-тесты с клиентской сети
-  # Usage: TEST_ID=... SERVER_HOST=1.2.3.4 docker compose --profile client up
+  # Run the one-liner printed by the listener startup banner — it bakes
+  # in TEST_ID / SESSION_ID / SERVER_HOST / CREDS_TOKEN / CREDS_CERT_SHA256.
   # ─────────────────────────────────────────────────────────────────
   client:
     profiles: [client]
-    image: ${DOCKERHUB_USERNAME:?DOCKERHUB_USERNAME is required — copy .env.example to .env}/censprobe-client:${DOCKERHUB_TAG:-main}
+    image: ${DOCKERHUB_USERNAME}/censprobe-client:${DOCKERHUB_TAG:-main}
     pull_policy: missing
     build:
       context: .
@@ -85,53 +94,26 @@ services:
       TEST_ID: ${TEST_ID:-}
       SESSION_ID: ${SESSION_ID:-}
       SERVER_HOST: ${SERVER_HOST:-}
-      IPAPI_IS_KEY: ${IPAPI_IS_KEY:-}
-      CENSPROBE_GIT_EMAIL: ${CENSPROBE_GIT_EMAIL:-noreply@censprobe.local}
-      CENSPROBE_GIT_NAME: ${CENSPROBE_GIT_NAME:-censprobe-bot}
-    volumes:
-      - ./:/workspace
-      - ~/.ssh:/root/.ssh:ro
-    working_dir: /workspace
+      CREDS_PORT: ${CREDS_PORT:-8443}
+      CREDS_TOKEN: ${CREDS_TOKEN:-}
+      CREDS_CERT_SHA256: ${CREDS_CERT_SHA256:-}
     restart: "no"
 
   # ─────────────────────────────────────────────────────────────────
-  # 4. CONTROL — эталонный baseline из чистой юрисдикции (DE VPS)
-  # Usage: docker compose --profile control up
-  # ─────────────────────────────────────────────────────────────────
-  control:
-    profiles: [control]
-    image: ${DOCKERHUB_USERNAME:?DOCKERHUB_USERNAME is required — copy .env.example to .env}/censprobe-control:${DOCKERHUB_TAG:-main}
-    pull_policy: missing
-    build:
-      context: .
-      dockerfile: packages/control/Dockerfile
-    network_mode: host
-    cap_add: [NET_RAW, NET_ADMIN]
-    environment:
-      RUNS_COUNT: ${RUNS_COUNT:-5}
-      IPAPI_IS_KEY: ${IPAPI_IS_KEY:-}
-      CENSPROBE_GIT_EMAIL: ${CENSPROBE_GIT_EMAIL:-noreply@censprobe.local}
-      CENSPROBE_GIT_NAME: ${CENSPROBE_GIT_NAME:-censprobe-bot}
-      CONTROL_ID: ${CONTROL_ID:-control-de-01}
-      CONTROL_COUNTRY: ${CONTROL_COUNTRY:-}
-    volumes:
-      - ./:/workspace
-      - ~/.ssh:/root/.ssh:ro
-    working_dir: /workspace
-    restart: "no"
-
-  # ─────────────────────────────────────────────────────────────────
-  # 5. DASHBOARD — Grafana + Postgres + sync-api
+  # 4. DASHBOARD — Grafana + Postgres + sync-api
   # Usage: docker compose --profile dashboard up -d
   # Open: http://localhost:3000 (admin/admin)
   # ─────────────────────────────────────────────────────────────────
   postgres:
     profiles: [dashboard]
-    image: postgres:16
+    # Digest pinned alongside the tag so a future minor bump on Docker
+    # Hub can't silently change the binary in an existing deployment.
+    # Bump both together when upgrading.
+    image: postgres:16@sha256:71e27bf60b70bded003791b5573f8b808365613f341df20ffcf0c1ed7bc13ddf
     environment:
       POSTGRES_DB: censprobe
       POSTGRES_USER: censprobe
-      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required — copy .env.example to .env}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
       - db_data:/var/lib/postgresql/data
     healthcheck:
@@ -147,13 +129,13 @@ services:
 
   sync-api:
     profiles: [dashboard]
-    image: ${DOCKERHUB_USERNAME:?DOCKERHUB_USERNAME is required — copy .env.example to .env}/censprobe-sync-api:${DOCKERHUB_TAG:-main}
+    image: ${DOCKERHUB_USERNAME}/censprobe-sync-api:${DOCKERHUB_TAG:-main}
     pull_policy: missing
     build:
       context: .
       dockerfile: packages/dashboard/sync-api/Dockerfile
     environment:
-      DATABASE_URL: postgresql+asyncpg://censprobe:${DB_PASSWORD:?DB_PASSWORD is required}@postgres/censprobe
+      DATABASE_URL: postgresql+asyncpg://censprobe:${DB_PASSWORD}@postgres/censprobe
       CENSPROBE_IMPORT_INTERVAL_SEC: ${CENSPROBE_IMPORT_INTERVAL_SEC:-60}
     volumes:
       - ./:/workspace
@@ -182,9 +164,10 @@ services:
     # 11.5.x is the long-term support line maintained alongside 13.x;
     # 11.2.0 missed several CVE fixes published in 2025. Bumping the
     # minor only keeps the schemaVersion: 39 dashboards compatible.
-    image: grafana/grafana:11.5.4
+    # Digest pinned alongside the tag — bump both together.
+    image: grafana/grafana:11.5.4@sha256:7c06aabc89f593c7dbb53bb346829e8d884acf75dafa304a09041dd2cae883ec
     environment:
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?GRAFANA_PASSWORD is required — copy .env.example to .env}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
       GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s:%(http_port)s/"
       DB_PASSWORD: ${DB_PASSWORD:-censprobe}
       # ── strip Grafana to dashboards only ──────────────────────────────

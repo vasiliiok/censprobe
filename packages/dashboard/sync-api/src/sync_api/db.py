@@ -23,7 +23,6 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
-    text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -124,7 +123,7 @@ class TestResult(Base):
     attempts = Column(Integer, default=1)
     notes = Column(Text, nullable=True)
     timestamp = Column(DateTime(timezone=True), nullable=True)
-    source = Column(String(32), default="solo")  # solo | listener | control
+    source = Column(String(32), default="solo")  # solo | listener
 
     test_run = relationship("TestRun", back_populates="results")
 
@@ -194,100 +193,15 @@ class ProtocolResult(Base):
     session = relationship("ListenerSession", back_populates="protocol_results")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Idempotent schema migrations
-# ─────────────────────────────────────────────────────────────────────────────
-#
-# `Base.metadata.create_all` only creates *missing* tables — it never adds new
-# columns or constraints to tables that already exist. We don't ship a full
-# Alembic setup (overkill for ~4 tables, single writer), so we patch the live
-# schema by hand using ``IF NOT EXISTS`` DDL. Every statement here MUST be
-# idempotent: this function runs on every container start.
-#
-# When you add or rename a column in a model, append an ``ALTER TABLE``
-# statement here so existing dashboard deployments pick it up without manual
-# `psql` surgery.
-_MIGRATIONS: tuple[str, ...] = (
-    # test_runs: kernel/distro were added after v0.1; nullable so they're
-    # safe to backfill as NULL on upgrade.
-    "ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS kernel VARCHAR(64)",
-    "ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS distro VARCHAR(128)",
-    "ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS last_synced_at TIMESTAMPTZ",
-    "ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS detected_techniques TEXT[]",
-    "ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS recommended_protocols TEXT[]",
-    "ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS dns_integrity DOUBLE PRECISION",
-    "ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS tls_integrity DOUBLE PRECISION",
-    "ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS telegram_health DOUBLE PRECISION",
-    "ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS throttling_detected BOOLEAN DEFAULT FALSE",
-    # Composite dedup index (matches __table_args__ on TestResult).
-    "CREATE INDEX IF NOT EXISTS ix_test_results_run_file "
-    "ON test_results(test_run_id, report_file)",
-    # ipv4_masked → ipv4: column renamed (no longer masking to /24).
-    # The DO block handles the case where the column was already renamed.
-    """DO $$
-BEGIN
-  IF EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_name='test_runs' AND column_name='ipv4_masked'
-  ) THEN
-    ALTER TABLE test_runs RENAME COLUMN ipv4_masked TO ipv4;
-  END IF;
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_name='test_runs' AND column_name='ipv4'
-  ) THEN
-    ALTER TABLE test_runs ADD COLUMN ipv4 VARCHAR(64);
-  END IF;
-END $$""",
-)
-
-
-async def _run_migrations(conn) -> None:
-    """Apply additive, idempotent DDL on top of create_all.
-
-    The unique constraint on listener_sessions(test_run_id, report_file) is
-    handled separately because Postgres lacks an ``ADD CONSTRAINT IF NOT
-    EXISTS`` form — we look it up in pg_catalog first.
-    """
-    for stmt in _MIGRATIONS:
-        await conn.execute(text(stmt))
-
-    # Add the unique constraint only if it isn't there yet, and only if the
-    # existing data permits it (older deployments may have dupes from before
-    # the constraint existed; in that case we log and skip rather than crash
-    # the whole startup).
-    exists = (
-        await conn.execute(
-            text(
-                "SELECT 1 FROM pg_constraint "
-                "WHERE conname = 'uq_listener_sessions_run_file'"
-            )
-        )
-    ).scalar()
-    if not exists:
-        try:
-            await conn.execute(
-                text(
-                    "ALTER TABLE listener_sessions "
-                    "ADD CONSTRAINT uq_listener_sessions_run_file "
-                    "UNIQUE (test_run_id, report_file)"
-                )
-            )
-        except Exception as e:  # pragma: no cover — recovery path
-            # Likely a duplicate row left over from a pre-constraint refresh.
-            # Don't kill startup over this; surface it for the operator and
-            # let dedupe-by-query keep doing its job.
-            import logging
-            logging.getLogger(__name__).warning(
-                "Could not add uq_listener_sessions_run_file (duplicate rows?): %s", e
-            )
-
-
 async def init_db() -> None:
-    """Create all tables (if missing), then patch any new columns/indexes."""
+    """Create all tables (if missing).
+
+    Schema is single-source-of-truth via the SQLAlchemy models above.
+    create_all() is a no-op for tables that already exist with the
+    declared shape; on a fresh DB it stamps the full schema in one shot.
+    """
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        await _run_migrations(conn)
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:

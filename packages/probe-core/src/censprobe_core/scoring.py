@@ -44,7 +44,6 @@ BLOCKING_VERDICTS: frozenset[Verdict] = frozenset({
     Verdict.IP_DROPPED,
     Verdict.RST_INJECTED,
     Verdict.REFUSED,
-    Verdict.THROTTLED,
     Verdict.YOUTUBE_SNI_THROTTLED,
 })
 
@@ -72,10 +71,10 @@ def compute_scores(
     scores.tls_integrity = _ok_pct(tls_results)
 
     # ── Throttling detected ───────────────────────────────────────────────────
+    # Only Method-B SNI throttling produces a non-OK verdict here.
     thr_results = [r for r in solo_results if r.category == "throttling"]
     scores.throttling_detected = any(
-        r.verdict in (Verdict.THROTTLED, Verdict.YOUTUBE_SNI_THROTTLED)
-        for r in thr_results
+        r.verdict == Verdict.YOUTUBE_SNI_THROTTLED for r in thr_results
     )
 
     # ── Telegram health ───────────────────────────────────────────────────────

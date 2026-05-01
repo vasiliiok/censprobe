@@ -10,6 +10,12 @@ on:
 jobs:
   build:
     name: ${{ matrix.name }}
+    # Skip the whole job on forks. They inherit this workflow file but
+    # not vars.DOCKERHUB_USERNAME / secrets.DOCKERHUB_TOKEN, so the
+    # docker/login-action step would otherwise fail with a confusing red
+    # X across every fork. A forker who actually wants to publish their
+    # own images can drop this guard or replace the repo string.
+    if: github.repository == 'vasiliiok/censprobe'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -25,9 +31,6 @@ jobs:
           - name: solo
             dockerfile: packages/solo/Dockerfile
             path: solo
-          - name: control
-            dockerfile: packages/control/Dockerfile
-            path: control
           - name: listener
             dockerfile: packages/listener/Dockerfile
             path: listener

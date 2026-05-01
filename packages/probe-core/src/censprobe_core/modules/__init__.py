@@ -6,7 +6,6 @@ from censprobe_core.modules import (  # noqa: F401
     dns,
     http,
     middlebox,
-    protocols,
     tcp,
     telegram,
     throttling,
