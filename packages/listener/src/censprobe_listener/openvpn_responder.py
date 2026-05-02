@@ -9,24 +9,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import subprocess
 import tempfile
 from pathlib import Path
 
+from censprobe_core.link_utils import delete_iface
+from censprobe_core.utils import write_secret
+
 logger = logging.getLogger(__name__)
-
-
-def _write_secret(path: Path, content: str) -> None:
-    """Create `path` with mode 0o600 atomically (no TOCTOU window)."""
-    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    try:
-        fh = os.fdopen(fd, "w", encoding="utf-8")
-    except BaseException:
-        os.close(fd)
-        raise
-    with fh:
-        fh.write(content)
 
 
 # Threshold for "real data flowed through the OpenVPN tun" — see the
@@ -71,7 +61,7 @@ class OpenVPNResponder:
         # with mode 0o600 atomically to close the TOCTOU window that
         # `write_text` + `chmod` would leave open.
         psk_path = tmpdir / "static.key"
-        _write_secret(psk_path, self.psk_pem)
+        write_secret(psk_path, self.psk_pem)
 
         # Status/log files colocated with config (never shared across instances).
         self._status_path = tmpdir / "status.log"
@@ -80,7 +70,7 @@ class OpenVPNResponder:
         # Pre-clean any leftover tun device from a crashed previous run —
         # `dev <name>` makes OpenVPN refuse to start if the interface is
         # already present, so we must drop it first.
-        await asyncio.get_running_loop().run_in_executor(None, _delete_iface, _OVPN_SRV_IFACE)
+        await asyncio.get_running_loop().run_in_executor(None, delete_iface, _OVPN_SRV_IFACE)
 
         # AEAD ciphers (GCM / ChaCha20-Poly1305) require TLS mode; in
         # static-key / `secret` mode OpenVPN 2.4+ refuses them with
@@ -168,7 +158,7 @@ verb 1
         # tun on graceful exit, but if we had to SIGKILL it the device
         # leaks and would block the next start().
         await asyncio.get_running_loop().run_in_executor(
-            None, _delete_iface, _OVPN_SRV_IFACE
+            None, delete_iface, _OVPN_SRV_IFACE
         )
 
         if self._config_dir:
@@ -199,11 +189,3 @@ verb 1
             return self._final_bytes_received > _MIN_OVPN_BYTES
         _, b = self._read_status()
         return b > _MIN_OVPN_BYTES
-
-
-def _delete_iface(name: str) -> None:
-    """Best-effort `ip link del`; never raises."""
-    subprocess.run(
-        ["ip", "link", "del", name],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
-    )

@@ -19,7 +19,7 @@ import yaml
 from censprobe_core import __version__ as PROBE_CORE_VERSION
 from censprobe_core.models import ServerMeta, TestResult
 from censprobe_core.modules import dns, tcp, tls, http, telegram, throttling, middlebox, cloudflare
-from censprobe_core.scoring import BLOCKING_VERDICTS
+from censprobe_core.scoring import BLOCKING_VERDICT_STRINGS
 
 logger = logging.getLogger(__name__)
 
@@ -277,11 +277,10 @@ def _summarize(results: list[TestResult], module_failures: list[str] | None = No
     dashboard can flag scoring done on partial data instead of treating
     a half-empty run as legitimate "neutral 50%".
     """
-    # Verdicts that mean "this target was actually censored / unreachable".
-    # Imported from scoring so the CLI summary, saved JSON summary, and
-    # Grafana dashboards never disagree on what counts as blocked.
-    BLOCKED_VERDICTS = {str(v) for v in BLOCKING_VERDICTS}
-
+    # Verdicts that mean "this target was actually censored / unreachable"
+    # — single source of truth in scoring.BLOCKING_VERDICT_STRINGS so the
+    # CLI summary, saved JSON summary, and Grafana never disagree on what
+    # counts as blocked.
     total = len(results)
     by_verdict: dict[str, int] = {}
     by_category: dict[str, dict[str, int]] = {}
@@ -296,9 +295,9 @@ def _summarize(results: list[TestResult], module_failures: list[str] | None = No
         if cat not in by_category:
             by_category[cat] = {}
         by_category[cat][v] = by_category[cat].get(v, 0) + 1
-        if r.method and v in BLOCKED_VERDICTS:
+        if r.method and v in BLOCKING_VERDICT_STRINGS:
             techniques.add(str(r.method))
-        if v in BLOCKED_VERDICTS:
+        if v in BLOCKING_VERDICT_STRINGS:
             blocked_count += 1
         elif v == "OK":
             ok_count += 1

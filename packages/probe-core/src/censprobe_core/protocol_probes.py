@@ -24,17 +24,31 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from censprobe_core.echo_ports import ECHO_PORTS
+from censprobe_core.link_utils import async_delete_iface, async_rm_amneziawg_socket
 from censprobe_core.models import Verdict
+from censprobe_core.utils import graceful_terminate
 
 logger = logging.getLogger(__name__)
 
 PROBE_TIMEOUT = 15.0
-# Must match censprobe_listener.echo_server.ECHO_PORTS.
-ECHO_PORTS: dict[str, int] = {
-    "shadowsocks": 9991,
-    "vless_reality": 9992,
-    "hysteria2": 9993,
-}
+
+# Re-exported so existing callers that did `from
+# censprobe_core.protocol_probes import ECHO_PORTS` keep working — the
+# canonical home is censprobe_core.echo_ports.
+__all__ = [
+    "ECHO_PORTS",
+    "PROBE_TIMEOUT",
+    "ProbeResult",
+    "probe_amneziawg",
+    "probe_hysteria2",
+    "probe_openvpn",
+    "probe_shadowsocks",
+    "probe_vless_reality",
+    "probe_wireguard",
+    "ping_echo",
+    "proxy_echo",
+]
 
 # Deterministic interface names so a crashed run leaves something we can
 # proactively clean up (otherwise a stale tun/wg device keeps holding the
@@ -42,11 +56,6 @@ ECHO_PORTS: dict[str, int] = {
 _OVPN_CLI_IFACE = "censovpn1"
 _WG_CLI_IFACE = "censwg1"
 _AWG_CLI_IFACE = "censawg1"
-
-# amneziawg-go writes a control socket here; `ip link del` removes the TUN
-# but leaves the socket behind, after which the next `awg-quick up` is
-# unhappy. We rm both pre- and post-run.
-_AWG_RUNDIR = Path("/var/run/amneziawg")
 
 
 @dataclass
@@ -193,35 +202,6 @@ def _classify_proxy_outcome(
     return False, False
 
 
-async def _graceful_terminate(proc: asyncio.subprocess.Process, timeout: float = 0.5) -> None:
-    """
-    Terminate an asyncio subprocess and reap it.
-
-    asyncio.Process.returncode is only updated once wait() observes exit, so
-    a plain `terminate() + sleep + returncode is None` check would always
-    end up calling kill() and leave the child as a zombie until wait() runs.
-    """
-    if proc.returncode is not None:
-        return
-    try:
-        proc.terminate()
-    except (OSError, ProcessLookupError):
-        return
-    try:
-        await asyncio.wait_for(proc.wait(), timeout=timeout)
-        return
-    except asyncio.TimeoutError:
-        pass
-    try:
-        proc.kill()
-    except (OSError, ProcessLookupError):
-        pass
-    try:
-        await proc.wait()
-    except Exception:
-        pass
-
-
 async def ping_echo(ip: str, timeout: float = 3.0) -> bool:
     """Ping a tunnel IP to verify data echo."""
     code, _, _ = await run_cmd(
@@ -286,24 +266,6 @@ def _pick_free_local_port() -> int:
         return s.getsockname()[1]
     finally:
         s.close()
-
-
-async def _cleanup_iface(iface: str) -> None:
-    """Best-effort removal of a tun/wg/awg interface (no error if absent)."""
-    await run_cmd(["ip", "link", "del", iface], timeout=3.0)
-
-
-async def _cleanup_awg_socket(iface: str) -> None:
-    """Remove leftover amneziawg-go control socket for <iface>.
-
-    `ip link del` only removes the TUN device; the unix socket persists
-    and would conflict with the next `awg-quick up`.
-    """
-    sock = _AWG_RUNDIR / f"{iface}.sock"
-    try:
-        sock.unlink(missing_ok=True)
-    except OSError:
-        pass
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -380,7 +342,7 @@ async def probe_openvpn(host: str, port: int, psk_pem: str) -> ProbeResult:
     # Pre-clean any stale tun from a previously-crashed run. With a fixed
     # interface name we can reliably scrub the leftover /32 peer route to
     # 10.200.0.1, which would otherwise blackhole this probe.
-    await _cleanup_iface(_OVPN_CLI_IFACE)
+    await async_delete_iface(_OVPN_CLI_IFACE)
 
     with tempfile.TemporaryDirectory(prefix="censprobe_client_ovpn_") as tmpdir:
         tmp_path = Path(tmpdir)
@@ -447,10 +409,10 @@ verb 1
                 finally:
                     await _stop_log_drain(drain_task)
         finally:
-            await _graceful_terminate(proc)
+            await graceful_terminate(proc)
             # Belt-and-braces: openvpn normally tears down its own tun on
             # exit, but if it was SIGKILLed the device leaks.
-            await _cleanup_iface(_OVPN_CLI_IFACE)
+            await async_delete_iface(_OVPN_CLI_IFACE)
 
     return result
 
@@ -491,13 +453,13 @@ PersistentKeepalive = 25
 
         # Remove any stale interface from a previously killed run. wg-quick
         # up would otherwise fail with "File exists" in host netns.
-        await _cleanup_iface(_WG_CLI_IFACE)
+        await async_delete_iface(_WG_CLI_IFACE)
 
         code, _, err = await run_cmd(["wg-quick", "up", str(conf_path)])
         if code != 0:
             result.error = f"wg-quick up failed: {err}"
             # Even on failure, scrub anything wg-quick may have half-set-up.
-            await _cleanup_iface(_WG_CLI_IFACE)
+            await async_delete_iface(_WG_CLI_IFACE)
             return result
 
         try:
@@ -529,7 +491,7 @@ PersistentKeepalive = 25
             # back to a hard `ip link del` so a leftover interface never
             # survives this probe.
             await run_cmd(["wg-quick", "down", str(conf_path)])
-            await _cleanup_iface(_WG_CLI_IFACE)
+            await async_delete_iface(_WG_CLI_IFACE)
 
     return result
 
@@ -581,14 +543,14 @@ PersistentKeepalive = 25
         # a previously killed run. amneziawg-go writes a unix socket under
         # /var/run/amneziawg/<iface>.sock; `ip link del` only drops the
         # TUN, leaving the socket behind to confuse the next bring-up.
-        await _cleanup_iface(_AWG_CLI_IFACE)
-        await _cleanup_awg_socket(_AWG_CLI_IFACE)
+        await async_delete_iface(_AWG_CLI_IFACE)
+        await async_rm_amneziawg_socket(_AWG_CLI_IFACE)
 
         code, _, err = await run_cmd(["awg-quick", "up", str(conf_path)])
         if code != 0:
             result.error = f"awg-quick up failed: {err}"
-            await _cleanup_iface(_AWG_CLI_IFACE)
-            await _cleanup_awg_socket(_AWG_CLI_IFACE)
+            await async_delete_iface(_AWG_CLI_IFACE)
+            await async_rm_amneziawg_socket(_AWG_CLI_IFACE)
             return result
 
         try:
@@ -626,8 +588,8 @@ PersistentKeepalive = 25
             # awg-quick down handles routing/socket cleanup when the conf
             # is still readable; the hard fallbacks ensure no leftovers.
             await run_cmd(["awg-quick", "down", str(conf_path)])
-            await _cleanup_iface(_AWG_CLI_IFACE)
-            await _cleanup_awg_socket(_AWG_CLI_IFACE)
+            await async_delete_iface(_AWG_CLI_IFACE)
+            await async_rm_amneziawg_socket(_AWG_CLI_IFACE)
 
     return result
 
@@ -762,7 +724,7 @@ socks5:
                 result.verdict = Verdict.BLOCKED
         finally:
             await _stop_log_drain(drain_task)
-            await _graceful_terminate(proc)
+            await graceful_terminate(proc)
 
     return result
 
@@ -826,6 +788,6 @@ async def _tunnel_via_singbox_or_xray(
                 result.verdict = Verdict.BLOCKED
         finally:
             await _stop_log_drain(drain_task)
-            await _graceful_terminate(proc)
+            await graceful_terminate(proc)
 
     return result

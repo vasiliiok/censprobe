@@ -42,6 +42,8 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 
+from censprobe_core.utils import write_secret
+
 logger = logging.getLogger(__name__)
 
 
@@ -123,14 +125,14 @@ class CredServer:
         # Materialise PEMs to disk for SSLContext.load_cert_chain — Python's
         # ssl module can't load PEM bytes directly. They sit in a 0o700
         # tempdir so they're readable only by this process; both files get
-        # cleaned up on stop().
+        # cleaned up on stop(). ``write_secret`` opens with O_CREAT mode
+        # 0o600 so the key is never world-readable, even briefly between
+        # write_bytes() and a follow-up chmod.
         self._tmpdir = tempfile.mkdtemp(prefix="censprobe_cred_")
         self._cert_path = Path(self._tmpdir) / "cert.pem"
         self._key_path = Path(self._tmpdir) / "key.pem"
-        self._cert_path.write_bytes(self._cert_pem)
-        self._key_path.write_bytes(self._key_pem)
-        self._cert_path.chmod(0o600)
-        self._key_path.chmod(0o600)
+        write_secret(self._cert_path, self._cert_pem)
+        write_secret(self._key_path, self._key_pem)
 
         self._server: http.server.ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None

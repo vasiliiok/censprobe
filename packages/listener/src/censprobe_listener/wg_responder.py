@@ -13,45 +13,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import subprocess
 import tempfile
 from pathlib import Path
 
+from censprobe_core.link_utils import delete_iface, rm_amneziawg_socket
+from censprobe_core.utils import write_secret
+
 logger = logging.getLogger(__name__)
 
 
-def _write_secret(path: Path, content: str) -> None:
-    """Atomically create `path` with mode 0o600 and write `content`.
-
-    Using `Path.write_text` + `Path.chmod` opens a TOCTOU window during
-    which the freshly-created file inherits the process umask (typically
-    0o022 → world-readable). The contents here include WG/AWG server
-    private keys and pre-shared keys; writing them to a world-readable
-    path on a multi-tenant host even briefly is a real exposure.
-    """
-    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    try:
-        fh = os.fdopen(fd, "w", encoding="utf-8")
-    except BaseException:
-        os.close(fd)
-        raise
-    with fh:
-        fh.write(content)
-
 _WG_INTERFACE = "censwg0"
-
-# amneziawg-go's userspace control socket lives here. `ip link del` only
-# removes the TUN; the socket file persists and trips up the next bring-up.
-_AWG_RUNDIR = Path("/var/run/amneziawg")
-
-
-def _rm_awg_socket(iface: str) -> None:
-    """Best-effort cleanup of leftover amneziawg-go control socket."""
-    try:
-        (_AWG_RUNDIR / f"{iface}.sock").unlink(missing_ok=True)
-    except OSError:
-        pass
 
 # `wg show <iface> transfer` reports the kernel's `peer->rx_bytes` counter,
 # which (linux drivers/net/wireguard/receive.c) is incremented only for
@@ -139,7 +111,7 @@ class WireGuardResponder:
         # `0o600` on creation, not after — write_text(...)+chmod is a TOCTOU
         # window during which the privatekey is world-readable.
         pk_path = tmpdir / "privatekey"
-        _write_secret(pk_path, self.server_private_key)
+        write_secret(pk_path, self.server_private_key)
 
         # The kernel `wg setconf` parser rejects `Address =` — that's a
         # wg-quick bash-wrapper directive, not a kernel-interface key. The
@@ -161,7 +133,7 @@ AllowedIPs = 10.202.0.2/32
         # Config has the server PrivateKey + PSK inline → must be 0o600
         # from the moment it touches disk.
         conf_path = tmpdir / f"{self.interface}.conf"
-        _write_secret(conf_path, config)
+        write_secret(conf_path, config)
 
         loop = asyncio.get_running_loop()
 
@@ -169,10 +141,7 @@ AllowedIPs = 10.202.0.2/32
             # If a previous run crashed (OOM, SIGKILL, docker stop) the
             # interface may still exist in host netns (we run with
             # network_mode: host). Remove any stale iface before adding ours.
-            subprocess.run(
-                ["ip", "link", "del", self.interface],
-                stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, check=False,
-            )
+            delete_iface(self.interface)
             try:
                 subprocess.run(
                     ["ip", "link", "add", self.interface, "type", "wireguard"],
@@ -206,17 +175,7 @@ AllowedIPs = 10.202.0.2/32
         self._snapshot_taken = True
 
         loop = asyncio.get_running_loop()
-
-        def _tear_down() -> None:
-            try:
-                subprocess.run(
-                    ["ip", "link", "del", self.interface],
-                    capture_output=True,
-                )
-            except Exception as e:
-                logger.warning("WireGuard teardown error: %s", e)
-
-        await loop.run_in_executor(None, _tear_down)
+        await loop.run_in_executor(None, delete_iface, self.interface)
 
         if self._tmpdir:
             try:
@@ -307,7 +266,7 @@ AllowedIPs = 10.201.0.2/32
 """
         # Inline server PrivateKey / PSK → write 0o600 from the start.
         self._conf_path = tmpdir / f"{self.interface}.conf"
-        _write_secret(self._conf_path, config)
+        write_secret(self._conf_path, config)
 
         loop = asyncio.get_running_loop()
 
@@ -317,11 +276,8 @@ AllowedIPs = 10.201.0.2/32
             # file; ip link del works regardless. Removing the .sock file
             # is mandatory — amneziawg-go refuses to bind a fresh socket
             # when a leftover from a SIGKILLed daemon is still on disk.
-            subprocess.run(
-                ["ip", "link", "del", self.interface],
-                stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, check=False,
-            )
-            _rm_awg_socket(self.interface)
+            delete_iface(self.interface)
+            rm_amneziawg_socket(self.interface)
             try:
                 subprocess.run(
                     ["awg-quick", "up", str(self._conf_path)],
@@ -355,11 +311,8 @@ AllowedIPs = 10.201.0.2/32
                     logger.warning("AmneziaWG stop error: %s", e)
                 # Hard fallback in case awg-quick down failed (e.g. conf
                 # file was never written or socket was already orphaned).
-                subprocess.run(
-                    ["ip", "link", "del", self.interface],
-                    stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, check=False,
-                )
-                _rm_awg_socket(self.interface)
+                delete_iface(self.interface)
+                rm_amneziawg_socket(self.interface)
 
             await loop.run_in_executor(None, _stop)
 

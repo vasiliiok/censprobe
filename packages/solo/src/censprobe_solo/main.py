@@ -20,7 +20,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 from pathlib import Path
 
 import click
@@ -33,13 +32,14 @@ from rich.table import Table
 
 from censprobe_core.models import ListenerReport, ReportMeta, ServerMeta
 from censprobe_core.runner import ProbeRunner
-from censprobe_core.scoring import BLOCKING_VERDICTS, compute_scores
+from censprobe_core.scoring import BLOCKING_VERDICT_STRINGS, compute_scores
 from censprobe_core.server_meta import (
     detect_distro,
     detect_kernel,
     detect_server_meta,
     set_vantage_country,
 )
+from censprobe_core.utils import validate_id
 
 # Bootstrap logging (after imports to avoid E402)
 logging.basicConfig(
@@ -52,10 +52,6 @@ logger = logging.getLogger(__name__)
 
 console = Console()
 WORKSPACE = Path("/workspace")
-
-# test_id flows into reports/<test_id>/... — refuse anything that could
-# escape the intended directory.
-_SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 
 
 @click.command()
@@ -71,10 +67,10 @@ def main(test_id: str, repeats: int, verbose: bool) -> None:
     if verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    if not _SAFE_ID_RE.match(test_id):
-        raise click.BadParameter(
-            f"--test-id must match [A-Za-z0-9_.-] (1-64 chars); got {test_id!r}"
-        )
+    try:
+        validate_id("--test-id", test_id)
+    except ValueError as e:
+        raise click.BadParameter(str(e)) from e
 
     console.print(Panel.fit(
         f"[bold cyan]Censprobe Solo[/bold cyan]\n"
@@ -198,7 +194,6 @@ def _print_summary(results, scores) -> None:
     table.add_column("Other", style="yellow", justify="right")
     table.add_column("Total", justify="right")
 
-    blocked_strs = {str(v) for v in BLOCKING_VERDICTS}
     by_cat: dict[str, dict[str, int]] = {}
     for r in results:
         cat = r.category
@@ -207,7 +202,7 @@ def _print_summary(results, scores) -> None:
         v = str(r.verdict)
         if v == "OK":
             by_cat[cat]["ok"] += 1
-        elif v in blocked_strs:
+        elif v in BLOCKING_VERDICT_STRINGS:
             by_cat[cat]["blocked"] += 1
         else:
             by_cat[cat]["other"] += 1

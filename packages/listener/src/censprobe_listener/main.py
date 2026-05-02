@@ -31,7 +31,6 @@ import asyncio
 import json
 import logging
 import os
-import re
 import signal
 import sys
 from datetime import datetime, timezone
@@ -45,6 +44,7 @@ from rich.table import Table
 
 from censprobe_core.models import EndpointMeta, ListenerReport, ProtocolResult, Verdict
 from censprobe_core.server_meta import enrich_endpoint
+from censprobe_core.utils import validate_id
 from censprobe_listener.cred_server import CredServer, detect_external_ip
 from censprobe_listener.credentials import (
     ProtocolCredentials,
@@ -69,20 +69,20 @@ console = Console()
 
 WORKSPACE = Path("/workspace")
 
-# Operator-supplied identifiers flow into filesystem paths
-# (reports/<test_id>/server-listener-<session_id>-*.json) — refusing
-# anything outside [A-Za-z0-9_.-] closes the path-traversal door without
-# breaking the documented naming convention `<provider>-<city>-<NN>` /
-# `client-<type>-<provider>-<city>`.
-_SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 
+def _click_validate_id(field: str, value: str) -> str:
+    """click.BadParameter wrapper around the shared probe-core validator.
 
-def _validate_id(field: str, value: str) -> str:
-    if not _SAFE_ID_RE.match(value):
-        raise click.BadParameter(
-            f"{field} must match [A-Za-z0-9_.-] (1-64 chars); got {value!r}"
-        )
-    return value
+    Operator-supplied identifiers flow into filesystem paths
+    (reports/<test_id>/server-listener-<session_id>-*.json) and into
+    Postgres row keys downstream — the underlying ``validate_id`` rejects
+    anything outside ``[A-Za-z0-9_.-]`` so path-traversal and SQL/Grafana
+    smuggling don't make it past the CLI.
+    """
+    try:
+        return validate_id(field, value)
+    except ValueError as e:
+        raise click.BadParameter(str(e)) from e
 
 # Hard ceiling on graceful-shutdown time. Any responder still inside its
 # stop() coroutine after this many seconds gets cancelled so the listener
@@ -110,8 +110,8 @@ def main(test_id: str, session_id: str, creds_port: int, verbose: bool) -> None:
     if verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    test_id = _validate_id("--test-id", test_id)
-    session_id = _validate_id("--session-id", session_id)
+    test_id = _click_validate_id("--test-id", test_id)
+    session_id = _click_validate_id("--session-id", session_id)
 
     console.print(Panel.fit(
         f"[bold cyan]Censprobe Listener[/bold cyan]\n"

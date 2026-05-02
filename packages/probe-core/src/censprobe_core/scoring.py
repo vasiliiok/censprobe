@@ -48,6 +48,15 @@ BLOCKING_VERDICTS: frozenset[Verdict] = frozenset({
 })
 
 
+# Same set as BLOCKING_VERDICTS but materialised as plain strings — what
+# the CLI summaries, JSON summaries, and Grafana queries actually compare
+# against. Centralising the conversion here means callers never have to
+# rebuild the set with `{str(v) for v in BLOCKING_VERDICTS}` and a typo
+# (e.g. forgetting `str()`) cannot silently miscount a category as
+# "other".
+BLOCKING_VERDICT_STRINGS: frozenset[str] = frozenset(str(v) for v in BLOCKING_VERDICTS)
+
+
 def compute_scores(
     solo_results: list[TestResult],
     listener_reports: list[ListenerReport] | None = None,

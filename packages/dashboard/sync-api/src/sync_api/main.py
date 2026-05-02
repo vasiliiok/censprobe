@@ -20,7 +20,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import re
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -37,6 +36,7 @@ from censprobe_core.models import (
     TestResult as CoreTestResult,
 )
 from censprobe_core.scoring import compute_scores
+from censprobe_core.utils import SAFE_ID_RE
 from sync_api.db import (
     ListenerSession,
     ProtocolResult,
@@ -144,7 +144,7 @@ def _list_report_files(reports_root: Path) -> list[tuple[str, Path, list[Path]]]
         if test_dir.is_symlink() or not test_dir.is_dir():
             continue
         # Mirror the producer-side path-traversal guard.
-        if not _SAFE_TEST_ID_RE.match(test_dir.name):
+        if not SAFE_ID_RE.match(test_dir.name):
             continue
         # Filter symlinks at file enumeration time — load_json checks
         # again on read but doing it here keeps the work list clean.
@@ -153,11 +153,6 @@ def _list_report_files(reports_root: Path) -> list[tuple[str, Path, list[Path]]]
         )
         out.append((test_dir.name, test_dir / "meta.yaml", report_files))
     return out
-
-
-# Mirror the producer-side validation in listener/main.py and
-# solo/main.py: only ASCII letters/digits/_-. up to 64 chars.
-_SAFE_TEST_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 
 
 def _is_file_stable(path: Path, settle_sec: float = 1.0) -> bool:

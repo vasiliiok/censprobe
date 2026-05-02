@@ -14,14 +14,16 @@ from __future__ import annotations
 import asyncio
 import logging
 
-logger = logging.getLogger(__name__)
+# Canonical home of the echo-port contract is probe-core (it is shared
+# with the client-side probe via :mod:`censprobe_core.protocol_probes`,
+# so a single source of truth eliminates silent drift). Re-exported here
+# for back-compat with the responder modules that imported it from this
+# file historically.
+from censprobe_core.echo_ports import ECHO_PORTS
 
-# Canonical per-protocol echo ports — client probes target these.
-ECHO_PORTS: dict[str, int] = {
-    "shadowsocks": 9991,
-    "vless_reality": 9992,
-    "hysteria2": 9993,
-}
+__all__ = ["ECHO_PORTS", "EchoServer"]
+
+logger = logging.getLogger(__name__)
 
 
 class EchoServer:
