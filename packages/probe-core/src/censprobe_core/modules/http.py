@@ -104,7 +104,7 @@ async def _test_url(
             # buffer the whole body into RAM, and a TSPU block-page streaming
             # an ISO would OOM us. We stop reading after _MAX_BODY_READ.
             async with client.stream(
-                "GET", url, headers={"User-Agent": _ua_probe()}
+                "GET", url, headers=_BROWSER_HEADERS
             ) as r:
                 body_length = 0
                 async for chunk in r.aiter_bytes():
@@ -116,9 +116,12 @@ async def _test_url(
                 content_type = r.headers.get("content-type", "")
 
             # If we got here over https://, ConnectError/SSLError did NOT
-            # fire, so TLS *did* succeed. Reusing that boolean below for the
-            # "geoblock vs censorship" attribution.
-            tls_ok = url.startswith("https://")
+            # fire, so TLS *did* succeed against the system trust store
+            # (httpx.AsyncClient was constructed with verify=True). Plain
+            # HTTP requests don't carry a TLS guarantee — for those tls_ok
+            # is False so the 403/451 "geoblock not censorship" rule never
+            # downgrades a network-injected block page on a non-TLS URL.
+            tls_ok = urlparse(url).scheme == "https"
 
             verdict, method = _verdict_from_response(
                 status=status,
@@ -231,18 +234,40 @@ def _timeout_result(test_name: str, url: str, attempts: int = 1) -> TestResult:
     )
 
 
-def _ua_probe() -> str:
-    """
-    Honest User-Agent identifying the probe.
-
-    Spoofing a Chrome UA without sending matching client hints (sec-ch-ua,
-    sec-fetch-*) triggers anti-bot defenses on Meta sites — Facebook and
-    WhatsApp respond with HTTP 400 instead of the normal 200, which the
-    probe then misclassifies as ANOMALY. An honest UA bypasses that
-    inconsistency check; servers that block our UA return a recognisable
-    non-200 status that does reflect a real reachability issue.
-    """
-    return "Mozilla/5.0 (compatible; censprobe/0.1; +https://github.com/vasiliiok/censprobe)"
+# Full Chrome-on-Windows fingerprint for top-level navigation GETs.
+#
+# The goal is to measure what a real user with a real browser sees, not
+# what an "honest probe" sees. A bare Chrome UA without the matching
+# client hints (sec-ch-ua*) and sec-fetch-* set fails Meta's anti-bot
+# inconsistency check (Facebook/WhatsApp return 400), so the full set is
+# load-bearing — drop any one header and we drift back toward false
+# ANOMALY verdicts on those sites.
+#
+# Maintenance: refresh the Chrome major version (UA + sec-ch-ua) every
+# ~6 months. Stale versions become a fingerprint of their own and start
+# tripping the same heuristics we are trying to pass.
+_BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/145.0.0.0 Safari/537.36"
+    ),
+    "Accept": (
+        "text/html,application/xhtml+xml,application/xml;q=0.9,"
+        "image/avif,image/webp,image/apng,*/*;q=0.8,"
+        "application/signed-exchange;v=b3;q=0.7"
+    ),
+    "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Accept-Encoding": "gzip, deflate, br, zstd",
+    "sec-ch-ua": '"Chromium";v="145", "Google Chrome";v="145", "Not?A_Brand";v="24"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"Windows"',
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-User": "?1",
+    "Sec-Fetch-Dest": "document",
+    "Upgrade-Insecure-Requests": "1",
+}
 
 
 def _slug(s: str) -> str:

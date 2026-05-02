@@ -8,8 +8,8 @@ name = "censprobe-sync-api"
 version = "0.4.0"
 requires-python = ">=3.11"
 # Minimal runtime deps. The schema is created by SQLAlchemy `create_all`
-# and evolved via the idempotent ALTER TABLE statements in
-# db._run_migrations(); no Alembic is required.
+# on first start; there is currently no migration story (see db.py docstring).
+# Schema-incompatible changes require dropping the dev `db_data` volume.
 dependencies = [
     "censprobe-core",
     "fastapi>=0.111",

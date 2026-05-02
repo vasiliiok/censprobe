@@ -10,6 +10,13 @@ datasources:
     secureJsonData:
       password: "${DB_PASSWORD}"
     jsonData:
+      # sslmode=disable is safe ONLY because Grafana, Postgres, and
+      # sync-api all live on the same single-host docker bridge network
+      # (see docker-compose.yml — no published port for postgres). If
+      # this deployment ever moves Postgres off-box, change this to
+      # `require` (or `verify-full` with a cert mount) BEFORE crossing
+      # the network — sslmode=disable would otherwise leak the DB
+      # password and every query payload in cleartext on a real LAN.
       sslmode: disable
       maxOpenConns: 10
       maxIdleConns: 10

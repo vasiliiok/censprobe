@@ -2,18 +2,22 @@
 censprobe-listener — Main entrypoint.
 
 Lifecycle:
-  1. Read TEST_ID and SESSION_ID from env.
+  1. Read TEST_ID and SESSION_ID from CLI args / env.
   2. Generate fresh in-memory credentials (one-time per session).
-  3. Start a one-shot HTTPS endpoint (cred_server) that hands the YAML to
-     the client when it presents the right bearer token. Print a ready-to-
-     paste ``docker compose ... up`` command for the operator to send to
-     the client machine.
+  3. Start a one-shot HTTPS endpoint (cred_server) that hands the YAML
+     to the client when it presents the right bearer token. The
+     endpoint also captures the IP of the first authenticated client
+     for later enrichment. Print a ready-to-paste ``docker compose run
+     --rm`` command for the operator to send to the client machine.
   4. Start all 6 VPN protocol responders.
   5. Wait for SIGINT (Ctrl+C) or SIGTERM.
-  6. Stop all responders + the cred endpoint.
-  7. Finalize verdicts and save report as
+  6. Stop all responders, snapshot client IP, then stop the cred endpoint.
+  7. Enrich the captured client IP via ipapi.is into a structured
+     EndpointMeta (no IP literal stored on disk). Three terminal states
+     are recorded — see ListenerReport docstring.
+  8. Save report as
      reports/<TEST_ID>/server-listener-<SESSION_ID>-<ts>.json.
-  8. Exit. Publishing is manual: `git add reports/ && git push` from the
+  9. Exit. Publishing is manual: `git add reports/ && git push` from the
      host when you're ready to share results.
 
 Security note:
@@ -27,6 +31,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import signal
 import sys
 from datetime import datetime, timezone
@@ -38,7 +43,8 @@ from rich.logging import RichHandler
 from rich.panel import Panel
 from rich.table import Table
 
-from censprobe_core.models import ListenerReport, ProtocolResult, Verdict
+from censprobe_core.models import EndpointMeta, ListenerReport, ProtocolResult, Verdict
+from censprobe_core.server_meta import enrich_endpoint
 from censprobe_listener.cred_server import CredServer, detect_external_ip
 from censprobe_listener.credentials import (
     ProtocolCredentials,
@@ -63,6 +69,21 @@ console = Console()
 
 WORKSPACE = Path("/workspace")
 
+# Operator-supplied identifiers flow into filesystem paths
+# (reports/<test_id>/server-listener-<session_id>-*.json) — refusing
+# anything outside [A-Za-z0-9_.-] closes the path-traversal door without
+# breaking the documented naming convention `<provider>-<city>-<NN>` /
+# `client-<type>-<provider>-<city>`.
+_SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+
+
+def _validate_id(field: str, value: str) -> str:
+    if not _SAFE_ID_RE.match(value):
+        raise click.BadParameter(
+            f"{field} must match [A-Za-z0-9_.-] (1-64 chars); got {value!r}"
+        )
+    return value
+
 # Hard ceiling on graceful-shutdown time. Any responder still inside its
 # stop() coroutine after this many seconds gets cancelled so the listener
 # can finish writing its report and exit. docker-compose gives us
@@ -83,11 +104,14 @@ def main(test_id: str, session_id: str, creds_port: int, verbose: bool) -> None:
     """
     Censprobe Listener — expose VPN handshake endpoints, record what clients can reach.
 
-    Run: TEST_ID=selectel-spb-001 SESSION_ID=client-home-rt-spb docker compose --profile listener up
+    Run: docker compose --profile listener run --rm listener --test-id selectel-spb-001 --session-id client-home-rt-spb
     Stop: Ctrl+C → results saved to reports/<TEST_ID>/.
     """
     if verbose:
         logging.getLogger().setLevel(logging.DEBUG)
+
+    test_id = _validate_id("--test-id", test_id)
+    session_id = _validate_id("--session-id", session_id)
 
     console.print(Panel.fit(
         f"[bold cyan]Censprobe Listener[/bold cyan]\n"
@@ -129,7 +153,7 @@ async def _async_main(test_id: str, session_id: str, creds_port: int) -> None:
         test_id=test_id,
         session_id=session_id,
         server_host=server_host,
-        creds_port=_CREDS_PORT,
+        creds_port=creds_port,
         creds_token=cred_server.token,
         creds_cert_sha256=cred_server.cert_sha256,
     )
@@ -208,6 +232,11 @@ async def _async_main(test_id: str, session_id: str, creds_port: int) -> None:
             logger.warning("Echo server stop timed out after 5s; continuing")
         except Exception as e:
             logger.warning("Echo server stop error: %s", e)
+    # Snapshot client IP from the cred-endpoint BEFORE tearing it down.
+    # The IP is captured under the cred-server's lock when the client
+    # successfully fetches credentials; reading it now gives a stable
+    # answer even if a late retry races with shutdown.
+    client_ip = cred_server.client_ip
     # Tear down the credentials endpoint last so a slow client retry can
     # still complete during the responder-shutdown window. cred_server.stop
     # is synchronous and doesn't wait for in-flight handlers, so this is
@@ -223,13 +252,33 @@ async def _async_main(test_id: str, session_id: str, creds_port: int) -> None:
     # Print final table
     _print_final_results(results, duration)
 
-    # ── Step 7: Save report ───────────────────────────────────────────────────
+    # ── Step 7: Enrich client identity (IP-free in serialized output) ────────
+    # Three terminal states recorded in the report:
+    #   * client_ip is None             → client_connected=False, client=None
+    #     (the network never let the client reach 8443 — strongest blocking
+    #     signal; per-protocol BLOCKED is network-level, not protocol-level)
+    #   * client_ip set, enrichment OK  → client_connected=True, client=<meta>
+    #   * client_ip set, enrichment None→ client_connected=True, client=None
+    #     (transient ipapi failure; protocol verdicts stay meaningful)
+    client_meta: EndpointMeta | None = None
+    if client_ip is not None:
+        try:
+            client_meta = await enrich_endpoint(client_ip)
+        except Exception as e:
+            logger.warning("Client enrichment failed: %s", e)
+            client_meta = None
+
+    _print_client_summary(client_ip is not None, client_meta)
+
+    # ── Step 8: Save report ───────────────────────────────────────────────────
     report = ListenerReport(
         test_id=test_id,
         session_id=session_id,
         listener_started_at=started_at,
         listener_stopped_at=stopped_at,
         duration_sec=round(duration, 1),
+        client_connected=client_ip is not None,
+        client=client_meta,
         results=results,
     )
     report_path = _save_listener_report(report, test_id, session_id)
@@ -405,23 +454,35 @@ def _print_client_run_command(
 ) -> None:
     """Print the one-liner the operator pastes into the client machine.
 
-    The whole point of the cred_server: hand the operator a ready-made
-    ``docker compose ... up`` invocation that fully bootstraps the
-    client. SERVER_HOST may be a placeholder if external-IP detection
-    failed (the network panel above prints what the listener thinks the
+    The command is a single-line ``docker compose run`` invocation with
+    every per-run value passed as a CLI flag rather than a shell-prefixed
+    env var. This keeps the line identical across bash, zsh, PowerShell,
+    and cmd.exe — the args are consumed by docker (and ultimately by
+    click inside the container), never interpreted by the host shell.
+    Click's CLI-over-envvar precedence means the empty per-run slots in
+    `.env` (which compose still substitutes into the container's
+    `environment:` block) don't shadow these values.
+
+    `run --rm` is also a better semantic fit than `up` for the client:
+    the probe is one-shot, exits when done, and `--rm` cleans up the
+    container afterwards instead of leaving a stopped one behind.
+
+    SERVER_HOST may be a placeholder if external-IP detection failed
+    (the network panel above prints what the listener thinks the
     address is); the operator edits it on paste in that case.
     """
     cmd = (
-        f"TEST_ID={test_id} \\\n"
-        f"  SESSION_ID={session_id} \\\n"
-        f"  SERVER_HOST={server_host} \\\n"
-        f"  CREDS_PORT={creds_port} \\\n"
-        f"  CREDS_TOKEN={creds_token} \\\n"
-        f"  CREDS_CERT_SHA256={creds_cert_sha256} \\\n"
-        f"  docker compose --profile client up"
+        "docker compose --profile client run --rm client"
+        f" --test-id {test_id}"
+        f" --session-id {session_id}"
+        f" --server-host {server_host}"
+        f" --creds-port {creds_port}"
+        f" --creds-token {creds_token}"
+        f" --creds-cert-sha256 {creds_cert_sha256}"
     )
     console.print(Panel.fit(
-        "[bold]Run this on the client machine[/bold] (in your local clone):\n\n"
+        "[bold]Run this on the client machine[/bold] (in your local clone).\n"
+        "Works as-is on Linux, macOS, and Windows (PowerShell or cmd):\n\n"
         f"[cyan]{cmd}[/cyan]\n\n"
         "[dim]The credentials are served once over a TLS-pinned channel "
         "(self-signed cert, fingerprint above). Token is single-use.[/dim]",
@@ -455,6 +516,59 @@ def _print_responder_status(responders: dict, errors: dict, creds: ProtocolCrede
             table.add_row(name, port, f"[red]Failed: {err[:40]}[/red]")
 
     console.print(table)
+
+
+def _print_client_summary(connected: bool, meta: EndpointMeta | None) -> None:
+    """Operator-facing summary of which client network this session saw.
+
+    Three states match the report's tri-state (see ListenerReport docstring).
+    No IPs are printed here either — only the structured network identity.
+    """
+    if not connected:
+        console.print(Panel.fit(
+            "[red]Client never reached the credentials endpoint.[/red]\n"
+            "[dim]Per-protocol BLOCKED verdicts in this run reflect the "
+            "client network's inability to reach 8443/tcp at all, not "
+            "protocol-specific blocking.[/dim]",
+            title="Client network",
+            border_style="red",
+        ))
+        return
+
+    if meta is None:
+        console.print(Panel.fit(
+            "[yellow]Client connected, but ipapi enrichment failed.[/yellow]\n"
+            "[dim]Per-protocol verdicts are still meaningful; only the "
+            "client-network identity is missing in the report.[/dim]",
+            title="Client network",
+            border_style="yellow",
+        ))
+        return
+
+    asn = meta.asn
+    loc = meta.location
+    line_org = (asn.org if asn else None) or (meta.company.name if meta.company else None) or "—"
+    line_asn = f"AS{asn.asn}" if asn else "—"
+    line_route = (asn.route if asn else None) or "—"
+    line_city = loc.city if loc else None
+    line_country = loc.country_code if loc else None
+    line_loc = ", ".join(p for p in (line_city, line_country) if p) or "—"
+
+    flags = []
+    if meta.is_mobile:
+        flags.append("[bold]MOBILE[/bold]")
+    if meta.is_datacenter:
+        flags.append("[red]DATACENTER (likely behind self-hosted VPN)[/red]")
+    flag_line = " · ".join(flags) if flags else "[dim]residential[/dim]"
+
+    console.print(Panel.fit(
+        f"Org: [cyan]{line_org}[/cyan]\n"
+        f"ASN: [cyan]{line_asn}[/cyan]  Route: [dim]{line_route}[/dim]\n"
+        f"Location: [cyan]{line_loc}[/cyan]\n"
+        f"Type: {flag_line}",
+        title="Client network",
+        border_style="green",
+    ))
 
 
 def _print_final_results(results: dict[str, ProtocolResult], duration: float) -> None:

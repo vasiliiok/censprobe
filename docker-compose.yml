@@ -11,7 +11,7 @@ services:
 
   # ─────────────────────────────────────────────────────────────────
   # 1. SOLO — тесты с перспективы тестируемого RU-сервера
-  # Usage: TEST_ID=selectel-spb-001 docker compose --profile solo up
+  # Usage: docker compose --profile solo run --rm solo --test-id selectel-spb-001
   # ─────────────────────────────────────────────────────────────────
   solo:
     profiles: [solo]
@@ -23,7 +23,6 @@ services:
     network_mode: host
     cap_add: [NET_RAW, NET_ADMIN]
     environment:
-      TEST_ID: ${TEST_ID}
       RUNS_COUNT: ${RUNS_COUNT}
       IPAPI_IS_KEY: ${IPAPI_IS_KEY}
     volumes:
@@ -41,7 +40,7 @@ services:
 
   # ─────────────────────────────────────────────────────────────────
   # 2. LISTENER — VPN-порты на тестируемом сервере
-  # Usage: TEST_ID=... SESSION_ID=client-home-rt-spb docker compose --profile listener up
+  # Usage: docker compose --profile listener run --rm listener --test-id ... --session-id client-home-rt-spb
   # ─────────────────────────────────────────────────────────────────
   listener:
     profiles: [listener]
@@ -60,8 +59,6 @@ services:
     devices:
       - "/dev/net/tun:/dev/net/tun"
     environment:
-      TEST_ID: ${TEST_ID}
-      SESSION_ID: ${SESSION_ID}
       CREDS_PORT: ${CREDS_PORT}
       IPAPI_IS_KEY: ${IPAPI_IS_KEY}
     volumes:
@@ -92,12 +89,7 @@ services:
     devices:
       - "/dev/net/tun:/dev/net/tun"
     environment:
-      TEST_ID: ${TEST_ID}
-      SESSION_ID: ${SESSION_ID}
-      SERVER_HOST: ${SERVER_HOST}
       CREDS_PORT: ${CREDS_PORT}
-      CREDS_TOKEN: ${CREDS_TOKEN}
-      CREDS_CERT_SHA256: ${CREDS_CERT_SHA256}
     restart: "no"
 
   # ─────────────────────────────────────────────────────────────────

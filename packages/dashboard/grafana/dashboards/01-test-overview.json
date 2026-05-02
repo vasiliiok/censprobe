@@ -91,7 +91,7 @@
       "datasource": {"type": "postgres", "uid": "DS_CENSPROBE_PG"},
       "targets": [
         {
-          "rawSql": "SELECT asn, as_name, location, provider, distro, ipv4, ipv6_available FROM test_runs WHERE test_id = ${test_id:sqlstring} LIMIT 1",
+          "rawSql": "SELECT 'AS' || (server_meta->'asn'->>'asn') AS asn, server_meta->'asn'->>'org' AS org, server_meta->'datacenter'->>'name' AS datacenter, server_meta->'location'->>'city' AS city, server_meta->'location'->>'country_code' AS country, server_meta->'asn'->>'route' AS route, distro, ipv6_available FROM test_runs WHERE test_id = ${test_id:sqlstring} LIMIT 1",
           "format": "table",
           "refId": "A",
           "editorMode": "code",

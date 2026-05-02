@@ -1,15 +1,20 @@
 """
-server_meta.py — Auto-detection of server metadata.
+server_meta.py — Server metadata detection and ipapi.is enrichment.
 
-Detects:
-  - External/exit IP (via Cloudflare trace + icanhazip.com)
-  - ASN and AS name (via ipapi.is over HTTPS)
-  - IPv6 availability
-  - Kernel version, distro
+Public API:
+  detect_server_meta()         — full server-side detection (IP → enrichment
+                                  + IPv6 + kernel/distro). Used by solo and
+                                  listener at startup.
+  enrich_endpoint(ip, client)  — IP → EndpointMeta. Reusable helper, called
+                                  from listener for client-side enrichment
+                                  when a client hits the cred-endpoint.
 
 OpSec:
   * All geo/ASN lookups go over HTTPS so an on-path observer cannot cheaply
-    link this server's IP to censorship-measurement activity.
+    link the queried IP to censorship-measurement activity.
+  * The exit IP is detected at runtime to drive the lookup but is not
+    returned to callers — only the structured EndpointMeta is. This keeps
+    raw IPv4 literals out of every serialized report by construction.
 """
 from __future__ import annotations
 
@@ -22,60 +27,193 @@ from pathlib import Path
 
 import httpx
 
-from censprobe_core.models import ServerMeta
+from censprobe_core.models import (
+    AsnInfo,
+    CompanyInfo,
+    DatacenterInfo,
+    EndpointMeta,
+    LocationInfo,
+    ServerMeta,
+)
 
 logger = logging.getLogger(__name__)
 
-# Timeout for external requests
 _TIMEOUT = httpx.Timeout(10.0)
 
-# Single source of truth: .env (always present, may be empty for free tier)
-# → docker-compose env injection. An empty string here is a valid runtime
-# state ("no key, use ipapi.is free tier"); a missing env var is a
-# contract violation and we fail loudly rather than silently degrade.
-_IPAPI_IS_KEY = os.environ["IPAPI_IS_KEY"]
+# Vantage country code (ISO-3166 alpha-2). Set once after server_meta
+# detection; consumed by measurement modules to gate RU-specific
+# attribution heuristics — e.g. tcp.py's <30 ms RST_INJECTED label
+# produces false positives from Frankfurt because anycast RTT to closed
+# ports is below the threshold without any censor in the path.
+_VANTAGE_COUNTRY: str | None = None
+
+
+def set_vantage_country(cc: str | None) -> None:
+    """Record the probe vantage's country code (ISO-3166 alpha-2)."""
+    global _VANTAGE_COUNTRY
+    _VANTAGE_COUNTRY = cc.upper() if cc else None
+
+
+def get_vantage_country() -> str | None:
+    """Return the recorded vantage country, or None if never set."""
+    return _VANTAGE_COUNTRY
+
+
+def is_ru_vantage() -> bool:
+    """Convenience: True iff the probe is being run from inside RU.
+
+    Modules that calibrate timing/RTT thresholds for RU networks gate on
+    this so a Frankfurt VM (or any non-RU vantage) doesn't get a flood of
+    spurious BLOCKED verdicts from heuristics that only make sense behind
+    TSPU.
+    """
+    return _VANTAGE_COUNTRY == "RU"
+
+# Lazy lookup: importing this module must not require the env var to be
+# set. Code paths that never actually call _enrich (probe-core consumers
+# that only use models/runner) must still be able to `import censprobe_core`.
+# An empty string is a valid runtime state ("no key, use ipapi.is free tier");
+# a missing env var only matters when we actually issue the lookup.
 _IPAPI_IS_URL = "https://api.ipapi.is/"
 
 
+def _ipapi_key() -> str:
+    return os.environ.get("IPAPI_IS_KEY", "")
+
+
 async def detect_server_meta() -> ServerMeta:
-    """
-    Auto-detect server metadata from the environment.
-    Returns ServerMeta populated with detected fields.
+    """Auto-detect server metadata.
+
+    Returns ServerMeta with EndpointMeta populated from ipapi.is plus host
+    info (kernel, distro, IPv6). The exit IP itself is detected to drive
+    the lookup but is not stored on ServerMeta.
     """
     meta = ServerMeta()
 
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        # --- Exit IP and ASN ---
         exit_ip = await _detect_exit_ip(client)
         if exit_ip:
-            meta._exit_ip = exit_ip
-            meta.ipv4 = exit_ip
-            asn_info = await _detect_asn(client, exit_ip)
-            if asn_info:
-                meta.asn = asn_info.get("asn")
-                meta.as_name = asn_info.get("as_name")
-                meta.location = asn_info.get("city")
-                meta.country = asn_info.get("country")
-                meta.provider = _guess_provider(asn_info.get("as_name", ""))
+            endpoint = await enrich_endpoint(exit_ip, client=client)
+            if endpoint is not None:
+                meta.endpoint = endpoint
         else:
             logger.warning(
                 "Could not detect server exit IP. Network may be unreachable. "
-                "Server metadata (ASN, location, provider) will be empty."
+                "Server endpoint metadata (ASN, location, company) will be empty."
             )
 
-    # --- IPv6 ---
     meta.ipv6_available = await _check_ipv6()
-
-    # --- Kernel / Distro ---
     meta.kernel = detect_kernel()
     meta.distro = detect_distro()
 
     return meta
 
 
+async def enrich_endpoint(
+    ip: str,
+    client: httpx.AsyncClient | None = None,
+) -> EndpointMeta | None:
+    """Look up `ip` against ipapi.is and return a structured EndpointMeta.
+
+    Returns None on any failure (transport, non-200, JSON shape mismatch,
+    rate-limit). Callers treat None as "enrichment unavailable" — distinct
+    from "endpoint not connected at all".
+
+    The `client` argument lets the caller share an httpx client across
+    multiple enrichments. If omitted we open a short-lived one.
+    """
+    if client is None:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as own_client:
+            return await _enrich(ip, own_client)
+    return await _enrich(ip, client)
+
+
+async def _enrich(ip: str, client: httpx.AsyncClient) -> EndpointMeta | None:
+    try:
+        r = await client.get(
+            _IPAPI_IS_URL,
+            params={"q": ip, "key": _ipapi_key()},
+        )
+        if r.status_code != 200:
+            logger.debug("ipapi.is non-200: %s", r.status_code)
+            return None
+        data = r.json()
+    except Exception as e:
+        logger.debug("ipapi.is failed: %s", e)
+        return None
+
+    return _endpoint_from_ipapi(data)
+
+
+def _endpoint_from_ipapi(data: dict) -> EndpointMeta:
+    """Map an ipapi.is JSON response onto EndpointMeta.
+
+    Tolerates missing nested objects (free tier returns thinner payloads
+    than keyed). Returns an EndpointMeta with as much populated as the
+    response provides; nested objects stay None when their source block
+    is absent.
+    """
+    asn_block = data.get("asn") or {}
+    company_block = data.get("company") or {}
+    datacenter_block = data.get("datacenter") or {}
+    loc_block = data.get("location") or {}
+
+    asn_num = asn_block.get("asn")
+    asn_info: AsnInfo | None = None
+    if asn_num is not None:
+        try:
+            asn_info = AsnInfo(
+                asn=int(asn_num),
+                descr=asn_block.get("descr"),
+                org=asn_block.get("org"),
+                domain=asn_block.get("domain"),
+                route=asn_block.get("route"),
+            )
+        except (TypeError, ValueError):
+            asn_info = None
+
+    company_info: CompanyInfo | None = None
+    if company_block:
+        company_info = CompanyInfo(
+            name=company_block.get("name"),
+            domain=company_block.get("domain"),
+            network=company_block.get("network"),
+        )
+
+    is_datacenter = bool(data.get("is_datacenter", False))
+    datacenter_info: DatacenterInfo | None = None
+    # Only populate datacenter block when the flag is true AND ipapi
+    # returned the nested object — free tier sometimes returns the flag
+    # without the nested details.
+    if is_datacenter and datacenter_block:
+        datacenter_info = DatacenterInfo(
+            # ipapi returns the DC operator under the key "datacenter"
+            # inside the datacenter block — flatten that to `name` to
+            # match the rest of our naming.
+            name=datacenter_block.get("datacenter") or datacenter_block.get("name"),
+            domain=datacenter_block.get("domain"),
+            network=datacenter_block.get("network"),
+        )
+
+    location_info: LocationInfo | None = None
+    if loc_block:
+        location_info = LocationInfo(
+            country_code=loc_block.get("country_code"),
+            city=loc_block.get("city"),
+        )
+
+    return EndpointMeta(
+        is_mobile=bool(data.get("is_mobile", False)),
+        is_datacenter=is_datacenter,
+        asn=asn_info,
+        company=company_info,
+        datacenter=datacenter_info,
+        location=location_info,
+    )
+
+
 async def _detect_exit_ip(client: httpx.AsyncClient) -> str | None:
     """Detect external IP via Cloudflare trace (primary) and icanhazip.com (fallback)."""
-    # Primary: Cloudflare CDN-CGI trace
     try:
         r = await client.get("https://www.cloudflare.com/cdn-cgi/trace")
         if r.status_code == 200:
@@ -85,7 +223,6 @@ async def _detect_exit_ip(client: httpx.AsyncClient) -> str | None:
     except Exception as e:
         logger.debug("Cloudflare trace failed: %s", e)
 
-    # Fallback: icanhazip.com
     try:
         r = await client.get("https://icanhazip.com/")
         if r.status_code == 200:
@@ -94,50 +231,6 @@ async def _detect_exit_ip(client: httpx.AsyncClient) -> str | None:
         logger.debug("icanhazip failed: %s", e)
 
     return None
-
-
-async def _detect_asn(client: httpx.AsyncClient, ip: str) -> dict | None:
-    """
-    Detect ASN, AS name, and city for an IP via ipapi.is (HTTPS, keyed).
-
-    ipapi.is response shape (relevant subset):
-      {
-        "ip": "...",
-        "asn": {"asn": 49505, "org": "JSC Selectel", ...},
-        "company": {"name": "Selectel", ...},
-        "location": {"city": "...", "country": "...", "state": "..."},
-      }
-    """
-    try:
-        r = await client.get(
-            _IPAPI_IS_URL,
-            params={"q": ip, "key": _IPAPI_IS_KEY},
-        )
-        if r.status_code != 200:
-            logger.debug("ipapi.is non-200: %s", r.status_code)
-            return None
-
-        data = r.json()
-        asn_block = data.get("asn") or {}
-        loc_block = data.get("location") or {}
-        company_block = data.get("company") or {}
-
-        asn_num = asn_block.get("asn")
-        asn_str = f"AS{asn_num}" if asn_num else None
-        as_name = asn_block.get("org") or company_block.get("name")
-
-        return {
-            "asn": asn_str,
-            "as_name": as_name,
-            "city": loc_block.get("city"),
-            "country": loc_block.get("country"),
-            "region": loc_block.get("state"),
-        }
-    except Exception as e:
-        logger.debug("ipapi.is failed: %s", e)
-
-    return None
-
 
 
 async def _check_ipv6() -> bool:
@@ -190,25 +283,3 @@ def detect_distro() -> str:
     except Exception:
         pass
     return platform.system()
-
-
-def _guess_provider(as_name: str) -> str | None:
-    """Guess VPS provider name from AS name string."""
-    as_lower = as_name.lower()
-    mapping = {
-        "selectel": "Selectel",
-        "timeweb": "Timeweb",
-        "vdsina": "VDSina",
-        "hetzner": "Hetzner",
-        "digitalocean": "DigitalOcean",
-        "linode": "Linode",
-        "vultr": "Vultr",
-        "ovh": "OVH",
-        "serverius": "Serverius",
-        "ihor": "ihor",
-        "king": "King Servers",
-    }
-    for key, val in mapping.items():
-        if key in as_lower:
-            return val
-    return as_name[:32] if as_name else None

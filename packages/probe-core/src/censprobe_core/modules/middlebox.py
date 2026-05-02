@@ -8,14 +8,12 @@ Tests:
      → middlebox normalizes headers → detected
   2. HTTP invalid request line: send request with random method string
      → middlebox may transform or block it
-  3. TCP fragmentation: send TLS ClientHello split across 2 TCP segments
-     → some DPI fails to reassemble and allows/blocks inconsistently
 """
 from __future__ import annotations
 
 import asyncio
 import logging
-import random
+import secrets
 import socket
 import string
 
@@ -39,11 +37,6 @@ async def run_middlebox_tests() -> list[TestResult]:
 
     # Test 2: HTTP invalid request line
     result = await _test_invalid_request_line()
-    if result:
-        results.append(result)
-
-    # Test 3: TCP fragmentation of TLS ClientHello
-    result = await _test_tcp_fragmentation()
     if result:
         results.append(result)
 
@@ -76,16 +69,27 @@ async def _test_header_manipulation() -> list[TestResult]:
     """
     results = []
 
+    # Use the same Chrome UA as modules/http.py so middleboxes that
+    # fingerprint by User-Agent value treat both probes uniformly. The
+    # case-mutation test is about wire-byte survival, not UA content,
+    # but a "censprobe/..." string here would let a UA-aware middlebox
+    # selectively rewrite our traffic and confuse the verdict.
+    _UA = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/145.0.0.0 Safari/537.36"
+    )
+
     test_cases = [
         {
             "name": "middlebox_header_host_case",
-            "headers": [("hOsT", "1.1.1.1"), ("User-Agent", "censprobe/0.1")],
+            "headers": [("hOsT", "1.1.1.1"), ("User-Agent", _UA)],
             "field": "hOsT",
             "notes": "Modified Host header case",
         },
         {
             "name": "middlebox_header_useragent_case",
-            "headers": [("Host", "1.1.1.1"), ("uSeR-aGeNt", "censprobe/0.1")],
+            "headers": [("Host", "1.1.1.1"), ("uSeR-aGeNt", _UA)],
             "field": "uSeR-aGeNt",
             "notes": "Modified User-Agent case",
         },
@@ -207,8 +211,13 @@ async def _test_invalid_request_line() -> TestResult | None:
     A middlebox may transform it to GET, drop the connection, or return
     something else entirely.
     """
-    # Random 7-letter method to avoid pattern matching
-    random_method = "".join(random.choices(string.ascii_uppercase, k=7))
+    # Random 7-letter method to avoid pattern matching. Using `secrets`
+    # rather than `random` so the method string can't be predicted by an
+    # adversary who knows the probe's PRNG state — a TSPU device that
+    # fingerprints censprobe could otherwise pre-compute the next method
+    # and selectively rewrite it to GET, masking the middlebox-detect
+    # signal.
+    random_method = "".join(secrets.choice(string.ascii_uppercase) for _ in range(7))
     target_host = "httpbin.org"
     request_line = f"{random_method} / HTTP/1.1\r\nHost: {target_host}\r\n\r\n"
 
@@ -295,44 +304,3 @@ async def _test_invalid_request_line() -> TestResult | None:
             test=test_name, category="middlebox", target=f"{target_host}:80",
             verdict=Verdict.ERROR, evidence={"error": str(e)},
         )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Test 3: TCP Fragmentation of TLS ClientHello
-# ─────────────────────────────────────────────────────────────────────────────
-
-async def _test_tcp_fragmentation() -> TestResult | None:
-    """
-    TCP-fragmentation circumvention test.
-
-    A real implementation would craft a TLS ClientHello split across two
-    TCP segments (either via raw sockets / Scapy or via the kernel socket
-    buffer with TCP_NODELAY + tiny send chunks) and compare reachability
-    with and without the split, to detect middleboxes that fail to
-    reassemble.
-
-    That is NOT what this MVP does. Returning Verdict.OK from a plain
-    `tls_sock.do_handshake()` would be actively misleading — it would
-    suggest that fragmentation-based circumvention works when no
-    fragmentation has been exercised at all. We therefore return
-    INCONCLUSIVE with a clear "not_implemented_in_mvp" marker so the
-    dashboard reflects reality.
-    """
-    test_name = "middlebox_tcp_fragmentation"
-    target_host = "cloudflare.com"
-    return TestResult(
-        test=test_name,
-        category="middlebox",
-        target=f"{target_host}:443",
-        verdict=Verdict.INCONCLUSIVE,
-        confidence=0.0,
-        evidence={
-            "status": "not_implemented_in_mvp",
-            "reason": (
-                "Real TCP fragmentation requires raw-socket or low-level "
-                "send-chunk control; the previous placeholder only ran a "
-                "normal TLS handshake and was misleading."
-            ),
-        },
-        notes="TCP fragmentation circumvention not implemented in MVP.",
-    )

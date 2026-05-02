@@ -59,7 +59,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT ls.session_id, pr.protocol, pr.verdict, pr.handshake_count, pr.data_transfer_ok, pr.avg_rtt_ms, pr.from_asn FROM protocol_results pr JOIN listener_sessions ls ON ls.id = pr.session_id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE tr.test_id = ${test_id:sqlstring} ORDER BY ls.session_id, pr.protocol",
+          "rawSql": "SELECT ls.session_id, COALESCE(ls.client_meta->'asn'->>'org', '—') AS client_org, pr.protocol, pr.verdict, pr.handshake_count, pr.data_transfer_ok, pr.avg_rtt_ms FROM protocol_results pr JOIN listener_sessions ls ON ls.id = pr.session_id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE tr.test_id = ${test_id:sqlstring} ORDER BY ls.session_id, pr.protocol",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -196,7 +196,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT ls.session_id, ls.started_at, ls.duration_sec, COUNT(pr.id) AS protocols, COUNT(*) FILTER (WHERE pr.verdict='OK') AS ok_protocols, array_to_string(ARRAY(SELECT DISTINCT pr2.from_asn FROM protocol_results pr2 WHERE pr2.session_id = ls.id AND pr2.from_asn IS NOT NULL), ', ') AS client_asns FROM listener_sessions ls LEFT JOIN protocol_results pr ON pr.session_id = ls.id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE tr.test_id = ${test_id:sqlstring} GROUP BY ls.id, ls.session_id, ls.started_at, ls.duration_sec ORDER BY ls.started_at DESC",
+          "rawSql": "SELECT ls.session_id, ls.started_at, ls.duration_sec, ls.client_connected, COALESCE(ls.client_meta->'asn'->>'org', '—') AS client_org, COALESCE(ls.client_meta->'location'->>'city', '—') AS city, CASE WHEN ls.client_meta->>'is_mobile' = 'true' THEN 'mobile' WHEN ls.client_meta->>'is_datacenter' = 'true' THEN 'datacenter' ELSE 'residential' END AS client_type, COUNT(pr.id) AS protocols, COUNT(*) FILTER (WHERE pr.verdict='OK') AS ok_protocols FROM listener_sessions ls LEFT JOIN protocol_results pr ON pr.session_id = ls.id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE tr.test_id = ${test_id:sqlstring} GROUP BY ls.id, ls.session_id, ls.started_at, ls.duration_sec, ls.client_connected, ls.client_meta ORDER BY ls.started_at DESC",
           "format": "table",
           "refId": "A",
           "editorMode": "code",

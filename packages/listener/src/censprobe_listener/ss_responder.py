@@ -130,7 +130,12 @@ class ShadowsocksResponder:
                 if line:
                     logger.debug("[sing-box] %s", line)
                     low = line.lower()
-                    if "inbound connection" in low or "accepted" in low:
+                    # Strict matchers: a bare "accepted" substring fires
+                    # on cert refresh / route-decision logs and inflates
+                    # the counter. sing-box logs real inbound accepts as
+                    # `inbound connection from <addr>` or
+                    # `[ss-in] inbound/shadowsocks: accepted ...`.
+                    if "inbound connection from" in low or "accepted tcp:" in low:
                         self.connection_count += 1
         except Exception as e:
             logger.debug("sing-box monitor ended: %s", e)

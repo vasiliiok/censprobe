@@ -100,7 +100,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT test_id, asn, as_name, location, provider, distro, ipv4, overall_score, detected_techniques FROM test_runs WHERE test_id = ${test_id_a:sqlstring} LIMIT 1",
+          "rawSql": "SELECT test_id, 'AS' || (server_meta->'asn'->>'asn') AS asn, server_meta->'asn'->>'org' AS org, server_meta->'datacenter'->>'name' AS datacenter, server_meta->'location'->>'city' AS city, server_meta->'location'->>'country_code' AS country, distro, overall_score, detected_techniques FROM test_runs WHERE test_id = ${test_id_a:sqlstring} LIMIT 1",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -128,7 +128,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT test_id, asn, as_name, location, provider, distro, ipv4, overall_score, detected_techniques FROM test_runs WHERE test_id = ${test_id_b:sqlstring} LIMIT 1",
+          "rawSql": "SELECT test_id, 'AS' || (server_meta->'asn'->>'asn') AS asn, server_meta->'asn'->>'org' AS org, server_meta->'datacenter'->>'name' AS datacenter, server_meta->'location'->>'city' AS city, server_meta->'location'->>'country_code' AS country, distro, overall_score, detected_techniques FROM test_runs WHERE test_id = ${test_id_b:sqlstring} LIMIT 1",
           "format": "table",
           "refId": "A",
           "editorMode": "code",

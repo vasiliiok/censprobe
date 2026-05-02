@@ -117,14 +117,13 @@ class EchoServer:
             for proto in self.ports
         }
 
-    # Smallest expected payload size for a successful round-trip:
-    #   * `curl ... /ping` on the client emits ~70-80 bytes (request line
-    #     + Host + UA + Accept), so an HTTP probe gives us ≥70 bytes;
-    #   * a raw TCP probe writing the literal "ping" (4 bytes) is the
-    #     legacy fallback the older client used and that we must keep
-    #     accepting; bumping the floor to 4 (the existing default) keeps
-    #     that path working but is high enough to filter the empty FIN
-    #     handshakes some scanners send when probing whether the port is
-    #     open.
-    def data_ok(self, proto: str, min_bytes: int = 4) -> bool:
+    # Smallest expected payload size for a successful round-trip.
+    # The current censprobe-client always issues an HTTP request through
+    # the tunnel ("GET /ping HTTP/1.1\r\nHost: ...\r\n..."), which is
+    # ≥70 bytes — so we floor at 64 to require an actual round-trip
+    # rather than the leaked plaintext from a Reality handshake. The
+    # previous floor of 4 ("ping" literal) accepted as little as the
+    # decrypted handshake echo from a mid-session RST and produced
+    # false-OK verdicts. The legacy 4-byte path is gone.
+    def data_ok(self, proto: str, min_bytes: int = 64) -> bool:
         return self.bytes_counts.get(proto, 0) >= min_bytes

@@ -47,20 +47,36 @@ logger = logging.getLogger(__name__)
 
 _CERT_VALIDITY_HOURS = 24    # cert lifetime; listener sessions are minutes
 _TOKEN_BYTES = 32            # 256 bits of entropy
-# How many times the token may be served before the endpoint refuses
-# further requests. Multiple is allowed because a slow / retrying client
-# may legitimately re-fetch; abuse beyond this is a sign of probing.
-_MAX_SERVES = 5
+# Single-use token. The previous _MAX_SERVES=5 retry budget was a
+# foot-gun: any party that snooped the bearer token (e.g. via `ps auxf`
+# / /proc/<pid>/cmdline on the client host) had four extra fetches to
+# steal the live VPN credentials before the legitimate retry consumed
+# the last serve. With 1, the first authenticated fetch closes the
+# window; a network-flaky client must restart the listener to retry.
+_MAX_SERVES = 1
 
 
 def generate_self_signed_cert() -> tuple[bytes, bytes, str]:
     """Generate an RSA-2048 self-signed cert.
 
     Returns (cert_pem, key_pem, sha256_fingerprint_hex).
+
+    The cert carries a SubjectAlternativeName extension covering localhost
+    plus the common cred-fetch addresses. The client pins by SHA-256
+    fingerprint and disables hostname verification, but RFC 6125 strict
+    clients (curl --cacert when an operator debugs by hand) refuse a
+    CN-only cert outright — so we publish the SAN even though the pinned
+    client doesn't consult it.
     """
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     name = x509.Name([
         x509.NameAttribute(NameOID.COMMON_NAME, "censprobe-listener"),
+    ])
+    san = x509.SubjectAlternativeName([
+        x509.DNSName("censprobe-listener"),
+        x509.DNSName("localhost"),
+        x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
+        x509.IPAddress(ipaddress.IPv6Address("::1")),
     ])
     now = datetime.now(timezone.utc)
     cert = (
@@ -71,6 +87,7 @@ def generate_self_signed_cert() -> tuple[bytes, bytes, str]:
         .serial_number(x509.random_serial_number())
         .not_valid_before(now)
         .not_valid_after(now + timedelta(hours=_CERT_VALIDITY_HOURS))
+        .add_extension(san, critical=False)
         .sign(key, hashes.SHA256())
     )
     cert_pem = cert.public_bytes(serialization.Encoding.PEM)
@@ -119,6 +136,13 @@ class CredServer:
         self._thread: threading.Thread | None = None
         self._serves_remaining = _MAX_SERVES
         self._lock = threading.Lock()
+        # First IP to successfully fetch credentials. Captured under the
+        # same lock that decrements _serves_remaining, so a request that
+        # fails auth or runs after exhaustion never sets it. The asyncio
+        # main loop reads `client_ip` after the listener stops, so a
+        # plain str field plus the existing _lock is sufficient — no
+        # event/condition variable is needed.
+        self._client_ip: str | None = None
 
     def start(self) -> None:
         handler_cls = self._make_handler()
@@ -129,6 +153,11 @@ class CredServer:
             (self.bind, self.port), handler_cls,
         )
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        # Floor at TLS 1.2 — we don't need 1.0/1.1 for any real client and
+        # disabling them removes a row of historical CVE surface (BEAST,
+        # POODLE-on-TLS-1.0, weak block ciphers). The pinned censprobe-client
+        # always negotiates 1.2+ on Python 3.10+.
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
         ctx.load_cert_chain(certfile=str(self._cert_path), keyfile=str(self._key_path))
         # Wrap the listening socket once; HTTPServer's accept() will return
         # SSL-wrapped client sockets via ssl.SSLContext.wrap_socket below.
@@ -145,6 +174,19 @@ class CredServer:
             "Credentials endpoint listening on https://%s:%d/creds",
             self.bind, self.port,
         )
+
+    @property
+    def client_ip(self) -> str | None:
+        """IP of the first client that successfully fetched credentials.
+
+        None means no client ever passed bearer-token auth — typically
+        because the cred-endpoint was unreachable from the client
+        network (firewall, blocked port). Read after stop() to decide
+        whether to enrich client metadata or mark the session as
+        client_connected=False.
+        """
+        with self._lock:
+            return self._client_ip
 
     def stop(self) -> None:
         if self._server is not None:
@@ -199,6 +241,13 @@ class CredServer:
                     if srv._serves_remaining <= 0:
                         self._reject(410, "credentials exhausted"); return
                     srv._serves_remaining -= 1
+                    # Record the first authenticated client. Subsequent
+                    # successful fetches (slow client retrying inside
+                    # _MAX_SERVES) keep the original; we want the
+                    # endpoint identity, not the latest replay.
+                    if srv._client_ip is None:
+                        # client_address is (ip, port); take the IP only.
+                        srv._client_ip = self.client_address[0]
 
                 self.send_response(200)
                 self.send_header("Content-Type", "application/yaml; charset=utf-8")

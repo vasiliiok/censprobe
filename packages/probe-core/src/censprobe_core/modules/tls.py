@@ -141,6 +141,14 @@ async def _test_sni_scenarios(
         ip, blocked_sni, verify=True, repeats=repeats,
     )
 
+    # Record which resolver path produced the IP we just tested. A
+    # "system_resolver_fallback" path means DoH was unreachable and
+    # we're potentially measuring the censor's hijacked IP, which
+    # changes the interpretation of an OK verdict.
+    resolve_path = _LAST_RESOLVE_PATH.get(domain)
+    if resolve_path:
+        ev_blocked["resolve_path"] = resolve_path
+
     base_verdict = v_blocked
     base_method = _attribute_tls_failure(v_blocked, ev_blocked)
 
@@ -618,6 +626,11 @@ async def _resolve_ip(domain: str) -> str | None:
     IP and the SNI test ends up measuring the censor's redirect host, not
     the real one. We try Cloudflare DoH first and only fall back to
     `getaddrinfo` if the DoH path is itself unreachable.
+
+    Records which path was used in module state so callers can include
+    it in evidence — the system-resolver fallback against a poisoned ISP
+    means the "OK" result is pointing at the censor's host, not the real
+    one, and reviewers need to see that.
     """
     # 1) DoH (Cloudflare) — cleartext-immune to local DNS poisoning.
     try:
@@ -631,6 +644,7 @@ async def _resolve_ip(domain: str) -> str | None:
             data = r.json()
             for ans in data.get("Answer", []):
                 if ans.get("type") == 1 and ans.get("data"):
+                    _LAST_RESOLVE_PATH[domain] = "doh"
                     return ans["data"]
     except Exception:
         pass
@@ -642,9 +656,18 @@ async def _resolve_ip(domain: str) -> str | None:
             loop.getaddrinfo(domain, 443, type=socket.SOCK_STREAM),
             timeout=5.0,
         )
+        _LAST_RESOLVE_PATH[domain] = "system_resolver_fallback"
         return infos[0][4][0]
     except Exception:
+        _LAST_RESOLVE_PATH[domain] = "no_resolution"
         return None
+
+
+# Per-domain breadcrumb of which resolver answered for the TLS test.
+# Read by _test_sni_scenarios so the evidence dict tells reviewers
+# whether they're looking at a DoH-truthed host or a possibly-poisoned
+# system-resolver answer.
+_LAST_RESOLVE_PATH: dict[str, str] = {}
 
 
 def _extract_cn(rdn_seq) -> str | None:

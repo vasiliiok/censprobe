@@ -27,6 +27,7 @@ import logging
 import time
 
 from censprobe_core.models import TestResult, Verdict, BlockingMethod
+from censprobe_core.server_meta import is_ru_vantage
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,15 @@ async def _test_tcp(ip: str, port: int, repeats: int) -> TestResult:
     # Aggregate: majority wins
     final_verdict = _majority(verdicts)
     method: BlockingMethod | None = None
+
+    # Vantage gating: the <30ms RST_INJECTED heuristic is calibrated for
+    # inside-RU vantages where a censor's RST is the only RST that arrives
+    # that fast. From a non-RU VM (e.g. Frankfurt → 9.9.9.9 anycast at
+    # ~5ms) every closed port is sub-30ms and this heuristic falsely
+    # paints a healthy network as RST-injected. Outside RU, downgrade to
+    # plain REFUSED so scoring doesn't claim censorship that isn't there.
+    if final_verdict == Verdict.RST_INJECTED and not is_ru_vantage():
+        final_verdict = Verdict.REFUSED
 
     if final_verdict == Verdict.RST_INJECTED:
         method = BlockingMethod.TCP_RST_INJECTION

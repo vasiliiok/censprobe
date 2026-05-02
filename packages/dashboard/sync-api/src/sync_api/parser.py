@@ -89,12 +89,28 @@ def parse_listener_report(
     if not raw or not isinstance(raw, dict):
         return {}, []
 
+    # client_meta is whatever the listener wrote (a serialized
+    # EndpointMeta dict) or None — defensive isinstance check guards
+    # against a future schema migration handing us a list/scalar in
+    # this slot. client_connected falls back to "did the listener
+    # produce any client meta?" for older reports that predate the
+    # explicit flag.
+    raw_client = raw.get("client")
+    client_meta = raw_client if isinstance(raw_client, dict) else None
+    raw_connected = raw.get("client_connected")
+    if isinstance(raw_connected, bool):
+        client_connected = raw_connected
+    else:
+        client_connected = client_meta is not None
+
     session_meta = {
         "report_file": path.name,
         "session_id": str(raw.get("session_id") or ""),
         "started_at": _parse_dt(raw.get("listener_started_at")),
         "stopped_at": _parse_dt(raw.get("listener_stopped_at")),
         "duration_sec": _to_float(raw.get("duration_sec"), default=None),
+        "client_connected": client_connected,
+        "client_meta": client_meta,
     }
 
     protocol_results: list[dict[str, Any]] = []
@@ -116,7 +132,6 @@ def parse_listener_report(
             "handshake_count": _to_int(pr.get("handshake_count"), default=0),
             "data_transfer_ok": bool(pr.get("data_transfer_ok")),
             "avg_rtt_ms": _to_float(pr.get("avg_rtt_ms"), default=None),
-            "from_asn": pr.get("from_asn"),
         })
 
     return session_meta, protocol_results
@@ -133,14 +148,45 @@ def is_listener_report(filename: str) -> bool:
     return filename.startswith("server-listener-") and filename.endswith(".json")
 
 
+# Cap individual report payloads to 50 MB. Real censprobe reports are
+# under 1 MB; anything an order of magnitude beyond that is either a
+# disk-fill mistake or a malicious symlink-target. read_bytes() reads
+# the whole file at once and a 10 GB file would OOM the importer.
+_MAX_REPORT_BYTES = 50 * 1024 * 1024
+
+
 def load_json(path: Path) -> dict | None:
     """Load a .json file into a dict.
 
     Returns None on any I/O / decode failure so callers can short-circuit
     cleanly (a half-written report on disk during a concurrent push is the
     common case — log it and let the next import re-try).
+
+    Defensive guards:
+      * Skip symlinks. The reports tree is whatever an operator
+        ``git pull``s — a malicious PR can ship a symlink at
+        ``reports/<test_id>/foo.json → /etc/passwd`` which would
+        otherwise be read into memory and JSON-parsed. Files reach
+        here only when produced by solo/listener (their ``write_text``
+        creates regular files), so any symlink in this position is
+        suspect.
+      * Cap file size at _MAX_REPORT_BYTES.
     """
     try:
+        if path.is_symlink():
+            logger.warning("Report %s is a symlink; refusing to follow", path.name)
+            return None
+        try:
+            size = path.stat().st_size
+        except OSError as e:
+            logger.error("Report %s: stat failed: %s", path.name, e)
+            return None
+        if size > _MAX_REPORT_BYTES:
+            logger.error(
+                "Report %s is %d bytes (>%d cap); refusing to load",
+                path.name, size, _MAX_REPORT_BYTES,
+            )
+            return None
         payload = path.read_bytes()
         if not payload:
             logger.warning("Report %s is empty; skipping", path.name)

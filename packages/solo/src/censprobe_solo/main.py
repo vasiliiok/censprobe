@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from pathlib import Path
 
 import click
@@ -33,7 +34,12 @@ from rich.table import Table
 from censprobe_core.models import ListenerReport, ReportMeta, ServerMeta
 from censprobe_core.runner import ProbeRunner
 from censprobe_core.scoring import BLOCKING_VERDICTS, compute_scores
-from censprobe_core.server_meta import detect_distro, detect_kernel, detect_server_meta
+from censprobe_core.server_meta import (
+    detect_distro,
+    detect_kernel,
+    detect_server_meta,
+    set_vantage_country,
+)
 
 # Bootstrap logging (after imports to avoid E402)
 logging.basicConfig(
@@ -46,6 +52,10 @@ logger = logging.getLogger(__name__)
 
 console = Console()
 WORKSPACE = Path("/workspace")
+
+# test_id flows into reports/<test_id>/... — refuse anything that could
+# escape the intended directory.
+_SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 
 
 @click.command()
@@ -60,6 +70,11 @@ def main(test_id: str, repeats: int, verbose: bool) -> None:
     """
     if verbose:
         logging.getLogger().setLevel(logging.DEBUG)
+
+    if not _SAFE_ID_RE.match(test_id):
+        raise click.BadParameter(
+            f"--test-id must match [A-Za-z0-9_.-] (1-64 chars); got {test_id!r}"
+        )
 
     console.print(Panel.fit(
         f"[bold cyan]Censprobe Solo[/bold cyan]\n"
@@ -117,6 +132,19 @@ async def _async_main(test_id: str, repeats: int) -> None:
             server_meta.kernel = detect_kernel()
         if not server_meta.distro:
             server_meta.distro = detect_distro()
+
+    # Make vantage country available to measurement modules so RU-specific
+    # attribution heuristics (TCP RST timing, QUIC drop, throttling target
+    # geo) can gate themselves and not fire false positives on, e.g., a
+    # Frankfurt VM probing the same domains.
+    cc = (
+        server_meta.endpoint.location.country_code
+        if server_meta.endpoint and server_meta.endpoint.location
+        else None
+    )
+    set_vantage_country(cc)
+    if cc:
+        console.print(f"[dim]Vantage: {cc}[/dim]")
 
     # ── Step 2: Run all tests ─────────────────────────────────────────────────
     runner = ProbeRunner(workspace=WORKSPACE, test_id=test_id)

@@ -118,20 +118,22 @@ def compute_scores(
     )
 
     # ── Exit score ────────────────────────────────────────────────────────────
-    # exit = 40% uplink reachability + 40% no censorship + 20% no geoblock
+    # exit = 60% uplink reachability + 40% censorship-low.
+    #
+    # The historical formula included a third "no_geoblock" axis worth
+    # 20 points, but inbound geoblocking is never actually measured —
+    # the term degenerated to a duplicated copy of uplink_quality and
+    # made operators think a real signal existed. Until geoblock is
+    # measured for real (would need outbound probes from RU IP back at
+    # the test server), the score is a two-axis weighted average that
+    # honestly reflects what we know.
     if scores.throttling_detected:
         censorship_low = max(0.0, uplink_quality - 0.2)
     else:
         censorship_low = uplink_quality
-    # We don't actually measure inbound geoblocking yet — but giving a flat
-    # +20 means a server with completely dead uplink still scores 20/100 as
-    # a VPN exit, which is misleading. Scale the optimistic "no_geoblock"
-    # assumption by uplink_quality so a dead server bottoms out at 0.
-    no_geoblock_term = uplink_quality * 20.0
     scores.exit_score = round(
-        uplink_quality * 40.0 +
-        censorship_low * 40.0 +
-        no_geoblock_term,
+        uplink_quality * 60.0 +
+        censorship_low * 40.0,
         1,
     )
 
@@ -160,9 +162,19 @@ def compute_scores(
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _ok_pct(results: list[TestResult]) -> float:
-    """Percent of OK results [0–100]. Returns 50 if no results (neutral)."""
+    """Percent of OK results [0–100].
+
+    Returns 0.0 (NOT 50.0) when the result list is empty: a module that
+    crashed and produced zero results must not silently look the same
+    as "all targets passed cleanly at 50%". The neutral fallback was
+    masking module failures and the runner's `module_failures` flag
+    was never consumed downstream — so a half-broken probe scored ≥40
+    on multiple axes for free. With 0.0 the score correctly bottoms out
+    when data is missing; runner.summary still records which modules
+    failed for the dashboard.
+    """
     if not results:
-        return 50.0
+        return 0.0
     ok = sum(1 for r in results if r.verdict == Verdict.OK)
     return (ok / len(results)) * 100.0
 

@@ -264,16 +264,28 @@ async def _wait_port_listening(
 def _pick_free_local_port() -> int:
     """Reserve a free TCP port from the OS and return its number.
 
-    `random.randint` could collide with an in-use port and make the tunnel
-    binary refuse to start; binding on port 0 gets us an OS-assigned free
-    one. Closing immediately leaves a small race window before the binary
-    rebinds, but it is overwhelmingly less likely than a 50 000-port
-    random collision, especially in --network host containers.
+    Sets SO_REUSEADDR (and SO_REUSEPORT where available) on the picker
+    socket so that even if a colliding listener manages to bind during
+    the close → tunnel-start gap (network_mode: host containers do
+    expose us to busy-port races on shared VPS), the tunnel binary's
+    rebind succeeds rather than refusing with EADDRINUSE.
+
+    Closing-then-rebinding is still a race, just a much smaller one
+    than `random.randint(50000, 60000)` would be — port collisions in
+    a 16-bit space happened often enough in CI to fail builds.
     """
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        if hasattr(socket, "SO_REUSEPORT"):
+            try:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+            except OSError:
+                pass
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+    finally:
+        s.close()
 
 
 async def _cleanup_iface(iface: str) -> None:

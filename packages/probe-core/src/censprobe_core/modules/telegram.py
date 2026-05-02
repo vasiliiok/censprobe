@@ -480,15 +480,20 @@ async def _capture_cert(domain: str) -> tuple[bytes | None, bool]:
     Returns (None, False) on connect/handshake errors that prevent
     capturing any cert at all.
     """
-    loop = asyncio.get_running_loop()
-
-    def _do_capture() -> tuple[bytes | None, bool]:
-        # Resolve once via getaddrinfo (DoH-poisoning is decided in dns module).
+    # Resolve via DoH (Cloudflare) so a poisoned system resolver can't
+    # silently redirect the cert capture to the censor's host. If DoH
+    # is also unreachable we fall back to getaddrinfo and tag the
+    # evidence so the verdict path is auditable. The TLS module's
+    # _resolve_ip does the same thing; importing it would create a
+    # cycle, so duplicate the lookup here.
+    ip = await _doh_resolve(domain)
+    if ip is None:
         try:
-            ip = socket.gethostbyname(domain)
+            ip = await asyncio.to_thread(socket.gethostbyname, domain)
         except OSError:
             return None, False
 
+    def _do_capture() -> tuple[bytes | None, bool]:
         # Pass 1: capture cert bytes regardless of validity.
         cert_der: bytes | None = None
         try:
@@ -523,9 +528,27 @@ async def _capture_cert(domain: str) -> tuple[bytes | None, bool]:
         return cert_der, chain_valid
 
     try:
-        return await asyncio.wait_for(asyncio.to_thread(_do_capture), timeout=12.0)
+        return await asyncio.wait_for(asyncio.to_thread(_do_capture), timeout=10.0)
     except Exception:
         return None, False
+
+
+async def _doh_resolve(domain: str) -> str | None:
+    """Resolve `domain` via Cloudflare DoH; returns first A or None."""
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as c:
+            r = await c.get(
+                "https://cloudflare-dns.com/dns-query",
+                params={"name": domain, "type": "A"},
+                headers={"Accept": "application/dns-json"},
+            )
+            if r.status_code == 200:
+                for ans in r.json().get("Answer", []):
+                    if ans.get("type") == 1 and ans.get("data"):
+                        return ans["data"]
+    except Exception:
+        pass
+    return None
 
 
 def _match_owned_cert(cert_der: bytes, patterns: list[re.Pattern]) -> str | None:
@@ -587,10 +610,14 @@ def _ok_ratio(results: list[TestResult]) -> float:
     # INCONCLUSIVE results carry no signal (e.g. probe host without IPv6,
     # globally-broken cdn1/cdn5 endpoints reclassified by cert-pattern check)
     # — exclude them from both numerator and denominator so they don't drag
-    # the ratio toward 0.
+    # the ratio toward 0. But if EVERY result is INCONCLUSIVE (e.g. censor
+    # nuked all CDN endpoints AND each one happened to present a Telegram-
+    # owned cert) we must NOT default to "neutral 50%" — that artificially
+    # inflates the health score for a fully-broken Telegram. Return 0.0
+    # instead; the dashboard reads "no decisive evidence of reachability".
     decisive = [r for r in results if r.verdict != Verdict.INCONCLUSIVE]
     if not decisive:
-        return 0.5  # no decisive data → neutral
+        return 0.0
     ok = sum(1 for r in decisive if r.verdict == Verdict.OK)
     return ok / len(decisive)
 

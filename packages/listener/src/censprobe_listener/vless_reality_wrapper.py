@@ -154,7 +154,13 @@ class VlessRealityResponder:
                 line = line_bytes.decode(errors="replace").strip()
                 if line:
                     logger.debug("[xray] %s", line)
-                    if "accepted" in line.lower():
+                    low = line.lower()
+                    # xray-core logs successful inbound accepts as
+                    # `accepted tcp:<host>:<port>`. Bare "accepted" matched
+                    # too broadly — every routing decision and outbound
+                    # selection contains the word — and inflated the
+                    # counter to 2-3× the real connection count.
+                    if "accepted tcp:" in low:
                         self.connection_count += 1
         except Exception as e:
             logger.debug("xray monitor ended: %s", e)

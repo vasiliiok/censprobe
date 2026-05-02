@@ -60,6 +60,7 @@ import time
 import httpx
 
 from censprobe_core.models import TestResult, Verdict, BlockingMethod
+from censprobe_core.server_meta import is_ru_vantage
 
 logger = logging.getLogger(__name__)
 
@@ -224,18 +225,37 @@ async def _test_quic(host: str, port: int, name: str) -> TestResult:
         )
 
     except asyncio.TimeoutError:
+        # Vantage gating: timeout → QUIC_DROPPED is a TSPU-specific
+        # attribution. From a non-RU vantage a UDP 443 timeout is far
+        # more likely to be a transient anycast loss / source-port
+        # collision than a censor; surface as INCONCLUSIVE so the
+        # scoring layer doesn't tally it as a censorship technique.
+        if is_ru_vantage():
+            return TestResult(
+                test=name,
+                category="cloudflare",
+                target=f"udp://{host}:{port}",
+                verdict=Verdict.IP_DROPPED,
+                method=BlockingMethod.QUIC_DROPPED,
+                evidence={
+                    "error": "udp_timeout",
+                    "timeout_sec": _QUIC_TIMEOUT,
+                },
+                notes="No QUIC VN response — UDP 443 blocked or filtered (HTTP3/QUIC unusable from this server)",
+                confidence=0.75,
+            )
         return TestResult(
             test=name,
             category="cloudflare",
             target=f"udp://{host}:{port}",
-            verdict=Verdict.IP_DROPPED,
-            method=BlockingMethod.QUIC_DROPPED,
+            verdict=Verdict.INCONCLUSIVE,
             evidence={
                 "error": "udp_timeout",
                 "timeout_sec": _QUIC_TIMEOUT,
+                "reason": "non_ru_vantage_no_quic_drop_attribution",
             },
-            notes="No QUIC VN response — UDP 443 blocked or filtered (HTTP3/QUIC unusable from this server)",
-            confidence=0.75,
+            notes="UDP 443 timeout from non-RU vantage — not attributed to TSPU.",
+            confidence=0.3,
         )
 
     except OSError as e:

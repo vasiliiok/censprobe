@@ -20,6 +20,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -124,16 +126,62 @@ async def _import_loop() -> None:
 
 
 def _list_report_files(reports_root: Path) -> list[tuple[str, Path, list[Path]]]:
-    """Enumerate (test_id, meta_path, [report_files]) tuples on disk."""
+    """Enumerate (test_id, meta_path, [report_files]) tuples on disk.
+
+    Refuses to descend into symlinked directories or load symlinked
+    files — see parser.load_json. The reports tree is whatever an
+    operator ``git pull``s; in a multi-contributor workflow a malicious
+    PR can ship a symlink, and this importer must not follow it.
+
+    A test_id directory is only kept if its name passes the same
+    [A-Za-z0-9_.-] guard the producers enforce — which prevents a stray
+    "../something" entry from materialising as a Postgres test_id.
+    """
     out: list[tuple[str, Path, list[Path]]] = []
     if not reports_root.exists():
         return out
     for test_dir in sorted(reports_root.iterdir()):
-        if not test_dir.is_dir():
+        if test_dir.is_symlink() or not test_dir.is_dir():
             continue
-        report_files = sorted(test_dir.glob("*.json"))
+        # Mirror the producer-side path-traversal guard.
+        if not _SAFE_TEST_ID_RE.match(test_dir.name):
+            continue
+        # Filter symlinks at file enumeration time — load_json checks
+        # again on read but doing it here keeps the work list clean.
+        report_files = sorted(
+            p for p in test_dir.glob("*.json") if not p.is_symlink()
+        )
         out.append((test_dir.name, test_dir / "meta.yaml", report_files))
     return out
+
+
+# Mirror the producer-side validation in listener/main.py and
+# solo/main.py: only ASCII letters/digits/_-. up to 64 chars.
+_SAFE_TEST_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+
+
+def _is_file_stable(path: Path, settle_sec: float = 1.0) -> bool:
+    """Return True iff `path`'s mtime+size are unchanged after `settle_sec`.
+
+    Solo and listener write reports with a single ``write_text`` call,
+    which is atomic at the filesystem level. But on a workspace that's
+    being ``git pull``ed concurrently, the importer could observe a file
+    mid-write (git uses staged-rename for tracked files but the
+    intermediate state can still leak through specific filesystems). A
+    valid-but-truncated JSON would otherwise be imported as partial
+    data, then dedup-filtered on the next pass — silently undercounting
+    rows. Stat → wait → re-stat catches that race.
+    """
+    try:
+        s1 = path.stat()
+    except OSError:
+        return False
+    time.sleep(settle_sec)
+    try:
+        s2 = path.stat()
+    except OSError:
+        return False
+    return s1.st_size == s2.st_size and s1.st_mtime == s2.st_mtime
 
 
 async def _import_once() -> None:
@@ -178,6 +226,14 @@ async def _import_once() -> None:
             for report_file in report_files:
                 fn = report_file.name
                 if fn in imported_results or fn in imported_sessions:
+                    continue
+                # Skip files that may still be mid-write. A valid-but-
+                # truncated JSON would otherwise be imported partially,
+                # then the dedup query on the next pass would skip it
+                # (the filename is now in `imported_results`), silently
+                # under-counting rows for this run.
+                if not await asyncio.to_thread(_is_file_stable, report_file):
+                    logger.debug("File %s still changing; will retry next cycle", fn)
                     continue
                 try:
                     async with session.begin_nested():
@@ -374,19 +430,22 @@ async def _get_or_create_test_run(
 
     meta_data = await asyncio.to_thread(_read_meta_yaml, meta_path)
 
-    server = meta_data.get("server", {})
+    server = meta_data.get("server") or {}
+    # New schema: server.endpoint is a serialized EndpointMeta dict.
+    # Stored verbatim in JSONB so Grafana can reach asn/company/datacenter
+    # without flattening at this boundary. Host fields stay flat.
+    endpoint = server.get("endpoint") if isinstance(server, dict) else None
+    if not isinstance(endpoint, dict):
+        endpoint = None
+
     run = TestRun(
         test_id=test_id,
         description=meta_data.get("description"),
         purpose=meta_data.get("purpose", "vpn-entry"),
-        asn=server.get("asn"),
-        as_name=server.get("as_name"),
-        location=server.get("location"),
-        ipv4=server.get("ipv4"),
-        ipv6_available=bool(server.get("ipv6_available", False)),
-        provider=server.get("provider"),
-        kernel=server.get("kernel"),
-        distro=server.get("distro"),
+        server_meta=endpoint,
+        ipv6_available=bool(server.get("ipv6_available", False)) if isinstance(server, dict) else False,
+        kernel=server.get("kernel") if isinstance(server, dict) else None,
+        distro=server.get("distro") if isinstance(server, dict) else None,
         created_at=datetime.now(tz=timezone.utc),
     )
     session.add(run)
@@ -426,6 +485,8 @@ async def _import_listener_report(
         started_at=sess_meta.get("started_at"),
         stopped_at=sess_meta.get("stopped_at"),
         duration_sec=sess_meta.get("duration_sec"),
+        client_connected=bool(sess_meta.get("client_connected", False)),
+        client_meta=sess_meta.get("client_meta"),
     )
     session.add(listener_sess)
     await session.flush()
@@ -451,12 +512,8 @@ def _run_to_dict(run: TestRun) -> dict:
         "test_id": run.test_id,
         "description": run.description,
         "purpose": run.purpose,
-        "asn": run.asn,
-        "as_name": run.as_name,
-        "location": run.location,
-        "ipv4": run.ipv4,
+        "server_meta": run.server_meta,
         "ipv6_available": run.ipv6_available,
-        "provider": run.provider,
         "kernel": run.kernel,
         "distro": run.distro,
         "created_at": run.created_at.isoformat() if run.created_at else None,

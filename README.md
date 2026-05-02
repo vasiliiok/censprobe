@@ -4,6 +4,15 @@ Censprobe — инструмент измерения цензуры и оцен
 
 Все тесты работают автономно через Docker Compose, а результаты сохраняются в `reports/<TEST_ID>/` локально — публикация в git-репозиторий выполняется вручную, и Grafana собирает дашборды из импортированных отчётов.
 
+## Vantage (важно)
+
+Часть атрибуции откалибрована **для RU-вантажа** — листенер/solo ожидают, что цензор находится в пути:
+- `tcp.py` помечает быстрый RST как RST_INJECTED (только в RU; вне RU heuristic отключается, downgrade в REFUSED).
+- `cloudflare.py` помечает QUIC-таймаут на UDP 443 как `QUIC_DROPPED` (только в RU).
+- `throttling.py` (Method B против `speedtest.selectel.ru`) полностью пропускается вне RU — относительная разница bandwidth доминируется географией, а не SNI-policy.
+
+Vantage определяется автоматически из `country_code` ipapi.is enrichment в `solo` и пробрасывается через `set_vantage_country()` в общий probe-core. Если запускаете solo с не-RU VM (Frankfurt, Vultr и т.д.), увидите большее количество INCONCLUSIVE-вердиктов в throttling/QUIC — это by design, не баг.
+
 ## Архитектура развертывания
 
 Система состоит из 4 независимых компонентов (профилей Docker), запускаемых на разных машинах:
@@ -46,7 +55,7 @@ cd censprobe
 Запускается на тестируемом RU-сервере. Отвечает на вопрос: *«Заблокировано ли что-то на аплинке провайдера сервера?»*
 
 ```bash
-TEST_ID=selectel-spb-001 docker compose --profile solo up
+docker compose --profile solo run --rm solo --test-id selectel-spb-001
 ```
 
 > Дождитесь завершения. Отчёт сохранится в `reports/<TEST_ID>/server-solo-<timestamp>.json`. Контейнер ничего не пушит — публикация ручная (см. ниже).
@@ -56,8 +65,7 @@ TEST_ID=selectel-spb-001 docker compose --profile solo up
 Запускается на тестируемом RU-сервере **после** solo. Слушает порты протоколов (OpenVPN, WireGuard, AmneziaWG, Shadowsocks, VLESS+Reality, Hysteria 2) и поднимает одноразовый HTTPS-эндпоинт `8443/tcp` для выдачи credentials клиенту.
 
 ```bash
-TEST_ID=selectel-spb-001 SESSION_ID=client-home-rt-spb \
-  docker compose --profile listener up
+docker compose --profile listener run --rm listener --test-id selectel-spb-001 --session-id client-home-rt-spb
 ```
 
 > Listener генерирует одноразовые credentials в памяти, выдаёт self-signed cert + bearer token и **печатает готовую команду** для запуска client'а на клиентской машине. Скопируйте её — она содержит `TEST_ID`, `SESSION_ID`, `SERVER_HOST`, `CREDS_TOKEN` и `CREDS_CERT_SHA256`.
@@ -66,16 +74,10 @@ TEST_ID=selectel-spb-001 SESSION_ID=client-home-rt-spb \
 
 ### Шаг 3. Имитация подключения (Client)
 
-На клиентской машине (ноутбук, мобильный интернет) откройте локальную копию репозитория и **вставьте команду, напечатанную listener'ом**. Она выглядит так:
+На клиентской машине (ноутбук, мобильный интернет) откройте локальную копию репозитория и **вставьте команду, напечатанную listener'ом**. Команда — одна строка, работает идентично в bash/zsh (Linux, macOS), PowerShell и cmd.exe (Windows), потому что значения летят как CLI-аргументы docker'а, а не shell-префиксом env-переменных:
 
-```bash
-TEST_ID=selectel-spb-001 \
-  SESSION_ID=client-home-rt-spb \
-  SERVER_HOST=1.2.3.4 \
-  CREDS_PORT=8443 \
-  CREDS_TOKEN=<one-time-token> \
-  CREDS_CERT_SHA256=<sha256-fingerprint> \
-  docker compose --profile client up
+```
+docker compose --profile client run --rm client --test-id selectel-spb-001 --session-id client-home-rt-spb --server-host 1.2.3.4 --creds-port 8443 --creds-token <one-time-token> --creds-cert-sha256 <sha256-fingerprint>
 ```
 
 > Client тянет credentials с listener'а через TLS-pinning (cert проверяется по SHA-256), проверяет bearer-token и пробует 6 протоколов. По завершении возвращайтесь в терминал сервера и нажмите `Ctrl+C` в процессе Listener.
@@ -176,8 +178,8 @@ git clone https://github.com/<YOUR_GITHUB_USERNAME>/censprobe.git
 cd censprobe
 
 # 2. Запустите тесты — отчёты появятся в reports/<TEST_ID>/.
-TEST_ID=<provider>-<city>-<NN> docker compose --profile solo up
-TEST_ID=<provider>-<city>-<NN> SESSION_ID=client-<...> docker compose --profile listener up
+docker compose --profile solo run --rm solo --test-id <provider>-<city>-<NN>
+docker compose --profile listener run --rm listener --test-id <provider>-<city>-<NN> --session-id client-<...>
 # (плюс client на клиентской машине — см. Шаг 3)
 
 # 3. Закоммитьте и откройте PR против main upstream-репозитория.
@@ -189,6 +191,8 @@ git push origin main
 
 Соглашения по `TEST_ID`: `<provider>-<city>-<NN>` (например `selectel-spb-001`, `vultr-frankfurt-002`). По `SESSION_ID`: `client-<тип>-<провайдер>-<город>` (`client-home-rt-spb`, `client-mob-mts-msk`).
 
+Оба идентификатора пропускают через валидатор: `[A-Za-z0-9_.-]{1,64}`. Кириллица, пробелы, `/` или путевые символы будут отклонены click'ом до запуска контейнера — это закрывает path-traversal через имя отчёта.
+
 > **Что review-ится в PR**: путь `reports/<TEST_ID>/` (новые файлы), целостность JSON, разумность `meta.yaml`. Изменения в коде/`targets/` обсуждаются отдельно — желательно открывать на них отдельные PR.
 
 > **Workflow в форках**: `.github/workflows/build.yml` не запускается на форках (guard `if: github.repository == 'vasiliiok/censprobe'`) — это убирает шум красных CI у контрибуторов без `DOCKERHUB_TOKEN`. Если форкер хочет собирать свои образы — снимает guard и ставит свои `vars.DOCKERHUB_USERNAME` + `secrets.DOCKERHUB_TOKEN`.
@@ -197,11 +201,7 @@ git push origin main
 
 ## Переменные окружения
 
-`.env` — **единственный источник истины** для всех runtime-параметров. Файл закоммичен в репо со значениями по умолчанию; редактируете локально, чтобы переопределить. Никаких fallback'ов в коде или compose: если ключ удалили из `.env`, контейнер упадёт явной ошибкой, а не запустится с тихим дефолтом.
-
-Параметры делятся на две группы:
-
-**Постоянные (с дефолтами в `.env`)** — оставляйте как есть или меняйте под свой деплой:
+`.env` — статическая конфигурация: порты, пароли, ключи, настройки. Закоммичен в репо со значениями по умолчанию; редактируете локально, чтобы переопределить. Если ключ удалили из `.env` — контейнер упадёт явной ошибкой. Per-run параметры (`--test-id`, `--session-id` и т.д.) — CLI-аргументы `docker compose run`, не переменные окружения.
 
 | Переменная | Профили | Дефолт | Описание |
 |------------|---------|--------|----------|
@@ -213,16 +213,6 @@ git push origin main
 | `CREDS_PORT` | listener, client | `8443` | Порт credentials-эндпоинта на listener'е |
 | `CENSPROBE_IMPORT_INTERVAL_SEC` | dashboard | `60` | Интервал импорта отчётов в Postgres (с) |
 | `IPAPI_IS_KEY` | solo, listener | `<key>` | API-ключ ipapi.is для ASN/geo (пустая строка — бесплатный tier) |
-
-**Per-run (пустые в `.env`)** — задаются на командной строке при `docker compose up`:
-
-| Переменная | Профили | Источник |
-|------------|---------|----------|
-| `TEST_ID` | solo, listener, client | Вы задаёте, например `selectel-spb-001` |
-| `SESSION_ID` | listener, client | Вы задаёте, например `client-home-rt-spb` |
-| `SERVER_HOST` | client | IPv4 listener'а — печатается в команде запуска client'а |
-| `CREDS_TOKEN` | client | Генерируется listener'ом при старте |
-| `CREDS_CERT_SHA256` | client | SHA-256 self-signed cert listener'а (cert pinning) |
 
 Контейнеры не имеют git/SSH зависимостей — `git push` запускаете вы сами с хоста, когда готовы публиковать отчёты.
 

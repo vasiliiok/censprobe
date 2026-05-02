@@ -27,6 +27,7 @@ import logging
 import time
 
 from censprobe_core.models import BlockingMethod, TestResult, Verdict
+from censprobe_core.server_meta import is_ru_vantage
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +42,32 @@ _METHOD_B_CONFIG = {
 
 
 async def run_throttling_tests() -> list[TestResult]:
-    """Run Method-B SNI throttling probe."""
+    """Run Method-B SNI throttling probe.
+
+    Vantage gating: Method B targets ``speedtest.selectel.ru``. From a
+    non-RU vantage (e.g. Frankfurt) the geographic RTT × BDP product
+    dominates the bandwidth measurement and the relative comparison
+    ``trigger < 25% × correct`` becomes noise — TSPU is not in the path,
+    yet Selectel routing variance can easily push one SNI below the
+    threshold. Skip the probe entirely outside RU and emit a single
+    INCONCLUSIVE marker so the dashboard sees "not run" instead of
+    "false negative".
+    """
+    if not is_ru_vantage():
+        return [TestResult(
+            test="throttling_youtube_sni_probe_method_b",
+            category="throttling",
+            target="speedtest.selectel.ru (SNI=googlevideo.com)",
+            verdict=Verdict.INCONCLUSIVE,
+            evidence={"reason": "non_ru_vantage_method_b_skipped"},
+            confidence=0.0,
+            notes=(
+                "Method B is a TSPU-specific test against speedtest.selectel.ru; "
+                "from a non-RU vantage the relative bandwidth comparison is "
+                "dominated by geographic latency rather than SNI policy."
+            ),
+        )]
+
     results: list[TestResult] = []
     result = await _run_method_b_sni_probe()
     if result:

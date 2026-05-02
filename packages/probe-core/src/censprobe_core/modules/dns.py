@@ -46,10 +46,13 @@ _ASN_CLIENT: httpx.AsyncClient | None = None
 # on-path observer must not be able to cheaply link this server's IP to
 # censorship-measurement activity. Plain-HTTP probes to ip-api.com would
 # leak the queried IP plus our return path in cleartext.
-# Same source-of-truth contract as server_meta.py: empty string means
-# "free tier", missing env var is a deployment bug.
-_IPAPI_IS_KEY = os.environ["IPAPI_IS_KEY"]
+# Lazy: don't fail import when IPAPI_IS_KEY is unset — only the actual
+# ASN lookup needs it, and an empty string is the "free tier" state.
 _IPAPI_IS_URL = "https://api.ipapi.is/"
+
+
+def _ipapi_key() -> str:
+    return os.environ.get("IPAPI_IS_KEY", "")
 
 
 def _get_doh_client() -> httpx.AsyncClient:
@@ -176,10 +179,22 @@ async def _test_domain(
 
     # 4. Determine "ground truth" from DoH (most reliable, bypasses ISP).
     # Include DoT answers as additional corroboration.
+    #
+    # Per-resolver answer sets are kept separately so the system-resolver
+    # ↔ "ground truth" overlap check can accept ANY single resolver as a
+    # match. Pooling all resolvers into one big set was producing false
+    # INCONCLUSIVE on CDN domains where each resolver returned a
+    # different rotated edge IP — the union-set then disagreed with the
+    # system answer 100% of the time.
     doh_ips: list[str] = []
+    per_resolver_sets: list[set[str]] = []
     for ips in doh_results.values():
+        if ips:
+            per_resolver_sets.append(set(ips))
         doh_ips.extend(ips)
     for ips in dot_results.values():
+        if ips:
+            per_resolver_sets.append(set(ips))
         doh_ips.extend(ips)
     doh_ips = list(set(doh_ips))
 
@@ -264,12 +279,38 @@ async def _test_domain(
     # 7. CERTainty-style verdict: cert validity + DoH consensus.
     #    ASN is collected for forensics only — comparing against a static
     #    expected-ASN list misclassifies CDN regional rotation as poisoning.
+    #
+    # Validate the cert for EVERY system-returned IP, not just sys_ips[0].
+    # Round-robin DNS poisoning (one valid IP + one captive) escapes the
+    # single-IP check: the attacker's first answer is fine, every
+    # subsequent answer is the censor. Treat the system as poisoned iff
+    # ANY of the returned IPs presents an invalid cert; treat as valid
+    # iff ALL of them validate.
     resolved_asn = await _ip_to_asn(sys_ips[0]) if sys_ips else None
-    cert_valid = await _validate_cert(domain, sys_ips[0]) if sys_ips else None
+    cert_valid: bool | None
+    if not sys_ips:
+        cert_valid = None
+    else:
+        cert_results = await asyncio.gather(*[
+            _validate_cert(domain, ip) for ip in sys_ips
+        ])
+        if any(r is False for r in cert_results):
+            cert_valid = False
+        elif all(r is True for r in cert_results):
+            cert_valid = True
+        else:
+            cert_valid = None  # at least one inconclusive, none invalid
 
     sys_set = set(sys_ips)
-    doh_set = set(doh_ips)
-    ip_overlap = bool(sys_set & doh_set) if sys_set and doh_set else False
+    # Match against ANY single resolver's answer set — CDNs return
+    # different edge IPs to different resolvers, and a union-overlap
+    # check fails on those even when every resolver agrees the domain
+    # is healthy.
+    ip_overlap = (
+        any(sys_set & rs for rs in per_resolver_sets)
+        if sys_set
+        else False
+    )
 
     verdict: Verdict
     method: BlockingMethod | None = None
@@ -523,6 +564,19 @@ async def _validate_cert(domain: str, ip: str) -> bool | None:
     """
     Connect to IP:443 with SNI=domain and check if cert is valid for domain.
     Returns True/False/None (None = connection failed, inconclusive).
+
+    Two failure modes both count as "cert invalid for `domain`":
+
+      * ssl.SSLCertVerificationError — chain failed verification or
+        hostname mismatch against a trusted CA.
+      * ssl.SSLError without the verification subclass — typical of a
+        homegrown TSPU MITM serving a self-signed cert: the handshake
+        completes far enough for OpenSSL to reject the cert with
+        "unable to get local issuer certificate" / "alert unknown CA",
+        which surfaces as plain SSLError.
+
+    Both → False so DNS_POISONING attribution doesn't silently downgrade
+    to ANOMALY when a censor uses a self-signed cert.
     """
     ctx = ssl.create_default_context()
 
@@ -534,10 +588,15 @@ async def _validate_cert(domain: str, ip: str) -> bool | None:
                     return True
         except ssl.SSLCertVerificationError:
             return False
+        except ssl.SSLError:
+            # MITM with a self-signed cert raises bare SSLError, not
+            # SSLCertVerificationError. Treat as "cert invalid" so
+            # DNS_POISONING is correctly attributed.
+            return False
         except Exception:
-            # Connection or non-cert TLS failure — caller treats None as
-            # "inconclusive", NOT as "cert invalid", which prevents flagging
-            # a TCP/RST as DNS_POISONING.
+            # Pre-TLS failure (TCP RST, timeout, ECONNREFUSED). Caller
+            # treats None as "inconclusive", NOT "cert invalid" — this
+            # prevents flagging a TCP-RST as DNS_POISONING.
             return None
 
     try:
@@ -585,7 +644,7 @@ async def _ip_to_asn(ip: str) -> str | None:
         client = _get_asn_client()
         r = await client.get(
             _IPAPI_IS_URL,
-            params={"q": ip, "key": _IPAPI_IS_KEY},
+            params={"q": ip, "key": _ipapi_key()},
         )
         if r.status_code == 429:
             _ASN_BACKOFF_UNTIL = now + 90.0

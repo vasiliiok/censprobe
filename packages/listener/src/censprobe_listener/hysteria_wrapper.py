@@ -132,7 +132,12 @@ class HysteriaResponder:
                 if line:
                     logger.debug("[hysteria] %s", line)
                     low = line.lower()
-                    if "client connected" in low or "authenticated" in low:
+                    # Hysteria 2 emits one "client connected" line per real
+                    # session. Drop the secondary "authenticated" matcher:
+                    # hysteria also logs auth events for sub-streams within
+                    # an existing session, which double-counted the same
+                    # client and made the connection_count meaningless.
+                    if "client connected" in low:
                         self.connection_count += 1
         except Exception as e:
             logger.debug("hysteria monitor ended: %s", e)

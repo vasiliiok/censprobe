@@ -4,17 +4,23 @@ Pydantic data models for Censprobe.
 Covers:
 - Verdict and BlockingMethod enums
 - TestResult — single test outcome
+- EndpointMeta — IP-free network identity (server or client)
 - ReportMeta — reports/<test_id>/meta.yaml
-- ServerMeta — auto-detected server metadata
+- ServerMeta — auto-detected server metadata (EndpointMeta + host info)
 - ListenerReport — output of censprobe-listener
 - ProtocolResult — single VPN protocol handshake outcome
+
+OpSec note: no specific IPv4/IPv6 host literals are stored in any
+serialized model. ipapi.is enrichment exposes ASN, organization,
+datacenter, and CIDR-level network ranges, which is sufficient for
+cross-test/cross-session grouping without persisting host identifiers.
 """
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any
-from pydantic import BaseModel, Field, PrivateAttr
+from pydantic import BaseModel, Field
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -83,23 +89,86 @@ class TestResult(BaseModel):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Endpoint identity (IP-free)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Three nested objects mirror the ipapi.is response shape so analytics can
+# compare on whichever axis matters: ASN (network operator), company
+# (legal owner), datacenter (physical hosting). They often coincide on a
+# clean VPS but diverge when a tenant resells capacity inside someone
+# else's facility, when an ISP runs multiple ASNs, or for residential
+# clients where datacenter is null entirely. Keeping the three separate
+# preserves that distinction; group-by for cross-test comparison uses
+# `asn.asn` as the canonical key.
+
+class AsnInfo(BaseModel):
+    """Network-operator-level identity (one ASN = one routing entity)."""
+    asn: int
+    descr: str | None = None       # human-readable AS name, e.g. "AS-VULTR ..."
+    org: str | None = None         # legal org behind the ASN
+    domain: str | None = None      # e.g. "constant.com"
+    route: str | None = None       # CIDR, e.g. "104.238.166.0/23"
+
+
+class CompanyInfo(BaseModel):
+    """Legal-entity-level identity (often == AsnInfo.org but not always)."""
+    name: str | None = None
+    domain: str | None = None
+    network: str | None = None     # range, e.g. "104.238.128.0 - 104.238.191.255"
+
+
+class DatacenterInfo(BaseModel):
+    """Physical-DC identity. Populated only when is_datacenter is true."""
+    name: str | None = None
+    domain: str | None = None
+    network: str | None = None
+
+
+class LocationInfo(BaseModel):
+    """Geographic identity. country_code is ISO-3166 alpha-2."""
+    country_code: str | None = None    # "RU", "DE"
+    city: str | None = None
+
+
+class EndpointMeta(BaseModel):
+    """IP-free network identity for one endpoint (server or client).
+
+    `is_datacenter` is the primary QA signal for client endpoints: a
+    client whose source IP belongs to a hosting provider is almost
+    certainly behind a self-hosted VPN, which taints VPN-protocol
+    verdicts in this run. This is more reliable than ipapi.is's
+    `is_vpn`/`is_proxy` flags, which only catch services that mark
+    themselves.
+
+    `is_mobile` distinguishes mobile-carrier networks; mobile uplinks
+    in RU are subject to heavier filtering than residential, so it
+    matters as a comparison axis.
+    """
+    is_mobile: bool = False
+    is_datacenter: bool = False
+    asn: AsnInfo | None = None
+    company: CompanyInfo | None = None
+    datacenter: DatacenterInfo | None = None
+    location: LocationInfo | None = None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Server & report metadata
 # ─────────────────────────────────────────────────────────────────────────────
 
 class ServerMeta(BaseModel):
-    """Auto-detected metadata about the probe server."""
-    provider: str | None = None
-    location: str | None = None
-    country: str | None = None       # ISO-3166 alpha-2, e.g. "DE"
-    asn: str | None = None
-    as_name: str | None = None
-    ipv4: str | None = None
+    """Auto-detected metadata about the probe server.
+
+    Embeds EndpointMeta for network identity; adds host-only fields the
+    operator wants visible (kernel, distro, IPv6 availability). No IPv4
+    literal is stored — `network` (in EndpointMeta nested objects) gives
+    the CIDR range, which is enough for grouping without exposing host
+    identifiers.
+    """
+    endpoint: EndpointMeta = Field(default_factory=EndpointMeta)
     ipv6_available: bool = False
-    plan: str | None = None
     kernel: str | None = None
     distro: str | None = None
-    # Raw detected values (not stored in git)
-    _exit_ip: str | None = PrivateAttr(default=None)
 
 
 class ReportMeta(BaseModel):
@@ -125,7 +194,6 @@ class ProtocolResult(BaseModel):
     first_handshake_at: datetime | None = None
     avg_rtt_ms: float | None = None
     avg_data_echo_ms: float | None = None
-    from_asn: str | None = None
     note: str | None = None
 
     def finalize(self) -> None:
@@ -139,12 +207,31 @@ class ProtocolResult(BaseModel):
 
 
 class ListenerReport(BaseModel):
-    """Output of censprobe-listener — reports/<test_id>/server-listener-<session>-<ts>.json"""
+    """Output of censprobe-listener — reports/<test_id>/server-listener-<session>-<ts>.json
+
+    `client_connected` and `client` describe whether the operator-side
+    client reached the listener's credentials HTTPS endpoint at all, and
+    if so, what network it came from. Three valid states:
+
+      1. client_connected=True, client=<EndpointMeta>
+         — normal session, enrichment succeeded.
+      2. client_connected=True, client=None
+         — client hit the endpoint but ipapi.is enrichment failed
+           (rate-limit, transient network). Per-protocol verdicts are
+           still meaningful.
+      3. client_connected=False, client=None
+         — client never reached the endpoint. Strongest blocking
+           signal: credentials were issued but the network did not
+           even allow the cred fetch to complete. Per-protocol BLOCKED
+           verdicts in this state are network-level, not protocol-level.
+    """
     test_id: str
     session_id: str
     listener_started_at: datetime
     listener_stopped_at: datetime | None = None
     duration_sec: float | None = None
+    client_connected: bool = False
+    client: EndpointMeta | None = None
     results: dict[str, ProtocolResult] = Field(default_factory=dict)
 
 
