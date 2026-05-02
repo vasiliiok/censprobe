@@ -33,6 +33,17 @@ logger = logging.getLogger(__name__)
 
 PROBE_TIMEOUT = 15.0
 
+# Throughput probe parameters. The server-side echo endpoint streams
+# this many zero bytes back through the tunnel; the client measures
+# end-to-end time via curl's `--write-out %{speed_download}`. 1 MiB is
+# small enough that even a heavily-throttled link (~270 kbps) finishes
+# inside the timeout, but large enough that fast networks register a
+# meaningful number rather than sub-millisecond noise. Tuning these
+# changes the floor of what we call "throttled" — see the THROTTLED
+# flag handling in proxy_throughput.
+THROUGHPUT_BYTES = 1 * 1024 * 1024
+THROUGHPUT_TIMEOUT_SEC = 30.0
+
 # Re-exported so existing callers that did `from
 # censprobe_core.protocol_probes import ECHO_PORTS` keep working — the
 # canonical home is censprobe_core.echo_ports.
@@ -65,6 +76,20 @@ class ProbeResult:
     data_ok: bool = False
     rtt_ms: float | None = None
     error: str | None = None
+    # Sustained-data signal — populated only for SS / VLESS / Hy2 (the
+    # three SOCKS-routed protocols that go through the listener echo
+    # server). OpenVPN / WG / AmneziaWG keep `None` because their
+    # data-phase verification is a single ping, not a bulk download.
+    #
+    # NOT used as a scoring criterion: a slow VPS with a narrow uplink
+    # would otherwise be penalised for non-censorship reasons. The value
+    # is for operator inspection (CLI + dashboard) only.
+    throughput_mbps: float | None = None
+    # True iff the throughput download didn't complete inside
+    # ``THROUGHPUT_TIMEOUT_SEC``. That's a strong indication the data
+    # plane is heavily throttled — but it can also fire on a server with
+    # < 270 kbps uplink, so the flag is informational, not a verdict.
+    throughput_throttled: bool = False
 
 
 async def run_cmd(cmd: list[str], timeout: float = PROBE_TIMEOUT) -> tuple[int, str, str]:
@@ -328,6 +353,64 @@ async def proxy_echo(
     # 56=recv_error, 18=partial, …): SOCKS connect plausibly succeeded but
     # the remote data phase did not.
     return "inconclusive", None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Sustained-data throughput probe (SS / VLESS / Hy2 only).
+# Returns: (mbps, throttled)
+#   mbps:      client-measured download rate in Mbps; None if the curl
+#              call failed for any reason other than timeout.
+#   throttled: True iff curl exited 28 (operation timed out), i.e. the
+#              tunnel could not deliver THROUGHPUT_BYTES inside the
+#              window. Caller surfaces this as a flag, not a verdict.
+# ─────────────────────────────────────────────────────────────────────────────
+async def proxy_throughput(
+    proxy_port: int,
+    echo_port: int,
+    target_bytes: int = THROUGHPUT_BYTES,
+    timeout: float = THROUGHPUT_TIMEOUT_SEC,
+) -> tuple[float | None, bool]:
+    """Download ``target_bytes`` from the listener echo via the local SOCKS proxy.
+
+    The numeric result is informational and intentionally not consumed
+    by scoring — narrow server uplink would otherwise look like
+    censorship. Caller is expected to print the value in the CLI / pass
+    it through into the report and let the dashboard show it as a
+    side channel.
+    """
+    cmd = [
+        "curl", "-s", "-o", "/dev/null",
+        "--max-time", str(timeout),
+        # %{exitcode}: curl's own exit; %{speed_download}: bytes/sec
+        # (curl's already-averaged rate over the whole transfer);
+        # %{size_download}: total bytes received — used to ignore
+        # partial transfers that the tunnel cut short.
+        "-w", "%{exitcode} %{speed_download} %{size_download}",
+        "-x", f"socks5h://127.0.0.1:{proxy_port}",
+        f"http://127.0.0.1:{echo_port}/throughput?bytes={target_bytes}",
+    ]
+    code, out, _err = await run_cmd(cmd, timeout=timeout + 2)
+    parts = out.strip().split()
+    if len(parts) < 3:
+        return None, False
+    try:
+        exit_code = int(parts[0])
+        speed_bps = float(parts[1])
+        size = int(parts[2])
+    except ValueError:
+        return None, False
+
+    # curl exit 28 = CURLE_OPERATION_TIMEDOUT — the link did not deliver
+    # the requested payload inside the deadline. We surface this as the
+    # throttled flag (not a verdict) so the operator can see "data plane
+    # established but heavily throttled" in the CLI / dashboard.
+    if exit_code == 28:
+        return None, True
+
+    if code != 0 or size <= 0:
+        return None, False
+
+    return (speed_bps * 8) / 1_000_000, False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -716,6 +799,13 @@ socks5:
                 result.data_ok = True
                 result.verdict = Verdict.OK
                 result.rtt_ms = rtt
+                # Sustained-throughput follow-up — strictly informational,
+                # never affects the verdict (see proxy_throughput docstring).
+                mbps, throttled = await proxy_throughput(
+                    local_port, ECHO_PORTS["hysteria2"],
+                )
+                result.throughput_mbps = mbps
+                result.throughput_throttled = throttled
             elif is_hs_only:
                 result.handshake_ok = True
                 result.verdict = Verdict.HANDSHAKE_ONLY
@@ -780,6 +870,14 @@ async def _tunnel_via_singbox_or_xray(
                 result.data_ok = True
                 result.verdict = Verdict.OK
                 result.rtt_ms = rtt
+                # Same informational throughput follow-up as in
+                # probe_hysteria2; the value is surfaced in the CLI and
+                # dashboard but never modifies the verdict.
+                mbps, throttled = await proxy_throughput(
+                    local_port, ECHO_PORTS[proto_label],
+                )
+                result.throughput_mbps = mbps
+                result.throughput_throttled = throttled
             elif is_hs_only:
                 result.handshake_ok = True
                 result.verdict = Verdict.HANDSHAKE_ONLY

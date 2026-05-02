@@ -338,7 +338,15 @@ def _print_results(results: dict[str, ProbeResult], server_host: str) -> None:
     table.add_column("Protocol", style="cyan", width=20)
     table.add_column("Verdict", width=22)
     table.add_column("RTT", justify="right", width=10)
-    table.add_column("Error", style="dim", width=40)
+    # Client-side throughput as observed by curl through the SOCKS
+    # tunnel. Populated only for SS / VLESS / Hy2 (the three protocols
+    # that route through the listener echo server). For OpenVPN / WG /
+    # AWG we still show "—" because they do not run a bulk download.
+    # The "throttled" suffix appears when the download did not finish
+    # inside the timeout — strong signal that the data plane is
+    # heavily rate-limited. NEVER used by scoring.
+    table.add_column("Throughput", justify="right", width=14)
+    table.add_column("Error", style="dim", width=32)
 
     verdict_colors = {
         Verdict.OK: "green",
@@ -352,7 +360,13 @@ def _print_results(results: dict[str, ProbeResult], server_host: str) -> None:
         color = verdict_colors.get(r.verdict, "white")
         v_str = f"[{color}]{r.verdict}[/{color}]"
         rtt_str = f"{r.rtt_ms:.0f}ms" if r.rtt_ms else "—"
-        table.add_row(name, v_str, rtt_str, r.error or "")
+        if r.throughput_throttled:
+            tp_str = "[red]throttled[/red]"
+        elif r.throughput_mbps is not None:
+            tp_str = f"{r.throughput_mbps:,.1f} Mbps"
+        else:
+            tp_str = "[dim]—[/dim]"
+        table.add_row(name, v_str, rtt_str, tp_str, r.error or "")
         if r.verdict in (Verdict.OK, Verdict.HANDSHAKE_ONLY):
             ok_count += 1
 

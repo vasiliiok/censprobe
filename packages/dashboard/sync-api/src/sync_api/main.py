@@ -28,7 +28,7 @@ from typing import AsyncIterator
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import distinct, select
+from sqlalchemy import delete, distinct, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from censprobe_core.models import (
@@ -473,10 +473,60 @@ async def _import_listener_report(
     if not sess_meta:
         return 0
 
+    session_id = sess_meta.get("session_id", "")
+    current_file = sess_meta.get("report_file", "") or path.name
+
+    # UPSERT-by-session_id: a re-run of the listener with the same TID
+    # and SID semantically replaces the previous attempt of "this client
+    # network probing this server". Without this, both rows survive in
+    # the DB and Grafana panel 04 shows duplicated tiles, while score
+    # recompute averages the two attempts instead of taking the latest.
+    #
+    # Listener filenames carry an ISO-8601 timestamp suffix
+    # (`...-2026-04-21T10-30-00Z.json`), which sorts chronologically as
+    # plain ASCII. We compare report_file strings as the freshness
+    # proxy:
+    #
+    #   * existing.report_file >= current_file → DB already has a
+    #     newer-or-equal observation for this SID; refuse the import to
+    #     keep the latest snapshot stable across loop iterations (the
+    #     `imported_sessions` dedup set is rebuilt per pass and would
+    #     otherwise re-import an old file whose row we just deleted).
+    #   * existing.report_file <  current_file → DB row is stale;
+    #     delete it (cascade clears protocol_results) and continue with
+    #     a fresh INSERT.
+    #   * no existing row                        → plain INSERT.
+    if session_id:
+        existing = (
+            await session.execute(
+                select(ListenerSession).where(
+                    ListenerSession.test_run_id == run.id,
+                    ListenerSession.session_id == session_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            if existing.report_file >= current_file:
+                logger.info(
+                    "Skipping %s: SID %r already represented by newer report %s",
+                    current_file, session_id, existing.report_file,
+                )
+                return 0
+            await session.execute(
+                delete(ListenerSession).where(ListenerSession.id == existing.id)
+            )
+            # Flush so the (test_run_id, report_file) UNIQUE constraint
+            # sees the DELETE before the INSERT lands in the same batch.
+            await session.flush()
+            logger.info(
+                "Replacing SID %r: %s ← %s",
+                session_id, current_file, existing.report_file,
+            )
+
     listener_sess = ListenerSession(
         test_run_id=run.id,
-        session_id=sess_meta.get("session_id", ""),
-        report_file=sess_meta.get("report_file", ""),
+        session_id=session_id,
+        report_file=current_file,
         started_at=sess_meta.get("started_at"),
         stopped_at=sess_meta.get("stopped_at"),
         duration_sec=sess_meta.get("duration_sec"),

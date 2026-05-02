@@ -59,7 +59,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT ls.session_id, COALESCE(ls.client_meta->'asn'->>'org', '—') AS client_org, pr.protocol, pr.verdict, pr.handshake_count, pr.data_transfer_ok, pr.avg_rtt_ms FROM protocol_results pr JOIN listener_sessions ls ON ls.id = pr.session_id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE tr.test_id = ${test_id:sqlstring} ORDER BY ls.session_id, pr.protocol",
+          "rawSql": "SELECT ls.session_id, COALESCE(ls.client_meta->'asn'->>'org', '—') AS client_org, pr.protocol, pr.verdict, pr.handshake_count, pr.data_transfer_ok, pr.avg_rtt_ms, pr.avg_throughput_mbps, pr.throughput_throttled FROM protocol_results pr JOIN listener_sessions ls ON ls.id = pr.session_id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE tr.test_id = ${test_id:sqlstring} ORDER BY ls.session_id, pr.protocol",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -136,6 +136,69 @@
                       "INCONCLUSIVE": {
                         "color": "blue",
                         "text": "?"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "avg_throughput_mbps"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Throughput (Mbps)"
+              },
+              {
+                "id": "unit",
+                "value": "Mbits"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "noValue",
+                "value": "—"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "throughput_throttled"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Throttled"
+              },
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "true": {
+                        "color": "red",
+                        "text": "throttled"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "false": {
+                        "color": "transparent",
+                        "text": ""
                       }
                     }
                   }

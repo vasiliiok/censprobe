@@ -187,13 +187,27 @@ class ReportMeta(BaseModel):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class ProtocolResult(BaseModel):
-    """Aggregated result for one protocol in a listener session."""
+    """Aggregated result for one protocol in a listener session.
+
+    ``avg_throughput_mbps`` and ``throughput_throttled`` are populated only
+    for the SOCKS-routed protocols (Shadowsocks, VLESS+Reality, Hysteria 2)
+    via the listener's loopback echo-server's ``/throughput`` handler.
+    OpenVPN / WireGuard / AmneziaWG keep both fields ``None``/``False``
+    because their data-phase verification is a single ICMP ping, not a
+    bulk download. The numeric value is *informational only* — never
+    consumed by scoring, so a narrow server uplink isn't mis-attributed
+    as censorship. ``throughput_throttled=True`` flags the case where the
+    download didn't complete inside the timeout, i.e. sustained data
+    plane is heavily throttled (or absent).
+    """
     verdict: Verdict = Verdict.BLOCKED
     handshake_count: int = 0
     data_transfer_ok: bool = False
     first_handshake_at: datetime | None = None
     avg_rtt_ms: float | None = None
     avg_data_echo_ms: float | None = None
+    avg_throughput_mbps: float | None = None
+    throughput_throttled: bool = False
     note: str | None = None
 
     def finalize(self) -> None:

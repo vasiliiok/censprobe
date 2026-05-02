@@ -8,11 +8,20 @@ bytes back. This lets us distinguish HANDSHAKE_ONLY from full OK:
 
   * handshake_count > 0  and  echo_count == 0  → HANDSHAKE_ONLY
   * handshake_count > 0  and  echo_count  > 0  → OK
+
+In addition to the small ``GET /ping`` round-trip, the server now also
+serves ``GET /throughput?bytes=N`` — streams ``N`` zero bytes back to the
+client and measures wall-clock time from first write to connection close,
+which is the listener-side view of the tunnel's sustained downlink. The
+resulting Mbps figure is *not* used by scoring (it would be wrong to
+penalise a slow VPS for narrow uplink); it is exposed only as an
+operator-facing signal in the listener report and dashboard.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 # Canonical home of the echo-port contract is probe-core (it is shared
 # with the client-side probe via :mod:`censprobe_core.protocol_probes`,
@@ -26,6 +35,18 @@ __all__ = ["ECHO_PORTS", "EchoServer"]
 logger = logging.getLogger(__name__)
 
 
+# Cap the throughput payload so a malicious client (or a misconfigured
+# probe) cannot ask for arbitrary GiB and starve the listener box of
+# memory. 16 MiB is comfortably above what the client probe asks for
+# (1 MiB by default).
+_MAX_THROUGHPUT_BYTES = 16 * 1024 * 1024
+
+# Hard-cap how long a single /throughput response may take. The default
+# matches the client-side curl --max-time so a stuck transfer doesn't
+# hold the only echo socket past the listener's session window.
+_THROUGHPUT_RESPONSE_TIMEOUT_SEC = 35.0
+
+
 class EchoServer:
     """Single-process asyncio TCP echo server with per-port counters."""
 
@@ -34,6 +55,11 @@ class EchoServer:
         self._servers: list[asyncio.base_events.Server] = []
         self.connection_counts: dict[str, int] = {p: 0 for p in self.ports}
         self.bytes_counts: dict[str, int] = {p: 0 for p in self.ports}
+        # Latest /throughput measurement per protocol — None until a probe
+        # actually requests one. Overwritten on each call rather than
+        # averaged, because the operator wants the most recent observation
+        # not a smoothed history.
+        self.throughput_mbps: dict[str, float | None] = {p: None for p in self.ports}
 
     async def start(self) -> None:
         # Bring up each port; on partial failure (e.g. one of the loopback
@@ -69,13 +95,21 @@ class EchoServer:
         proto: str,
     ) -> None:
         self.connection_counts[proto] = self.connection_counts.get(proto, 0) + 1
-        total_bytes = 0
         try:
-            # Echo up to 8 KiB, then send a tiny HTTP-ish reply so curl is happy
-            # whether the client sends raw bytes or an HTTP GET.
+            # Read enough to see the HTTP request line + headers (or the
+            # raw payload if the client isn't speaking HTTP). 8 KiB
+            # comfortably covers any sane ``GET /...`` line + headers.
             data = await asyncio.wait_for(reader.read(8192), timeout=3.0)
             total_bytes = len(data)
             self.bytes_counts[proto] = self.bytes_counts.get(proto, 0) + total_bytes
+
+            if data.startswith(b"GET /throughput"):
+                # Throughput probe — server-side measurement of wall-clock
+                # time from first write to connection close. The bytes
+                # counter has already been credited above for the request
+                # line, which is enough to satisfy data_ok().
+                await self._serve_throughput(proto, data, writer)
+                return
 
             if data.startswith(b"GET ") or data.startswith(b"POST "):
                 body = b"pong"
@@ -99,6 +133,87 @@ class EchoServer:
             except Exception:
                 pass
 
+    async def _serve_throughput(
+        self,
+        proto: str,
+        request: bytes,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        """Stream N zero bytes back; measure transfer wall-clock duration.
+
+        ``writer.wait_closed()`` is what actually meters the slow link:
+        for any payload that fits in the kernel send buffer, ``drain()``
+        returns immediately, but ``wait_closed`` blocks on the FIN-ACK
+        round-trip after the kernel has finished pushing the bytes
+        through the throttled tunnel. The measurement is approximate on
+        very fast / very small transfers (kernel buffer absorption hides
+        actual time-on-wire), but accurate within ~10% on anything that
+        takes more than ~1 second — which is exactly the regime where
+        we care about the number.
+        """
+        n = _parse_throughput_n(request)
+        if n <= 0:
+            writer.write(
+                b"HTTP/1.1 400 Bad Request\r\n"
+                b"Content-Length: 0\r\n"
+                b"Connection: close\r\n\r\n"
+            )
+            try:
+                await writer.drain()
+            finally:
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except Exception:
+                    pass
+            return
+
+        if n > _MAX_THROUGHPUT_BYTES:
+            n = _MAX_THROUGHPUT_BYTES
+
+        body = b"\x00" * n
+        headers = (
+            b"HTTP/1.1 200 OK\r\n"
+            b"Content-Type: application/octet-stream\r\n"
+            b"Content-Length: " + str(n).encode() + b"\r\n"
+            b"Cache-Control: no-store\r\n"
+            b"Connection: close\r\n\r\n"
+        )
+
+        t0 = time.monotonic()
+        duration: float | None = None
+        try:
+            writer.write(headers)
+            writer.write(body)
+            await asyncio.wait_for(
+                writer.drain(), timeout=_THROUGHPUT_RESPONSE_TIMEOUT_SEC,
+            )
+            writer.close()
+            try:
+                await asyncio.wait_for(
+                    writer.wait_closed(),
+                    timeout=_THROUGHPUT_RESPONSE_TIMEOUT_SEC,
+                )
+            except (asyncio.TimeoutError, Exception):
+                # Client hung — measurement still meaningful (we know it
+                # didn't finish), record duration as the deadline and let
+                # the caller see a low Mbps.
+                pass
+            duration = time.monotonic() - t0
+        except asyncio.TimeoutError:
+            duration = time.monotonic() - t0
+        except Exception as e:
+            logger.debug("throughput serve to %s aborted: %s", proto, e)
+            return
+
+        if duration and duration > 0:
+            mbps = (n * 8) / duration / 1_000_000
+            self.throughput_mbps[proto] = mbps
+            logger.info(
+                "throughput[%s]: %.2f Mbps (%d bytes in %.2fs)",
+                proto, mbps, n, duration,
+            )
+
     async def stop(self) -> None:
         for srv in self._servers:
             srv.close()
@@ -109,12 +224,13 @@ class EchoServer:
                 pass
         self._servers.clear()
 
-    def snapshot(self) -> dict[str, dict[str, int]]:
-        """Return per-protocol {connections, bytes}."""
+    def snapshot(self) -> dict[str, dict[str, float | int | None]]:
+        """Return per-protocol {connections, bytes, throughput_mbps}."""
         return {
             proto: {
                 "connections": self.connection_counts.get(proto, 0),
                 "bytes": self.bytes_counts.get(proto, 0),
+                "throughput_mbps": self.throughput_mbps.get(proto),
             }
             for proto in self.ports
         }
@@ -129,3 +245,30 @@ class EchoServer:
     # false-OK verdicts. The legacy 4-byte path is gone.
     def data_ok(self, proto: str, min_bytes: int = 64) -> bool:
         return self.bytes_counts.get(proto, 0) >= min_bytes
+
+
+def _parse_throughput_n(request: bytes) -> int:
+    """Extract ``bytes`` query param from a ``GET /throughput?...`` line.
+
+    Returns 0 when the value is missing, malformed, or non-numeric.
+    The caller treats 0 as "reject the request" so a typo in the client
+    doesn't quietly stream nothing and read as a successful zero-byte
+    transfer.
+    """
+    try:
+        first_line = request.split(b"\r\n", 1)[0]
+        # "GET /throughput?bytes=1048576 HTTP/1.1"
+        parts = first_line.split(b" ")
+        if len(parts) < 2:
+            return 0
+        path_qs = parts[1]
+        if b"?" not in path_qs:
+            return 0
+        _, qs = path_qs.split(b"?", 1)
+        for pair in qs.split(b"&"):
+            if pair.startswith(b"bytes="):
+                value = pair[len(b"bytes="):]
+                return max(0, int(value))
+    except (ValueError, IndexError):
+        return 0
+    return 0

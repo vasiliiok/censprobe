@@ -8,13 +8,16 @@ Verdicts:
   OK            — connect() succeeded
   IP_DROPPED    — SYN sent, timeout (null-route / blackhole)
   REFUSED       — legitimate RST from the host (port closed, service down)
-  RST_INJECTED  — HEURISTIC ONLY: RST that arrives in less than
-                  _SYN_FAST_RST_MS after connect(). This is a rough
-                  timing heuristic, NOT a TTL-anomaly analysis: low-latency
-                  networks (same datacenter, localhost) can legitimately
-                  return a REFUSED RST faster than the threshold and be
-                  mislabeled as RST_INJECTED. Treat this verdict as a hint,
-                  not a conclusion.
+  RST_INJECTED  — ⚠ SUSPICION ONLY (not a confirmation). RST arrives in
+                  less than _SYN_FAST_RST_MS after connect(). This is a
+                  pure timing heuristic, NOT a TTL-anomaly analysis:
+                  low-latency networks (same DC, anycast, localhost) can
+                  legitimately return a REFUSED RST faster than the
+                  threshold. Surface this verdict as a lead — confirmation
+                  requires out-of-band TTL-delta capture which the MVP
+                  does not perform. Confidence is capped at 0.5 and the
+                  evidence dict carries an explicit signal=suspicion +
+                  disclaimer to keep this honest in dashboards.
 
 True TTL-delta analysis requires raw sockets (eBPF or similar) and is
 deliberately not implemented in the MVP — we surface the heuristic RTT
@@ -88,9 +91,30 @@ async def _test_tcp(ip: str, port: int, repeats: int) -> TestResult:
     elif final_verdict == Verdict.IP_DROPPED:
         method = BlockingMethod.IP_DROPPED
 
-    # RST_INJECTED is only a timing heuristic here — flag that explicitly
-    # in evidence and lower confidence so scoring can discount it.
+    # RST_INJECTED is a timing-only heuristic (fast RST < 30 ms after
+    # SYN), NOT a TTL-delta verification. The flags below — explicit
+    # confidence ≤ 0.5, evidence.signal="suspicion", a long-form note —
+    # are all there so the dashboard, the CLI summary, and any reviewer
+    # of the JSON report can SEE that this verdict is a suspicion, not a
+    # confirmation. A genuine attribution would require raw-socket
+    # capture of incoming RST TTL and comparison with the SYN-ACK TTL on
+    # the same path, which the MVP doesn't do.
     is_heuristic_rst = final_verdict == Verdict.RST_INJECTED
+    evidence: dict[str, object] = {
+        "all_verdicts": verdicts,
+        "rtts_ms": rtts,
+        "rst_detection": "rtt_heuristic_no_scapy",
+    }
+    if is_heuristic_rst:
+        evidence["signal"] = "suspicion"
+        evidence["heuristic"] = "rst_timing_only"
+        evidence["heuristic_threshold_ms"] = _SYN_FAST_RST_MS
+        evidence["disclaimer"] = (
+            "Fast-RST timing heuristic only — same-AS / same-DC peers "
+            "can produce sub-30ms REFUSED that this rule misclassifies. "
+            "Confirm with an out-of-band TTL-delta capture before "
+            "treating as evidence of TSPU injection."
+        )
     return TestResult(
         test=f"tcp_{_slug(ip)}_{port}",
         category="tcp",
@@ -101,16 +125,15 @@ async def _test_tcp(ip: str, port: int, repeats: int) -> TestResult:
         attempts=repeats,
         confidence=0.5 if is_heuristic_rst else 1.0,
         notes=(
-            "RST_INJECTED is a timing heuristic (fast RST, no TTL check); "
-            "treat as a hint, not a conclusion."
+            "SUSPICION (heuristic, not confirmed): RST arrived within "
+            f"{_SYN_FAST_RST_MS} ms of SYN, which is consistent with an "
+            "in-path injector but also occurs naturally on same-AS / "
+            "same-DC paths. No TTL-delta verification was performed; "
+            "treat as a lead, not a verdict."
             if is_heuristic_rst
             else None
         ),
-        evidence={
-            "all_verdicts": verdicts,
-            "rtts_ms": rtts,
-            "rst_detection": "rtt_heuristic_no_scapy",
-        },
+        evidence=evidence,
     )
 
 

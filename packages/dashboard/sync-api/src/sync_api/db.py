@@ -218,6 +218,13 @@ class ProtocolResult(Base):
     handshake_count = Column(Integer, default=0)
     data_transfer_ok = Column(Boolean, default=False)
     avg_rtt_ms = Column(Float, nullable=True)
+    # Listener-side sustained-data measurement (only populated for SS /
+    # VLESS / Hysteria2 — the three protocols that route through the
+    # loopback echo server). NULL for OpenVPN / WireGuard / AmneziaWG
+    # whose data-phase verification is a single ICMP ping. Surfaced in
+    # dashboards as an operator signal; NEVER used by scoring.
+    avg_throughput_mbps = Column(Float, nullable=True)
+    throughput_throttled = Column(Boolean, default=False)
 
     session = relationship("ListenerSession", back_populates="protocol_results")
 

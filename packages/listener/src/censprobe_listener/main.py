@@ -403,9 +403,22 @@ def _finalize_protocol_result(name: str, responder) -> ProtocolResult:
 
     data_ok = bool(getattr(responder, "data_transfer_ok", False))
 
+    # Throughput: only the SOCKS-routed responders expose
+    # ``echo_server`` (injected in _start_responders). For OpenVPN /
+    # WG / AWG the attribute is missing or None — leave the field
+    # unset so the report carries an honest "not measured".
+    avg_throughput: float | None = None
+    echo_server = getattr(responder, "echo_server", None)
+    if echo_server is not None:
+        try:
+            avg_throughput = echo_server.throughput_mbps.get(name)
+        except (AttributeError, TypeError):
+            avg_throughput = None
+
     pr = ProtocolResult(
         handshake_count=handshake_count,
         data_transfer_ok=data_ok,
+        avg_throughput_mbps=avg_throughput,
     )
     pr.finalize()
     return pr
@@ -577,6 +590,11 @@ def _print_final_results(results: dict[str, ProtocolResult], duration: float) ->
     table.add_column("Verdict")
     table.add_column("Handshakes", justify="right")
     table.add_column("Data Transfer")
+    # Listener-side throughput: only the SOCKS-routed protocols populate
+    # this; OpenVPN / WG / AmneziaWG show "—" because their data-phase
+    # verification is a single ping, not a bulk download. The number is
+    # operator-facing only and intentionally NOT used by scoring.
+    table.add_column("Throughput", justify="right")
 
     for name, pr in results.items():
         verdict_str = {
@@ -584,11 +602,16 @@ def _print_final_results(results: dict[str, ProtocolResult], duration: float) ->
             Verdict.HANDSHAKE_ONLY: "[yellow]HANDSHAKE_ONLY[/yellow]",
             Verdict.BLOCKED: "[red]BLOCKED[/red]",
         }.get(pr.verdict, str(pr.verdict))
+        if pr.avg_throughput_mbps is not None:
+            throughput_str = f"{pr.avg_throughput_mbps:,.1f} Mbps"
+        else:
+            throughput_str = "[dim]—[/dim]"
         table.add_row(
             name,
             verdict_str,
             str(pr.handshake_count),
             "yes" if pr.data_transfer_ok else "no",
+            throughput_str,
         )
 
     console.print(table)

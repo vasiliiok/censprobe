@@ -132,6 +132,14 @@ def parse_listener_report(
             "handshake_count": _to_int(pr.get("handshake_count"), default=0),
             "data_transfer_ok": bool(pr.get("data_transfer_ok")),
             "avg_rtt_ms": _to_float(pr.get("avg_rtt_ms"), default=None),
+            # Listener-measured sustained throughput. Older listener
+            # reports predate the field — `_to_float(None, default=None)`
+            # quietly leaves the column NULL, which is exactly what the
+            # dashboard expects for "not measured".
+            "avg_throughput_mbps": _to_float(
+                pr.get("avg_throughput_mbps"), default=None,
+            ),
+            "throughput_throttled": bool(pr.get("throughput_throttled", False)),
         })
 
     return session_meta, protocol_results
