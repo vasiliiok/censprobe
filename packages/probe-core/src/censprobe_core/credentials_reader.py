@@ -16,6 +16,14 @@ import yaml
 @dataclass
 class ProtocolCredentials:
     """Parsed credentials YAML received from the listener cred-server."""
+
+    # ``_protocols_enabled`` mirrors the listener's
+    # ``censprobe.yaml::protocols.enabled`` list — the client uses it to
+    # avoid probing a protocol the listener didn't bring up. ``None``
+    # means "old listener that didn't advertise the field" → client
+    # falls back to every registered probe.
+    _protocols_enabled: list[str] | None = None
+
     openvpn_psk_pem: str = ""
     openvpn_port: int = 1194
 
@@ -65,6 +73,13 @@ def parse_protocols_yaml(text: str) -> ProtocolCredentials:
     parsed = yaml.safe_load(text)
     raw: dict[str, Any] = parsed if isinstance(parsed, dict) else {}
     c = ProtocolCredentials()
+
+    # Listener-advertised enabled-protocols list. Permissive parsing —
+    # missing key, ``null``, non-list value → leave as None and let the
+    # client fall back to "every registered protocol".
+    enabled = raw.get("_protocols_enabled")
+    if isinstance(enabled, list):
+        c._protocols_enabled = [str(x) for x in enabled if isinstance(x, str)]
 
     ovpn = raw.get("openvpn", {})
     c.openvpn_psk_pem = ovpn.get("psk_pem", "")

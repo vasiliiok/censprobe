@@ -26,50 +26,60 @@ import asyncio
 import logging
 import time
 
+from censprobe_core.config import get_config
 from censprobe_core.models import BlockingMethod, TestResult, Verdict
-from censprobe_core.server_meta import is_ru_vantage
+from censprobe_core.server_meta import is_censoring_vantage
 
 logger = logging.getLogger(__name__)
-
-_METHOD_B_CONFIG = {
-    "control_ip_host": "speedtest.selectel.ru",
-    "runs": [
-        {"label": "correct_sni",    "sni": "speedtest.selectel.ru"},
-        {"label": "googlevideo_sni", "sni": "googlevideo.com"},
-        {"label": "typo_sni",       "sni": "googleviideo.com"},
-    ],
-}
 
 
 async def run_throttling_tests() -> list[TestResult]:
     """Run Method-B SNI throttling probe.
 
-    Vantage gating: Method B targets ``speedtest.selectel.ru``. From a
-    non-RU vantage (e.g. Frankfurt) the geographic RTT × BDP product
-    dominates the bandwidth measurement and the relative comparison
-    ``trigger < 25% × correct`` becomes noise — TSPU is not in the path,
-    yet Selectel routing variance can easily push one SNI below the
-    threshold. Skip the probe entirely outside RU and emit a single
-    INCONCLUSIVE marker so the dashboard sees "not run" instead of
-    "false negative".
+    Vantage gating: Method B targets a single throughput-test endpoint
+    (defaults to ``speedtest.selectel.ru``). From an uncensored vantage
+    the geographic RTT × BDP product dominates the bandwidth
+    measurement and the relative comparison ``trigger < threshold ×
+    correct`` becomes noise — there is no TSPU in the path, yet
+    routing variance can push one SNI below the threshold. We skip
+    the probe entirely outside the configured censoring countries
+    (defaults: RU, BY) and emit a single INCONCLUSIVE marker so the
+    dashboard sees "not run" instead of "false negative".
+
+    Tunable in censprobe.yaml under ``modules.throttling``:
+      * ``target_url`` — the URL to download (Selectel by default);
+      * ``correct_sni`` / ``typo_sni`` / ``trigger_sni`` — the three
+        SNIs sent to the same IP for the relative comparison;
+      * ``bandwidth_ratio_threshold`` — the trigger/(min(correct,typo))
+        ratio below which the verdict flips to YOUTUBE_SNI_THROTTLED;
+      * ``curl_timeout_sec`` — per-run curl timeout;
+      * ``require_censoring_vantage`` — set to false to force the
+        probe to run regardless of vantage country (useful when the
+        operator has supplied a custom target_url tied to their own
+        in-country control).
     """
-    if not is_ru_vantage():
+    cfg = get_config().modules.throttling
+
+    if cfg.require_censoring_vantage and not is_censoring_vantage():
         return [TestResult(
             test="throttling_youtube_sni_probe_method_b",
             category="throttling",
-            target="speedtest.selectel.ru (SNI=googlevideo.com)",
+            target=f"{cfg.correct_sni} (SNI={cfg.trigger_sni})",
             verdict=Verdict.INCONCLUSIVE,
-            evidence={"reason": "non_ru_vantage_method_b_skipped"},
+            evidence={"reason": "non_censoring_vantage_method_b_skipped"},
             confidence=0.0,
             notes=(
-                "Method B is a TSPU-specific test against speedtest.selectel.ru; "
-                "from a non-RU vantage the relative bandwidth comparison is "
-                "dominated by geographic latency rather than SNI policy."
+                "Method B is a censor-specific test against a single throughput "
+                "endpoint; from an uncensored vantage the relative bandwidth "
+                "comparison is dominated by geographic latency rather than SNI "
+                "policy. Override modules.throttling.require_censoring_vantage "
+                "if you have supplied a custom target_url tied to your own "
+                "in-country control."
             ),
         )]
 
     results: list[TestResult] = []
-    result = await _run_method_b_sni_probe()
+    result = await _run_method_b_sni_probe(cfg)
     if result:
         results.append(result)
     return results
@@ -77,18 +87,19 @@ async def run_throttling_tests() -> list[TestResult]:
 
 def _decide_method_b_verdict(
     bw_correct: float, bw_trigger: float, bw_typo: float,
+    threshold_ratio: float,
 ) -> Verdict:
-    """Within-run relative bandwidth check for ТСПУ SNI throttling.
+    """Within-run relative bandwidth check for SNI throttling.
 
-    YOUTUBE_SNI_THROTTLED iff trigger SNI is < 25% of BOTH the correct and
-    typo SNIs on the same uplink in the same run — i.e., the only
-    plausible explanation is that the network treats googlevideo.com SNI
-    differently. INCONCLUSIVE when any of the three measurements failed
-    (bw == 0); otherwise OK.
+    YOUTUBE_SNI_THROTTLED iff the trigger SNI is below ``threshold_ratio``
+    of BOTH the correct and typo SNIs on the same uplink in the same
+    run — i.e. the only plausible explanation is that the network
+    treats the trigger SNI differently. INCONCLUSIVE when any of the
+    three measurements failed (bw == 0); otherwise OK.
     """
     if bw_correct <= 0 or bw_trigger <= 0 or bw_typo <= 0:
         return Verdict.INCONCLUSIVE
-    if bw_trigger < bw_correct * 0.25 and bw_trigger < bw_typo * 0.25:
+    if bw_trigger < bw_correct * threshold_ratio and bw_trigger < bw_typo * threshold_ratio:
         return Verdict.YOUTUBE_SNI_THROTTLED
     return Verdict.OK
 
@@ -97,23 +108,28 @@ def _decide_method_b_verdict(
 # Method B — SNI throttling probe via curl --connect-to
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def _run_method_b_sni_probe() -> TestResult | None:
+async def _run_method_b_sni_probe(cfg) -> TestResult | None:
     """
-    Three curl runs to selectel.ru IP with different SNIs.
+    Three sequential curl runs to ``cfg.correct_sni`` IP with different SNIs.
 
-    curl --connect-to ::speedtest.selectel.ru -k
-    sends TLS ClientHello with SNI=googlevideo.com but connects to selectel IP.
-    ТСПУ sees the SNI and throttles if it's in their list.
+    curl --connect-to ::<correct_sni> -k
+    sends TLS ClientHello with SNI=<trigger_sni> but connects to the
+    correct-SNI IP. The censor sees the SNI and throttles if it matches
+    their list.
 
     Verdict is decided by within-run relative bandwidth, not against a
-    static control snapshot. The baseline approach was unstable: a probe
-    VPS with a narrower uplink than the control VPS would have all three
-    SNIs measure below the baseline, masking real throttling. The
-    relative check (trigger vs. correct/typo on the same uplink in the
-    same run) is robust to that.
+    static control snapshot. The baseline approach was unstable: a
+    probe VPS with a narrower uplink than the control VPS would have
+    all three SNIs measure below the baseline, masking real throttling.
+    The relative check (trigger vs. correct/typo on the same uplink in
+    the same run) is robust to that.
     """
-    cfg = _METHOD_B_CONFIG
-    control_host = cfg["control_ip_host"]
+    control_host = cfg.correct_sni
+    runs_spec = (
+        ("correct_sni",     cfg.correct_sni),
+        ("googlevideo_sni", cfg.trigger_sni),
+        ("typo_sni",        cfg.typo_sni),
+    )
 
     run_results: dict[str, dict] = {}
 
@@ -121,33 +137,41 @@ async def _run_method_b_sni_probe() -> TestResult | None:
     # same uplink: on a narrow VPS (30–50 Mbit/s) three simultaneous curls
     # split the channel three ways and the relative drop of the throttled
     # SNI is masked. Sequential runs give each SNI the full uplink.
-    for run in cfg["runs"]:
+    for label, sni in runs_spec:
         try:
             result = await _curl_connect_to_run(
-                sni=run["sni"],
+                sni=sni,
                 connect_to_host=control_host,
-                label=run["label"],
+                label=label,
+                target_url=cfg.target_url,
+                timeout_sec=cfg.curl_timeout_sec,
             )
-            run_results[run["label"]] = result
+            run_results[label] = result
         except Exception as e:
-            run_results[run["label"]] = {"bandwidth_mbps": 0.0, "error": str(e)}
+            run_results[label] = {"bandwidth_mbps": 0.0, "error": str(e)}
 
     bw_correct = run_results.get("correct_sni", {}).get("bandwidth_mbps", 0.0)
     bw_trigger = run_results.get("googlevideo_sni", {}).get("bandwidth_mbps", 0.0)
     bw_typo    = run_results.get("typo_sni", {}).get("bandwidth_mbps", 0.0)
 
-    verdict = _decide_method_b_verdict(bw_correct, bw_trigger, bw_typo)
+    verdict = _decide_method_b_verdict(
+        bw_correct, bw_trigger, bw_typo, cfg.bandwidth_ratio_threshold,
+    )
 
     method = BlockingMethod.SNI_THROTTLING if verdict == Verdict.YOUTUBE_SNI_THROTTLED else None
 
     return TestResult(
         test="throttling_youtube_sni_probe_method_b",
         category="throttling",
-        target="speedtest.selectel.ru (SNI=googlevideo.com)",
+        target=f"{control_host} (SNI={cfg.trigger_sni})",
         verdict=verdict,
         method=method,
         evidence={
             "control_host": control_host,
+            "target_url": cfg.target_url,
+            "trigger_sni": cfg.trigger_sni,
+            "typo_sni": cfg.typo_sni,
+            "ratio_threshold": cfg.bandwidth_ratio_threshold,
             "runs": run_results,
             "bandwidth_correct_sni_mbps": round(bw_correct, 2),
             "bandwidth_googlevideo_sni_mbps": round(bw_trigger, 2),
@@ -162,6 +186,8 @@ async def _curl_connect_to_run(
     sni: str,
     connect_to_host: str,
     label: str,
+    target_url: str,
+    timeout_sec: float,
 ) -> dict:
     """
     Run curl --connect-to to send traffic to connect_to_host with SNI=sni.
@@ -182,17 +208,25 @@ async def _curl_connect_to_run(
     would give ~16 KB/s vs the unthrottled ~350 KB/s instead of the much
     cleaner 16 KB/s vs 50 MB/s with a sustained download).
     """
-    url = f"https://{sni}/100MB"
+    # ``target_url`` is configured to be the path under the control
+    # host (``https://speedtest.selectel.ru/100MB`` by default). We
+    # rewrite the host portion to the trigger SNI so curl's SNI matches
+    # the on-wire ClientHello, while ``--connect-to`` keeps the actual
+    # TCP destination at the control host's IP.
+    from urllib.parse import urlparse, urlunparse
+    parsed = urlparse(target_url)
+    sni_url = urlunparse(parsed._replace(netloc=sni))
+
     cmd = [
         "curl",
         "--connect-to", f"::{connect_to_host}",
         "-k",
         "-o", "/dev/null",
         "--write-out", "%{speed_download} %{time_total} %{http_code}",
-        "--max-time", "30",
+        "--max-time", str(int(timeout_sec)),
         "--limit-rate", "0",  # no rate limit
         "-s",
-        url,
+        sni_url,
     ]
 
     proc = None
@@ -204,7 +238,7 @@ async def _curl_connect_to_run(
             stderr=asyncio.subprocess.PIPE,
         )
         try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=35)
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout_sec + 5)
         except asyncio.TimeoutError:
             # Critical: kill + reap so we don't accumulate zombie curl
             # children across runs.

@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from censprobe_core.subcategories import derive as _derive_subcategory
+
 logger = logging.getLogger(__name__)
 
 
@@ -58,10 +60,19 @@ def parse_solo_report(
     for r in raw_results:
         if not isinstance(r, dict):
             continue
+        test_name = str(r.get("test") or "")
+        category = str(r.get("category") or "")
+        # Trust the producer's subcategory if present, otherwise derive
+        # it here. Older reports written before the field existed
+        # quietly pick up the right subcategory on re-import.
+        subcategory = r.get("subcategory")
+        if not isinstance(subcategory, str) or not subcategory:
+            subcategory = _derive_subcategory(test_name, category)
         results.append({
             "report_file": path.name,
-            "test": str(r.get("test") or ""),
-            "category": str(r.get("category") or ""),
+            "test": test_name,
+            "category": category,
+            "subcategory": subcategory,
             "target": str(r.get("target") or ""),
             "verdict": str(r.get("verdict") or "INCONCLUSIVE"),
             "method": r.get("method"),

@@ -139,7 +139,10 @@ def generate_credentials() -> ProtocolCredentials:
     return creds
 
 
-def creds_to_yaml(creds: ProtocolCredentials) -> str:
+def creds_to_yaml(
+    creds: ProtocolCredentials,
+    enabled_protocols: list[str] | None = None,
+) -> str:
     """Serialise the full credential set (server + client material) for the
     one-shot HTTPS endpoint.
 
@@ -151,9 +154,19 @@ def creds_to_yaml(creds: ProtocolCredentials) -> str:
     surface for them to leak through. The client itself never uses the
     server-private fields — they are emitted here only because both
     sides parse the same YAML schema.
+
+    ``enabled_protocols`` is the operator-configured subset the listener
+    actually started. The client mirrors this exact list so we never
+    probe a protocol the listener didn't bring up. ``None`` means "all
+    six historical protocols" — which is what an old listener would
+    naturally produce, so a new client paired with an old listener
+    keeps working.
     """
     data: dict[str, Any] = {
         "_note": "One-time test credentials. Do not use for production VPN.",
+        "_protocols_enabled": list(enabled_protocols)
+        if enabled_protocols is not None
+        else None,
         "openvpn": {
             "port": creds.openvpn_port,
             "protocol": "udp",

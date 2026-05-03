@@ -93,23 +93,54 @@ docker compose --profile client run --rm client --test-id selectel-spb-001 --ses
 
 ---
 
+## Настройка (censprobe.yaml)
+
+Все runtime-knob'ы лежат в одном файле `censprobe.yaml` в корне репо. Файл коммитится с дефолтами; локальные правки не пушатся автоматически. Если файла нет, всё работает с дефолтами (схема в `packages/probe-core/src/censprobe_core/config.py::CensprobeConfig`).
+
+Что можно настроить:
+
+- **`vantage.censoring_countries`** — список стран ISO-3166 alpha-2, где включаются censor-specific эвристики (TCP fast-RST, QUIC drop, Method-B throttling). По умолчанию `[RU, BY]`. Расширяйте при тестах из CN/IR/KZ.
+- **`modules.<name>.enabled: false`** — отключить модуль. Дашборд просто не получит данные по нему.
+- **Пороги** в `modules.tcp.fast_rst_threshold_ms`, `modules.http.body_cap_bytes`, `modules.throttling.bandwidth_ratio_threshold` и т.д.
+- **`protocols.enabled`** — какие из 6 VPN-протоколов листенер реально поднимает. Клиент мирорит этот список через креды; неизвестные имена дропаются с warning'ом.
+- **`scoring.entry/exit/relay`** — веса в формулах score'ов.
+- **`throughput.target_bytes` / `timeout_sec`** — ниже какой скорости срабатывает флаг `throttled`.
+- **`targets.directory` + auto-discovery** — любой `*.yaml` в `targets/` подбирается автоматически. См. ниже.
+
+Опечатка в имени поля = fatal startup error с понятным сообщением, не silent fallback.
+
+---
+
 ## Настройка целей тестирования (Targets)
 
-Все цели хранятся в папке `targets/` в формате YAML:
+Все цели хранятся в папке `targets/` в формате YAML и **подбираются автоматически** — runner глобит `*.yaml` и валидирует каждый файл против `TargetFile` (`packages/probe-core/src/censprobe_core/targets.py`).
+
+Текущие файлы:
 
 - `targets/news.yaml` — СМИ
 - `targets/social.yaml` — социальные сети
 - `targets/messengers.yaml` — мессенджеры
 - `targets/vpn.yaml` — VPN-сервисы
-- `targets/telegram.yaml` — дата-центры Telegram
-- `targets/neutral.yaml` — нейтральные ресурсы (VK, Yandex, Wikipedia)
-- `targets/cloudflare.yaml` — инфраструктура Cloudflare и WARP: QUIC/HTTP3 (UDP 443), WARP control plane (engage/connectivity/zero-trust на TCP 443), MASQUE-anycast (162.159.197.0/24 — основной протокол WARP с дек. 2024) и WireGuard-anycast (162.159.193.0/24 — legacy). Покрываются все UDP-ports реальной WARP-fallback-лестницы: MASQUE 443→4443/8443, WG 2408→4500. Используется модулем cloudflare.
+- `targets/neutral.yaml` — нейтральные ресурсы (VK, Yandex, Wikipedia) + список TCP-проб (anycast DNS на 443/853)
+- `targets/telegram.yaml` — дата-центры Telegram, web/aux/CDN-домены, owned_cert_patterns, health_weights. Потребляется только модулем `telegram`.
+- `targets/cloudflare.yaml` — инфраструктура Cloudflare и WARP. Потребляется только модулем `cloudflare`.
+
+`telegram.yaml` и `cloudflare.yaml` помечены как `targets.module_owned` в `censprobe.yaml` — они грузятся в общий `TargetSet`, но не попадают в выборку для модулей dns/tcp/tls/http (у них своя модель данных).
 
 **Как добавить новый сайт:**
 
-1. Откройте нужный файл в `targets/`.
-2. Добавьте домен по аналогии с существующими.
-3. Сделайте `git commit` и `git push` локально, когда готовы поделиться изменениями.
+1. Откройте нужный файл в `targets/` и добавьте domain по аналогии с существующими (поля: `domain`, `urls`, `expected_status`, `category`, `ech_advertised`, `notes`).
+2. Сделайте `git commit` и `git push` локально, когда готовы поделиться изменениями.
+
+**Как добавить новый файл целей:** просто положите `targets/<my>.yaml` со схемой `targets: [...]` (или другие поля из `TargetFile`). Pydantic провалидирует, runner автоматически включит его в общий список.
+
+**Как добавить новый протокол** (например, MTProto-proxy, TUIC):
+
+1. Дополните `ProtocolSpec` в `packages/probe-core/src/censprobe_core/protocol_registry.py`.
+2. Добавьте responder в `packages/listener/src/censprobe_listener/_responder_dispatch.py`.
+3. Добавьте probe-coroutine в `packages/probe-core/src/censprobe_core/protocol_probes.py` + dispatch в `packages/client/src/censprobe_client/_probe_dispatch.py`.
+4. Расширьте `ProtocolCredentials` (listener `credentials.py` + probe-core `credentials_reader.py`).
+5. Включите в `protocols.enabled` в `censprobe.yaml`.
 
 Параметры VPN-протоколов (порты, ключи, AmneziaWG-обфускация) генерируются `listener` в памяти при каждом старте и передаются клиенту через одноразовый TLS-pinned эндпоинт. На диск ничего не пишется и в git ничего не коммитится.
 

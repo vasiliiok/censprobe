@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 _TIMEOUT = httpx.Timeout(10.0)
 
 # Vantage country code (ISO-3166 alpha-2). Set once after server_meta
-# detection; consumed by measurement modules to gate RU-specific
+# detection; consumed by measurement modules to gate censor-specific
 # attribution heuristics — e.g. tcp.py's <30 ms RST_INJECTED label
 # produces false positives from Frankfurt because anycast RTT to closed
 # ports is below the threshold without any censor in the path.
@@ -49,9 +49,20 @@ _VANTAGE_COUNTRY: str | None = None
 
 
 def set_vantage_country(cc: str | None) -> None:
-    """Record the probe vantage's country code (ISO-3166 alpha-2)."""
+    """Record the probe vantage's country code (ISO-3166 alpha-2).
+
+    Honours :data:`censprobe_core.config.VantageConfig.override` if set
+    — useful for testing the heuristics from outside a censor's network
+    or when the host's auto-detected country diverges from the network
+    actually being measured (e.g. a tunnelled host)."""
+    from censprobe_core.config import get_config
+
     global _VANTAGE_COUNTRY
-    _VANTAGE_COUNTRY = cc.upper() if cc else None
+    override = get_config().vantage.override
+    if override:
+        _VANTAGE_COUNTRY = override.upper()
+    else:
+        _VANTAGE_COUNTRY = cc.upper() if cc else None
 
 
 def get_vantage_country() -> str | None:
@@ -59,15 +70,37 @@ def get_vantage_country() -> str | None:
     return _VANTAGE_COUNTRY
 
 
-def is_ru_vantage() -> bool:
-    """Convenience: True iff the probe is being run from inside RU.
+def is_censoring_vantage() -> bool:
+    """True iff the vantage country is in
+    :data:`censprobe_core.config.VantageConfig.censoring_countries`.
 
-    Modules that calibrate timing/RTT thresholds for RU networks gate on
-    this so a Frankfurt VM (or any non-RU vantage) doesn't get a flood of
-    spurious BLOCKED verdicts from heuristics that only make sense behind
-    TSPU.
+    Modules that calibrate timing/RTT thresholds for RU/CN/IR-style
+    networks gate on this so a Frankfurt VM (or any other uncensored
+    vantage) doesn't get a flood of spurious BLOCKED verdicts from
+    heuristics that only make sense behind a state filter.
+
+    The default whitelist is ``[RU, BY]``; extend it via
+    ``vantage.censoring_countries`` in censprobe.yaml when probing
+    from another censoring vantage.
     """
-    return _VANTAGE_COUNTRY == "RU"
+    # Lazy import keeps server_meta importable without the config
+    # singleton having been initialised yet (fall back to defaults).
+    from censprobe_core.config import get_config
+
+    if _VANTAGE_COUNTRY is None:
+        return False
+    return _VANTAGE_COUNTRY in {
+        cc.upper() for cc in get_config().vantage.censoring_countries
+    }
+
+
+# Back-compat alias. Kept indefinitely because the module ecosystem
+# (dns/tcp/cloudflare/throttling) used this name for several months and
+# external tooling may still call it. New code should prefer
+# :func:`is_censoring_vantage`.
+def is_ru_vantage() -> bool:
+    """Deprecated: prefer :func:`is_censoring_vantage`."""
+    return is_censoring_vantage()
 
 # Lazy lookup: importing this module must not require the env var to be
 # set. Code paths that never actually call _enrich (probe-core consumers

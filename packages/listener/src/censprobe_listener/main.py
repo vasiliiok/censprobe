@@ -42,9 +42,12 @@ from rich.logging import RichHandler
 from rich.panel import Panel
 from rich.table import Table
 
+from censprobe_core.config import get_config, load_config
 from censprobe_core.models import EndpointMeta, ListenerReport, ProtocolResult, Verdict
+from censprobe_core.protocol_registry import enabled_protocols, known_names
 from censprobe_core.server_meta import enrich_endpoint
 from censprobe_core.utils import validate_id
+from censprobe_listener._responder_dispatch import LISTENER_RESPONDERS
 from censprobe_listener.cred_server import CredServer, detect_external_ip
 from censprobe_listener.credentials import (
     ProtocolCredentials,
@@ -52,11 +55,6 @@ from censprobe_listener.credentials import (
     generate_credentials,
 )
 from censprobe_listener.echo_server import EchoServer
-from censprobe_listener.openvpn_responder import OpenVPNResponder
-from censprobe_listener.wg_responder import AmneziaWGResponder, WireGuardResponder
-from censprobe_listener.ss_responder import ShadowsocksResponder
-from censprobe_listener.vless_reality_wrapper import VlessRealityResponder
-from censprobe_listener.hysteria_wrapper import HysteriaResponder
 
 logging.basicConfig(
     level=logging.INFO,
@@ -126,6 +124,15 @@ def main(test_id: str, session_id: str, creds_port: int, verbose: bool) -> None:
 
 
 async def _async_main(test_id: str, session_id: str, creds_port: int) -> None:
+    # ── Step 0: Load top-level config (protocols.enabled, vantage list, …) ───
+    # Failures are fatal: a missing censprobe.yaml is fine (defaults
+    # apply), but a malformed one would silently degrade the run.
+    try:
+        load_config(WORKSPACE)
+    except ValueError as e:
+        console.print(f"[red]Config error:[/red] {e}")
+        sys.exit(1)
+
     # ── Step 1: Generate fresh credentials in memory ──────────────────────────
     # Each session gets its own one-time credential set; nothing is written
     # to disk. The cred_server below hands them to the client over a
@@ -134,8 +141,12 @@ async def _async_main(test_id: str, session_id: str, creds_port: int) -> None:
     creds = generate_credentials()
 
     # ── Step 2: Start the credentials HTTPS endpoint ──────────────────────────
+    # Pass the operator-enabled protocol subset alongside credentials so
+    # the client mirrors exactly what the listener brought up — no
+    # mismatched probe attempts when the operator narrows the list.
+    cfg = get_config()
     cred_server = CredServer(
-        creds_yaml=creds_to_yaml(creds),
+        creds_yaml=creds_to_yaml(creds, enabled_protocols=cfg.protocols.enabled),
         port=creds_port,
     )
     try:
@@ -304,45 +315,47 @@ async def _start_responders(
     creds: ProtocolCredentials,
     echo_server: EchoServer | None,
 ) -> tuple[dict, dict]:
-    """Start all protocol responders. Returns (started_dict, errors_dict)."""
+    """Start all protocol responders.
+
+    Iterates :data:`censprobe_core.protocol_registry.PROTOCOLS` filtered
+    by ``censprobe.yaml::protocols.enabled``. Per-protocol factories
+    live in :mod:`censprobe_listener._responder_dispatch`.
+
+    Returns ``(started, errors)`` keyed by canonical protocol name.
+    """
     responders: dict = {}
     errors: dict = {}
 
-    ss = ShadowsocksResponder(creds.ss_password_b64, creds.ss_port, creds.ss_method)
-    vless = VlessRealityResponder(
-        creds.vless_uuid, creds.vless_pvk, creds.vless_pbk,
-        creds.vless_short_id, creds.vless_server_name, creds.vless_port,
-    )
-    hy2 = HysteriaResponder(creds.hy2_auth, creds.hy2_obfs_password, creds.hy2_port)
+    cfg = get_config()
+    requested = cfg.protocols.enabled
+    valid_names = set(known_names())
+    unknown = [n for n in requested if n not in valid_names]
+    if unknown:
+        logger.warning(
+            "Ignoring unknown protocol names in protocols.enabled: %s "
+            "(known: %s)",
+            ", ".join(unknown),
+            ", ".join(sorted(valid_names)),
+        )
 
-    # Inject echo_server into wrappers that need data-phase signal.
-    for r in (ss, vless, hy2):
-        r.echo_server = echo_server
-
-    protocols_to_start = [
-        ("openvpn", OpenVPNResponder(creds.openvpn_psk_pem, creds.openvpn_port)),
-        ("wireguard", WireGuardResponder(
-            creds.wg_server_private, creds.wg_client_public, creds.wg_preshared_key, creds.wg_port
-        )),
-        ("amneziawg", AmneziaWGResponder(
-            creds.awg_server_private, creds.awg_client_public, creds.awg_preshared_key,
-            creds.awg_port, creds.awg_jc, creds.awg_jmin, creds.awg_jmax,
-            creds.awg_s1, creds.awg_s2,
-            creds.awg_h1, creds.awg_h2, creds.awg_h3, creds.awg_h4,
-        )),
-        ("shadowsocks", ss),
-        ("vless_reality", vless),
-        ("hysteria2", hy2),
-    ]
-
-    for name, responder in protocols_to_start:
+    for spec in enabled_protocols(requested):
+        factory = LISTENER_RESPONDERS.get(spec.name)
+        if factory is None:
+            logger.error(
+                "Protocol %s is in the registry but has no listener factory; "
+                "fix _responder_dispatch.py",
+                spec.name,
+            )
+            errors[spec.name] = "no listener factory"
+            continue
         try:
+            responder = factory(creds, echo_server)
             await responder.start()
-            responders[name] = responder
-            logger.info("%s started", name)
+            responders[spec.name] = responder
+            logger.info("%s started", spec.name)
         except Exception as e:
-            logger.error("%s failed to start: %s", name, e)
-            errors[name] = str(e)
+            logger.error("%s failed to start: %s", spec.name, e)
+            errors[spec.name] = str(e)
 
     return responders, errors
 
@@ -505,28 +518,41 @@ def _print_client_run_command(
 
 
 def _print_responder_status(responders: dict, errors: dict, creds: ProtocolCredentials) -> None:
+    """Show port + run status for every protocol the operator asked for.
+
+    The set of rows comes from the runtime config (``protocols.enabled``)
+    intersected with the registry — a protocol disabled in
+    censprobe.yaml never appears, and a typo in the YAML produces a
+    warning at start_responders rather than a phantom row here. Per-
+    protocol port comes from the live :class:`ProtocolCredentials` so
+    a port override propagates into this table without code changes.
+    """
+    cfg = get_config()
     table = Table(title="Listener Status", show_header=True, header_style="bold cyan")
     table.add_column("Protocol", style="cyan")
     table.add_column("Port", justify="right")
     table.add_column("Status")
 
-    port_map = {
-        "openvpn": f"UDP/{creds.openvpn_port}",
-        "wireguard": f"UDP/{creds.wg_port}",
-        "amneziawg": f"UDP/{creds.awg_port}",
-        "shadowsocks": f"TCP/{creds.ss_port}",
-        "vless_reality": f"TCP/{creds.vless_port}",
-        "hysteria2": f"UDP/{creds.hy2_port}",
+    port_attr_for = {
+        "openvpn":       ("openvpn_port", "UDP"),
+        "wireguard":     ("wg_port", "UDP"),
+        "amneziawg":     ("awg_port", "UDP"),
+        "shadowsocks":   ("ss_port", "TCP"),
+        "vless_reality": ("vless_port", "TCP"),
+        "hysteria2":     ("hy2_port", "UDP"),
     }
-    all_protocols = list(port_map.keys())
 
-    for name in all_protocols:
-        port = port_map.get(name, "?")
-        if name in responders:
-            table.add_row(name, port, "[green]Running[/green]")
+    for spec in enabled_protocols(cfg.protocols.enabled):
+        attr, transport = port_attr_for.get(
+            spec.name, (None, spec.transport.upper()),
+        )
+        port_value = getattr(creds, attr, spec.default_port) if attr else spec.default_port
+        port_str = f"{transport}/{port_value}"
+        if spec.name in responders:
+            table.add_row(spec.name, port_str, "[green]Running[/green]")
         else:
-            err = errors.get(name, "unknown error")
-            table.add_row(name, port, f"[red]Failed: {err[:40]}[/red]")
+            err = errors.get(spec.name, "unknown error")
+            table.add_row(spec.name, port_str, f"[red]Failed: {err[:40]}[/red]")
 
     console.print(table)
 

@@ -47,16 +47,29 @@ def _get_doh_client() -> httpx.AsyncClient:
 
 logger = logging.getLogger(__name__)
 
-_TLS_TIMEOUT = 10.0  # seconds
-_MAX_PARALLEL = 6    # concurrency cap for TLS handshakes
+# TLS timeout fallback used by the few callers (internal helpers, ECH
+# probe) that aren't on the run_tls_tests entry path. The main entry
+# reads from CensprobeConfig.modules.tls — see run_tls_tests below.
+_TLS_TIMEOUT = 10.0
 
 
 async def run_tls_tests(
     targets: list[dict],  # {"domain": ..., "ip": ..., "blocked_sni": ...}
     repeats: int = 2,
 ) -> list[TestResult]:
-    """Run TLS/SNI tests for each target in parallel (bounded)."""
-    sem = asyncio.Semaphore(_MAX_PARALLEL)
+    """Run TLS/SNI tests for each target in parallel (bounded).
+
+    Concurrency cap and per-handshake timeout come from
+    :class:`censprobe_core.config.TlsModuleConfig`. The internal
+    helpers below still reference the module-level ``_TLS_TIMEOUT``
+    fallback for back-compat with tests that import them directly.
+    """
+    from censprobe_core.config import get_config
+
+    cfg = get_config().modules.tls
+    global _TLS_TIMEOUT
+    _TLS_TIMEOUT = cfg.timeout_sec
+    sem = asyncio.Semaphore(cfg.max_parallel)
 
     async def _one(t: dict) -> list[TestResult]:
         async with sem:

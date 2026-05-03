@@ -37,15 +37,9 @@ from rich.table import Table
 
 from censprobe_core.credentials_reader import parse_protocols_yaml
 from censprobe_core.models import Verdict
-from censprobe_core.protocol_probes import (
-    ProbeResult,
-    probe_hysteria2,
-    probe_openvpn,
-    probe_shadowsocks,
-    probe_vless_reality,
-    probe_wireguard,
-    probe_amneziawg,
-)
+from censprobe_core.protocol_probes import ProbeResult
+from censprobe_core.protocol_registry import enabled_protocols, known_names
+from censprobe_client._probe_dispatch import CLIENT_PROBES
 
 logging.basicConfig(
     level=logging.INFO,
@@ -153,26 +147,42 @@ async def _async_main(
     console.print("[green]Credentials received[/green]")
 
     # ── Step 2: Run probes in random order with jitter ────────────────────────
-    protocols = [
-        ("openvpn", _run_openvpn, creds),
-        ("wireguard", _run_wireguard, creds),
-        ("amneziawg", _run_amneziawg, creds),
-        ("shadowsocks", _run_shadowsocks, creds),
-        ("vless_reality", _run_vless_reality, creds),
-        ("hysteria2", _run_hysteria2, creds),
-    ]
+    # Pull the list of enabled protocols from the credentials YAML
+    # (listener writes `_protocols_enabled` into it; the client mirrors
+    # that exact set so we never probe a protocol the listener didn't
+    # bring up). When the listener is too old to advertise the field,
+    # fall back to every registered probe — matches historical behaviour.
+    enabled_names = getattr(creds, "_protocols_enabled", None) or known_names()
+    valid_names = set(known_names())
+    unknown = [n for n in enabled_names if n not in valid_names]
+    if unknown:
+        logger.warning(
+            "Listener advertised unknown protocol(s) %s; ignored. Known: %s",
+            ", ".join(unknown), ", ".join(sorted(valid_names)),
+        )
 
-    # Randomize order for opsec
-    random.shuffle(protocols)
+    probe_jobs: list[tuple[str, callable]] = []
+    for spec in enabled_protocols(enabled_names):
+        factory = CLIENT_PROBES.get(spec.name)
+        if factory is None:
+            logger.error(
+                "No client probe factory for %s — fix _probe_dispatch.py",
+                spec.name,
+            )
+            continue
+        probe_jobs.append((spec.name, factory))
+
+    # Randomize order for opsec.
+    random.shuffle(probe_jobs)
 
     results: dict[str, ProbeResult] = {}
-    for i, (name, probe_fn, _creds) in enumerate(protocols):
+    for i, (name, factory) in enumerate(probe_jobs):
         if not no_jitter and i > 0:
             await asyncio.sleep(random.uniform(0.5, 3.0))
 
         console.print(f"[dim]Probing {name}...[/dim]")
         try:
-            result = await probe_fn(server_host, _creds)
+            result = await factory(server_host, creds)
             results[name] = result
             _print_single_result(name, result)
         except Exception as e:
@@ -262,55 +272,6 @@ def _hex_eq(a: str, b: str) -> bool:
     nothing and keeps reviewers from second-guessing.
     """
     return hmac.compare_digest(a.lower(), b.lower())
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Per-protocol wrappers
-# ─────────────────────────────────────────────────────────────────────────────
-
-async def _run_openvpn(host: str, creds) -> ProbeResult:
-    return await probe_openvpn(host, creds.openvpn_port, creds.openvpn_psk_pem)
-
-
-async def _run_wireguard(host: str, creds) -> ProbeResult:
-    return await probe_wireguard(
-        host, creds.wg_port,
-        creds.wg_server_public,
-        creds.wg_client_public,
-        creds.wg_preshared_key,
-        creds.wg_client_private,
-    )
-
-
-async def _run_amneziawg(host: str, creds) -> ProbeResult:
-    return await probe_amneziawg(
-        host, creds.awg_port,
-        creds.awg_server_public,
-        creds.awg_client_public,
-        creds.awg_preshared_key,
-        creds.awg_client_private,
-        creds.awg_jc, creds.awg_jmin, creds.awg_jmax,
-        creds.awg_s1, creds.awg_s2,
-        creds.awg_h1, creds.awg_h2, creds.awg_h3, creds.awg_h4
-    )
-
-
-async def _run_shadowsocks(host: str, creds) -> ProbeResult:
-    return await probe_shadowsocks(host, creds.ss_port, creds.ss_method, creds.ss_password_b64)
-
-
-async def _run_vless_reality(host: str, creds) -> ProbeResult:
-    return await probe_vless_reality(
-        host, creds.vless_port,
-        creds.vless_uuid,
-        creds.vless_pbk,
-        creds.vless_short_id,
-        creds.vless_server_name,
-    )
-
-
-async def _run_hysteria2(host: str, creds) -> ProbeResult:
-    return await probe_hysteria2(host, creds.hy2_port, creds.hy2_auth, creds.hy2_obfs_password)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

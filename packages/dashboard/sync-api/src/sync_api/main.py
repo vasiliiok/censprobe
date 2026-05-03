@@ -582,6 +582,7 @@ def _result_to_dict(r: TestResult) -> dict:
     return {
         "test": r.test,
         "category": r.category,
+        "subcategory": r.subcategory,
         "target": r.target,
         "verdict": r.verdict,
         "method": r.method,

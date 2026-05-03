@@ -60,7 +60,7 @@ import time
 import httpx
 
 from censprobe_core.models import TestResult, Verdict, BlockingMethod
-from censprobe_core.server_meta import is_ru_vantage
+from censprobe_core.server_meta import is_censoring_vantage
 
 logger = logging.getLogger(__name__)
 
@@ -225,12 +225,13 @@ async def _test_quic(host: str, port: int, name: str) -> TestResult:
         )
 
     except asyncio.TimeoutError:
-        # Vantage gating: timeout → QUIC_DROPPED is a TSPU-specific
-        # attribution. From a non-RU vantage a UDP 443 timeout is far
-        # more likely to be a transient anycast loss / source-port
-        # collision than a censor; surface as INCONCLUSIVE so the
-        # scoring layer doesn't tally it as a censorship technique.
-        if is_ru_vantage():
+        # Vantage gating: timeout → QUIC_DROPPED is a censor-specific
+        # attribution. Outside the configured censoring countries a
+        # UDP 443 timeout is far more likely to be a transient anycast
+        # loss / source-port collision than a censor; surface as
+        # INCONCLUSIVE so the scoring layer doesn't tally it as a
+        # censorship technique.
+        if is_censoring_vantage():
             return TestResult(
                 test=name,
                 category="cloudflare",

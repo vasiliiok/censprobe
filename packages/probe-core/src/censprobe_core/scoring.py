@@ -4,30 +4,31 @@ scoring.py — Server suitability scoring.
 Computes three scores (entry, exit, relay) and an overall score.
 All scores are in range [0.0, 100.0].
 
-Formulas from Часть 11.2:
-  entry_score = avg_protocol_reachability_from_clients * 60%
-              + avg_server_uplink_quality * 30%
-              + avg_latency_score * 10%
+Weights are read from
+:class:`censprobe_core.config.ScoringConfig`. Defaults match the
+historical hardcoded values:
 
-  exit_score = server_external_ip_reachable * 40%
-             + server_uplink_low_censorship * 40%
-             + no_geoblock_inbound * 20%
+  entry_score = protocol_reachability·0.6 + uplink·0.3 + latency·0.1
+  exit_score  = uplink·0.6 + censorship_low·0.4
+  relay_score = tcp·0.7 + latency·0.3
+  overall     = max(entry, exit, relay)
 
-  relay_score = basic_tcp_udp_reachability * 70%
-              + throughput * 30%
-
-  overall = max(entry_score, exit_score, relay_score)
+The recommended-protocol list is built from
+:data:`censprobe_core.protocol_registry.PROTOCOLS` ordered by the
+operator-supplied ``protocols.priority`` from censprobe.yaml.
 """
 from __future__ import annotations
 
 import logging
 
+from censprobe_core.config import get_config
 from censprobe_core.models import (
     ListenerReport,
     ServerScores,
     TestResult,
     Verdict,
 )
+from censprobe_core.protocol_registry import known_names
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,7 @@ def compute_scores(
                           (dict[protocol_name → ProtocolResult])
     """
     scores = ServerScores()
+    weights = get_config().scoring
 
     # ── DNS integrity ─────────────────────────────────────────────────────────
     dns_results = [r for r in solo_results if r.category == "dns"]
@@ -118,16 +120,20 @@ def compute_scores(
     latency_score = _latency_to_score(rtts) / 100.0 if rtts else 0.5
 
     # ── Entry score ───────────────────────────────────────────────────────────
-    # entry = 60% client-reachability + 30% uplink quality + 10% latency
+    # entry = protocol·W_p + uplink·W_u + latency·W_l   (×100)
+    #
+    # Weights come from censprobe.yaml's scoring.entry section; defaults
+    # match the historical 60/30/10 split.
+    w_e = weights.entry
     scores.entry_score = round(
-        proto_ok * 60.0 +
-        uplink_quality * 30.0 +
-        latency_score * 10.0,
+        (proto_ok * w_e.protocol +
+         uplink_quality * w_e.uplink +
+         latency_score * w_e.latency) * 100.0,
         1,
     )
 
     # ── Exit score ────────────────────────────────────────────────────────────
-    # exit = 60% uplink reachability + 40% censorship-low.
+    # exit = uplink·W_u + censorship·W_c   (×100)
     #
     # The historical formula included a third "no_geoblock" axis worth
     # 20 points, but inbound geoblocking is never actually measured —
@@ -136,21 +142,26 @@ def compute_scores(
     # measured for real (would need outbound probes from RU IP back at
     # the test server), the score is a two-axis weighted average that
     # honestly reflects what we know.
+    w_x = weights.exit
     if scores.throttling_detected:
         censorship_low = max(0.0, uplink_quality - 0.2)
     else:
         censorship_low = uplink_quality
     scores.exit_score = round(
-        uplink_quality * 60.0 +
-        censorship_low * 40.0,
+        (uplink_quality * w_x.uplink +
+         censorship_low * w_x.censorship) * 100.0,
         1,
     )
 
     # ── Relay score ───────────────────────────────────────────────────────────
-    # relay = 70% basic TCP/UDP reachability + 30% latency
+    # relay = tcp·W_t + latency·W_l   (×100)
+    w_r = weights.relay
     tcp_results = [r for r in solo_results if r.category == "tcp"]
     tcp_ok = _ok_pct(tcp_results) / 100.0
-    scores.relay_score = round(tcp_ok * 70.0 + latency_score * 30.0, 1)
+    scores.relay_score = round(
+        (tcp_ok * w_r.tcp + latency_score * w_r.latency) * 100.0,
+        1,
+    )
 
     # ── Overall ───────────────────────────────────────────────────────────────
     scores.overall = round(max(scores.entry_score, scores.exit_score, scores.relay_score), 1)
@@ -242,53 +253,60 @@ def _recommend_protocols(
     solo_results: list[TestResult],
     listener_reports: list[ListenerReport] | None,
 ) -> list[str]:
+    """Suggest which VPN protocols are likely to work, in priority order.
+
+    Order comes from ``censprobe.yaml::protocols.priority`` (defaults
+    to ``[vless_reality, hysteria2, amneziawg, shadowsocks, wireguard,
+    openvpn]``). Names are validated against
+    :data:`censprobe_core.protocol_registry.PROTOCOLS` — entries the
+    operator added that aren't real protocols are silently dropped (a
+    typo doesn't become a recommendation).
     """
-    Suggest which VPN protocols are likely to work.
-    Based on signature-blocking results from solo and listener reachability.
-    """
-    # Track what's confirmed blocked via solo
+    cfg = get_config()
+    valid = set(known_names())
+    priority_order = [n for n in cfg.protocols.priority if n in valid]
+    # Append any registered protocol not mentioned in priority — keeps
+    # "novel" protocols recommendable even before the operator gets
+    # around to placing them in the priority list.
+    for n in valid:
+        if n not in priority_order:
+            priority_order.append(n)
+
+    # Solo-side signature-blocked protocols (substring match against
+    # the BlockingMethod enum value) — these are excluded from
+    # recommendations even if a listener happens to handshake-only.
     blocked: set[str] = set()
     for r in solo_results:
-        if r.category == "protocols" and r.verdict == Verdict.BLOCKED and r.method:
-            method = str(r.method)
-            if "openvpn" in method:
-                blocked.add("openvpn")
-            elif "wireguard" in method:
-                blocked.add("wireguard")
-            elif "shadowsocks" in method:
-                blocked.add("shadowsocks")
+        if r.category != "protocols" or r.verdict != Verdict.BLOCKED or not r.method:
+            continue
+        method = str(r.method)
+        for name in valid:
+            # The BlockingMethod enum encodes protocol-specific blocking
+            # as e.g. "openvpn_signature_blocked" / "wireguard_signature_blocked".
+            if name in method:
+                blocked.add(name)
 
-    # Build recommendation from listener data
-    recommended: list[str] = []
     confirmed_ok: set[str] = set()
-    confirmed_hs: set[str] = set()  # handshake-only (reachable but data phase blocked)
-
+    confirmed_hs: set[str] = set()
     if listener_reports:
         for report in listener_reports:
             for proto_name, pr in report.results.items():
-                if pr.verdict == Verdict.OK and proto_name not in blocked:
+                if proto_name in blocked:
+                    continue
+                if pr.verdict == Verdict.OK:
                     confirmed_ok.add(proto_name)
-                elif pr.verdict == Verdict.HANDSHAKE_ONLY and proto_name not in blocked:
+                elif pr.verdict == Verdict.HANDSHAKE_ONLY:
                     confirmed_hs.add(proto_name)
 
-        # Priority: confirmed OK, then HANDSHAKE_ONLY (still reachable)
-        priority_order = [
-            "vless_reality", "hysteria2", "amneziawg", "shadowsocks",
-            "wireguard", "openvpn",
-        ]
+        recommended: list[str] = []
         for proto in priority_order:
             if proto in confirmed_ok:
                 recommended.append(proto)
         for proto in priority_order:
             if proto in confirmed_hs and proto not in recommended:
                 recommended.append(f"{proto} (handshake only)")
-    else:
-        # No listener data — recommend based on known RU survivability,
-        # but skip anything that solo's signature probes already saw blocked.
-        # Previously only `amneziawg` was guarded; the others got recommended
-        # even if confirmed signature-blocked.
-        for proto in ("vless_reality", "amneziawg", "hysteria2", "shadowsocks"):
-            if proto not in blocked:
-                recommended.append(proto)
+        return recommended
 
-    return recommended
+    # No listener data — fall back to "what the priority list suggests,
+    # minus protocols solo's signature probes already blocked".
+    return [proto for proto in priority_order if proto not in blocked]

@@ -119,6 +119,11 @@ class TestResult(Base):
     report_file = Column(String(256), nullable=False)  # e.g. server-solo-2026-04-21.json
     test = Column(String(128), nullable=False)
     category = Column(String(64), nullable=False)
+    # Stable family key auto-derived from ``test`` (and ``category`` as
+    # a fallback) — see censprobe_core.subcategories. Grafana panels
+    # filter on this column instead of fragile ``test LIKE '...'``
+    # patterns; without it, a renamed test silently emptied a panel.
+    subcategory = Column(String(64), nullable=False, default="unknown", index=True)
     target = Column(Text, nullable=False)
     verdict = Column(String(64), nullable=False)
     method = Column(String(64), nullable=True)

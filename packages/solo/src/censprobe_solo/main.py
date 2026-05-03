@@ -30,6 +30,7 @@ from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
+from censprobe_core.config import get_config, load_config
 from censprobe_core.models import ListenerReport, ReportMeta, ServerMeta
 from censprobe_core.runner import ProbeRunner
 from censprobe_core.scoring import BLOCKING_VERDICT_STRINGS, compute_scores
@@ -84,6 +85,17 @@ def main(test_id: str, repeats: int, verbose: bool) -> None:
 
 
 async def _async_main(test_id: str, repeats: int) -> None:
+    # ── Step 0: Load top-level config ────────────────────────────────────────
+    # Defaults apply when censprobe.yaml is absent. A malformed file is a
+    # fatal startup error rather than a silent fallback — the operator
+    # notices immediately if their YAML is broken instead of spending an
+    # hour wondering why a knob isn't taking effect.
+    try:
+        load_config(WORKSPACE)
+    except ValueError as e:
+        console.print(f"[red]Config error:[/red] {e}")
+        raise click.ClickException(str(e)) from e
+
     # ── Step 1: Initialize meta.yaml if needed ───────────────────────────────
     meta_path = WORKSPACE / "reports" / test_id / "meta.yaml"
     if not meta_path.exists():

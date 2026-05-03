@@ -33,14 +33,12 @@ logger = logging.getLogger(__name__)
 
 PROBE_TIMEOUT = 15.0
 
-# Throughput probe parameters. The server-side echo endpoint streams
-# this many zero bytes back through the tunnel; the client measures
-# end-to-end time via curl's `--write-out %{speed_download}`. 1 MiB is
-# small enough that even a heavily-throttled link (~270 kbps) finishes
-# inside the timeout, but large enough that fast networks register a
-# meaningful number rather than sub-millisecond noise. Tuning these
-# changes the floor of what we call "throttled" — see the THROTTLED
-# flag handling in proxy_throughput.
+# Throughput probe defaults. Operator-overridable via
+# ``censprobe.yaml::throughput.target_bytes`` and
+# ``censprobe.yaml::throughput.timeout_sec`` — these constants are the
+# fallback when no config is loaded (e.g. probe-core consumed as a
+# library outside the solo/listener startup path). 1 MiB / 30 s ⇒ the
+# floor of "throttled" detection sits at ~270 kbps.
 THROUGHPUT_BYTES = 1 * 1024 * 1024
 THROUGHPUT_TIMEOUT_SEC = 30.0
 
@@ -367,10 +365,16 @@ async def proxy_echo(
 async def proxy_throughput(
     proxy_port: int,
     echo_port: int,
-    target_bytes: int = THROUGHPUT_BYTES,
-    timeout: float = THROUGHPUT_TIMEOUT_SEC,
+    target_bytes: int | None = None,
+    timeout: float | None = None,
 ) -> tuple[float | None, bool]:
     """Download ``target_bytes`` from the listener echo via the local SOCKS proxy.
+
+    When ``target_bytes`` / ``timeout`` are omitted (the common path —
+    callers in this module always omit them), values come from
+    :class:`censprobe_core.config.ThroughputConfig`. Explicit arguments
+    win, so tests can pin specific values without touching the global
+    config singleton.
 
     The numeric result is informational and intentionally not consumed
     by scoring — narrow server uplink would otherwise look like
@@ -378,18 +382,23 @@ async def proxy_throughput(
     it through into the report and let the dashboard show it as a
     side channel.
     """
+    from censprobe_core.config import get_config
+
+    tcfg = get_config().throughput
+    n_bytes = target_bytes if target_bytes is not None else tcfg.target_bytes
+    n_timeout = timeout if timeout is not None else tcfg.timeout_sec
     cmd = [
         "curl", "-s", "-o", "/dev/null",
-        "--max-time", str(timeout),
+        "--max-time", str(n_timeout),
         # %{exitcode}: curl's own exit; %{speed_download}: bytes/sec
         # (curl's already-averaged rate over the whole transfer);
         # %{size_download}: total bytes received — used to ignore
         # partial transfers that the tunnel cut short.
         "-w", "%{exitcode} %{speed_download} %{size_download}",
         "-x", f"socks5h://127.0.0.1:{proxy_port}",
-        f"http://127.0.0.1:{echo_port}/throughput?bytes={target_bytes}",
+        f"http://127.0.0.1:{echo_port}/throughput?bytes={n_bytes}",
     ]
-    code, out, _err = await run_cmd(cmd, timeout=timeout + 2)
+    code, out, _err = await run_cmd(cmd, timeout=n_timeout + 2)
     parts = out.strip().split()
     if len(parts) < 3:
         return None, False

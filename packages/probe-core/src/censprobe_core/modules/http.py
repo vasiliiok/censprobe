@@ -21,37 +21,41 @@ from urllib.parse import urlparse
 
 import httpx
 
+from censprobe_core.config import get_config
 from censprobe_core.models import TestResult, Verdict, BlockingMethod
 
 logger = logging.getLogger(__name__)
-
-_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=10.0)
-# Cap response read so a misbehaving server can't OOM the probe by streaming
-# an ISO under a TSPU block-page response. Body bytes themselves are no longer
-# inspected (block-page fingerprinting is gone) — we only record body_length
-# as a forensic signal.
-_MAX_BODY_READ = 512 * 1024
-_MAX_PARALLEL = 8            # concurrency cap for HTTP probes
 
 
 async def run_http_tests(
     targets: list[dict],  # from targets/*.yaml
     repeats: int = 3,
 ) -> list[TestResult]:
-    """Run HTTP/HTTPS tests for all targets."""
+    """Run HTTP/HTTPS tests for all targets.
+
+    Timeouts, body cap, and concurrency cap come from
+    :class:`censprobe_core.config.HttpModuleConfig`.
+    """
+    cfg = get_config().modules.http
+    timeout = httpx.Timeout(
+        connect=cfg.timeout_connect_sec,
+        read=cfg.timeout_read_sec,
+        write=cfg.timeout_connect_sec,
+        pool=cfg.timeout_connect_sec,
+    )
+    sem = asyncio.Semaphore(cfg.max_parallel)
+
     results = []
 
-    sem = asyncio.Semaphore(_MAX_PARALLEL)
-
     async with httpx.AsyncClient(
-        timeout=_TIMEOUT,
+        timeout=timeout,
         http2=True,
         follow_redirects=True,
         verify=True,
     ) as client:
         async def _bounded(url: str, target: dict) -> TestResult:
             async with sem:
-                return await _test_url(url, target, client, repeats)
+                return await _test_url(url, target, client, repeats, cfg.body_cap_bytes)
 
         tasks = [
             _bounded(url, target)
@@ -92,6 +96,7 @@ async def _test_url(
     target: dict,
     client: httpx.AsyncClient,
     repeats: int,
+    body_cap_bytes: int,
 ) -> TestResult:
     """Fetch a URL and analyze the response. Retries on transient failures."""
     domain = target.get("domain", url)
@@ -102,14 +107,16 @@ async def _test_url(
         try:
             # Stream and count bytes only (don't buffer) — httpx.get() would
             # buffer the whole body into RAM, and a TSPU block-page streaming
-            # an ISO would OOM us. We stop reading after _MAX_BODY_READ.
+            # an ISO would OOM us. We stop reading after `body_cap_bytes`,
+            # which the operator can tune via modules.http.body_cap_bytes
+            # in censprobe.yaml.
             async with client.stream(
                 "GET", url, headers=_BROWSER_HEADERS
             ) as r:
                 body_length = 0
                 async for chunk in r.aiter_bytes():
                     body_length += len(chunk)
-                    if body_length >= _MAX_BODY_READ:
+                    if body_length >= body_cap_bytes:
                         break
                 status = r.status_code
                 final_url = str(r.url)

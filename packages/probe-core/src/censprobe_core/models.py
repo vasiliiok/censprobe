@@ -20,7 +20,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+from censprobe_core.subcategories import derive as _derive_subcategory
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -74,9 +76,20 @@ class BlockingMethod(StrEnum):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestResult(BaseModel):
-    """Single test result — one measurement of one target."""
+    """Single test result — one measurement of one target.
+
+    ``subcategory`` is auto-derived from ``test`` + ``category`` via
+    :mod:`censprobe_core.subcategories` — modules don't set it
+    explicitly. Grafana SQL filters on this stable column instead of
+    fragile ``test LIKE '...'`` patterns; see the subcategories module
+    for the prefix→name contract.
+    """
     test: str = Field(description="Test name, e.g. 'dns_meduza_io_system'")
     category: str = Field(description="Module category: dns|tcp|tls|http|telegram|throttling|protocols|middlebox")
+    subcategory: str = Field(
+        default="",
+        description="Stable family identifier auto-derived from `test`/`category`",
+    )
     target: str = Field(description="Target URL, domain, or IP:port")
     verdict: Verdict
     method: BlockingMethod | None = None
@@ -86,6 +99,15 @@ class TestResult(BaseModel):
     attempts: int = 1
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     notes: str | None = None
+
+    @model_validator(mode="after")
+    def _populate_subcategory(self) -> "TestResult":
+        # Auto-fill only when the producer didn't supply one explicitly.
+        # Old reports without ``subcategory`` round-trip through here on
+        # re-import and pick up the derived value automatically.
+        if not self.subcategory:
+            self.subcategory = _derive_subcategory(self.test, self.category)
+        return self
 
 
 # ─────────────────────────────────────────────────────────────────────────────

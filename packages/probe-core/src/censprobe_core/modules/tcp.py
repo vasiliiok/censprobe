@@ -29,37 +29,33 @@ import asyncio
 import logging
 import time
 
+from censprobe_core.config import get_config
 from censprobe_core.models import TestResult, Verdict, BlockingMethod
-from censprobe_core.server_meta import is_ru_vantage
+from censprobe_core.server_meta import is_censoring_vantage
 
 logger = logging.getLogger(__name__)
-
-_CONNECT_TIMEOUT = 5.0    # seconds before declaring IP_DROPPED
-# RST within this time ≈ locally injected by an in-path middlebox.
-# A legitimate RST from a geographically close datacenter (Moscow→EU,
-# ~40-50ms RTT) easily beats a 500ms threshold, triggering false
-# positives. 30ms roughly matches the "in-AS / first-hop" window; we
-# simultaneously lower confidence to reflect the limits of a pure
-# RTT heuristic (a TTL-delta test would need raw sockets).
-_SYN_FAST_RST_MS = 30
-_MAX_PARALLEL = 16        # concurrency cap for TCP probes
 
 
 async def run_tcp_tests(
     targets: list[tuple[str, int]],  # (ip, port) pairs
     repeats: int = 3,
 ) -> list[TestResult]:
-    """Run TCP reachability tests for a list of (ip, port) targets in parallel."""
-    sem = asyncio.Semaphore(_MAX_PARALLEL)
+    """Run TCP reachability tests for a list of (ip, port) targets in parallel.
+
+    Concurrency cap, SYN timeout, and the fast-RST heuristic threshold
+    all come from :class:`censprobe_core.config.TcpModuleConfig`.
+    """
+    cfg = get_config().modules.tcp
+    sem = asyncio.Semaphore(cfg.max_parallel)
 
     async def _bounded(ip: str, port: int) -> TestResult:
         async with sem:
-            return await _test_tcp(ip, port, repeats)
+            return await _test_tcp(ip, port, repeats, cfg)
 
     return await asyncio.gather(*[_bounded(ip, port) for ip, port in targets])
 
 
-async def _test_tcp(ip: str, port: int, repeats: int) -> TestResult:
+async def _test_tcp(ip: str, port: int, repeats: int, cfg) -> TestResult:
     """Test TCP connectivity to ip:port."""
     target = f"{ip}:{port}"
     verdicts = []
@@ -67,7 +63,7 @@ async def _test_tcp(ip: str, port: int, repeats: int) -> TestResult:
 
     for _ in range(repeats):
         t0 = time.monotonic()
-        verdict = await _single_tcp_attempt(ip, port)
+        verdict = await _single_tcp_attempt(ip, port, cfg)
         rtt_ms = (time.monotonic() - t0) * 1000
         verdicts.append(verdict)
         rtts.append(rtt_ms)
@@ -77,13 +73,14 @@ async def _test_tcp(ip: str, port: int, repeats: int) -> TestResult:
     final_verdict = _majority(verdicts)
     method: BlockingMethod | None = None
 
-    # Vantage gating: the <30ms RST_INJECTED heuristic is calibrated for
-    # inside-RU vantages where a censor's RST is the only RST that arrives
-    # that fast. From a non-RU VM (e.g. Frankfurt → 9.9.9.9 anycast at
-    # ~5ms) every closed port is sub-30ms and this heuristic falsely
-    # paints a healthy network as RST-injected. Outside RU, downgrade to
-    # plain REFUSED so scoring doesn't claim censorship that isn't there.
-    if final_verdict == Verdict.RST_INJECTED and not is_ru_vantage():
+    # Vantage gating: the fast-RST heuristic is calibrated for inside-
+    # censor vantages where a censor's RST is the only RST that arrives
+    # that fast. From an uncensored VM (Frankfurt → 9.9.9.9 anycast at
+    # ~5 ms) every closed port is sub-threshold and this heuristic
+    # falsely paints a healthy network as RST-injected. Outside the
+    # configured censoring countries (defaults: RU, BY) we downgrade
+    # the verdict to plain REFUSED.
+    if final_verdict == Verdict.RST_INJECTED and not is_censoring_vantage():
         final_verdict = Verdict.REFUSED
 
     if final_verdict == Verdict.RST_INJECTED:
@@ -91,14 +88,15 @@ async def _test_tcp(ip: str, port: int, repeats: int) -> TestResult:
     elif final_verdict == Verdict.IP_DROPPED:
         method = BlockingMethod.IP_DROPPED
 
-    # RST_INJECTED is a timing-only heuristic (fast RST < 30 ms after
-    # SYN), NOT a TTL-delta verification. The flags below — explicit
-    # confidence ≤ 0.5, evidence.signal="suspicion", a long-form note —
-    # are all there so the dashboard, the CLI summary, and any reviewer
-    # of the JSON report can SEE that this verdict is a suspicion, not a
-    # confirmation. A genuine attribution would require raw-socket
-    # capture of incoming RST TTL and comparison with the SYN-ACK TTL on
-    # the same path, which the MVP doesn't do.
+    # RST_INJECTED is a timing-only heuristic (fast RST below the
+    # configured threshold), NOT a TTL-delta verification. The flags
+    # below — explicit confidence ≤ 0.5, evidence.signal="suspicion",
+    # a long-form note — are all there so the dashboard, the CLI
+    # summary, and any reviewer of the JSON report can SEE that this
+    # verdict is a suspicion, not a confirmation. A genuine attribution
+    # would require raw-socket capture of incoming RST TTL and
+    # comparison with the SYN-ACK TTL on the same path, which the MVP
+    # doesn't do.
     is_heuristic_rst = final_verdict == Verdict.RST_INJECTED
     evidence: dict[str, object] = {
         "all_verdicts": verdicts,
@@ -108,12 +106,12 @@ async def _test_tcp(ip: str, port: int, repeats: int) -> TestResult:
     if is_heuristic_rst:
         evidence["signal"] = "suspicion"
         evidence["heuristic"] = "rst_timing_only"
-        evidence["heuristic_threshold_ms"] = _SYN_FAST_RST_MS
+        evidence["heuristic_threshold_ms"] = cfg.fast_rst_threshold_ms
         evidence["disclaimer"] = (
             "Fast-RST timing heuristic only — same-AS / same-DC peers "
-            "can produce sub-30ms REFUSED that this rule misclassifies. "
-            "Confirm with an out-of-band TTL-delta capture before "
-            "treating as evidence of TSPU injection."
+            "can produce sub-threshold REFUSED that this rule "
+            "misclassifies. Confirm with an out-of-band TTL-delta "
+            "capture before treating as evidence of TSPU injection."
         )
     return TestResult(
         test=f"tcp_{_slug(ip)}_{port}",
@@ -126,10 +124,10 @@ async def _test_tcp(ip: str, port: int, repeats: int) -> TestResult:
         confidence=0.5 if is_heuristic_rst else 1.0,
         notes=(
             "SUSPICION (heuristic, not confirmed): RST arrived within "
-            f"{_SYN_FAST_RST_MS} ms of SYN, which is consistent with an "
-            "in-path injector but also occurs naturally on same-AS / "
-            "same-DC paths. No TTL-delta verification was performed; "
-            "treat as a lead, not a verdict."
+            f"{cfg.fast_rst_threshold_ms} ms of SYN, which is consistent "
+            "with an in-path injector but also occurs naturally on "
+            "same-AS / same-DC paths. No TTL-delta verification was "
+            "performed; treat as a lead, not a verdict."
             if is_heuristic_rst
             else None
         ),
@@ -137,13 +135,13 @@ async def _test_tcp(ip: str, port: int, repeats: int) -> TestResult:
     )
 
 
-async def _single_tcp_attempt(ip: str, port: int) -> Verdict:
+async def _single_tcp_attempt(ip: str, port: int, cfg) -> Verdict:
     """Attempt a single TCP connect and return the verdict."""
     try:
         t0 = time.monotonic()
         _, writer = await asyncio.wait_for(
             asyncio.open_connection(ip, port),
-            timeout=_CONNECT_TIMEOUT,
+            timeout=cfg.syn_timeout_sec,
         )
         writer.close()
         try:
@@ -158,8 +156,7 @@ async def _single_tcp_attempt(ip: str, port: int) -> Verdict:
     except ConnectionRefusedError:
         # Real RST from the host — port closed but host is alive
         elapsed_ms = (time.monotonic() - t0) * 1000
-        if elapsed_ms < _SYN_FAST_RST_MS:
-            # Very fast RST — might be injected
+        if elapsed_ms < cfg.fast_rst_threshold_ms:
             return Verdict.RST_INJECTED
         return Verdict.REFUSED
 
@@ -168,7 +165,7 @@ async def _single_tcp_attempt(ip: str, port: int) -> Verdict:
         elapsed_ms = (time.monotonic() - t0) * 1000
         err_str = str(e).lower()
         if "reset" in err_str or "refused" in err_str:
-            if elapsed_ms < _SYN_FAST_RST_MS:
+            if elapsed_ms < cfg.fast_rst_threshold_ms:
                 return Verdict.RST_INJECTED
             return Verdict.REFUSED
         return Verdict.ERROR  # type: ignore[return-value]

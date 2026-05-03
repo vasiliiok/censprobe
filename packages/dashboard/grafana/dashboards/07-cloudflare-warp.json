@@ -61,7 +61,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT ROUND(100.0 * COUNT(*) FILTER (WHERE verdict = 'OK') / NULLIF(COUNT(*), 0)) AS \"Score\" FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND category = 'cloudflare' AND test NOT LIKE 'cloudflare_quic%'",
+          "rawSql": "SELECT ROUND(100.0 * COUNT(*) FILTER (WHERE verdict = 'OK') / NULLIF(COUNT(*), 0)) AS \"Score\" FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND category = 'cloudflare' AND subcategory <> 'cloudflare_quic'",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -310,7 +310,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT test, target, verdict, method, notes FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND category = 'cloudflare' AND test LIKE 'cloudflare_warp_masque_udp%' ORDER BY test",
+          "rawSql": "SELECT test, target, verdict, method, notes FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND subcategory = 'cloudflare_warp_udp_masque' ORDER BY test",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -384,7 +384,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT test, target, verdict, method, notes FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND category = 'cloudflare' AND test LIKE 'cloudflare_warp_wg_udp%' ORDER BY test",
+          "rawSql": "SELECT test, target, verdict, method, notes FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND subcategory = 'cloudflare_warp_udp_wg' ORDER BY test",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -458,7 +458,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT test, target, verdict, method, rtt_ms FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND category = 'cloudflare' AND test LIKE 'cloudflare_http%' ORDER BY test",
+          "rawSql": "SELECT test, target, verdict, method, rtt_ms FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND subcategory = 'cloudflare_http' ORDER BY test",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
