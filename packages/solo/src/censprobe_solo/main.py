@@ -86,10 +86,8 @@ def main(test_id: str, repeats: int, verbose: bool) -> None:
 
 async def _async_main(test_id: str, repeats: int) -> None:
     # ── Step 0: Load top-level config ────────────────────────────────────────
-    # Defaults apply when censprobe.yaml is absent. A malformed file is a
-    # fatal startup error rather than a silent fallback — the operator
-    # notices immediately if their YAML is broken instead of spending an
-    # hour wondering why a knob isn't taking effect.
+    # censprobe.yaml is required and must be fully populated. A missing or
+    # malformed file is a fatal startup error — no fallback defaults exist.
     try:
         load_config(WORKSPACE)
     except ValueError as e:

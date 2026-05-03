@@ -141,14 +141,16 @@ def is_enabled(spec: ModuleSpec, cfg: CensprobeConfig) -> bool:
 
     Reads the matching attribute on ``cfg.modules`` (e.g.
     ``cfg.modules.dns.enabled``) — module names mirror config field
-    names by construction. An unknown name (custom adapter without a
-    matching config section) defaults to True so a registry-only
-    extension still runs.
+    names by construction. Every module must have an explicit config
+    section in censprobe.yaml with an ``enabled`` flag.
     """
     section = getattr(cfg.modules, spec.name, None)
     if section is None:
-        return True
-    return bool(getattr(section, "enabled", True))
+        raise RuntimeError(
+            f"Module '{spec.name}' has no config section in cfg.modules. "
+            f"All modules must be explicitly configured in censprobe.yaml."
+        )
+    return bool(section.enabled)
 
 
 def enabled_modules(cfg: CensprobeConfig) -> list[ModuleSpec]:

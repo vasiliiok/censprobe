@@ -125,8 +125,8 @@ def main(test_id: str, session_id: str, creds_port: int, verbose: bool) -> None:
 
 async def _async_main(test_id: str, session_id: str, creds_port: int) -> None:
     # ── Step 0: Load top-level config (protocols.enabled, vantage list, …) ───
-    # Failures are fatal: a missing censprobe.yaml is fine (defaults
-    # apply), but a malformed one would silently degrade the run.
+    # censprobe.yaml is required and must be fully populated. A missing or
+    # malformed file is a fatal error — no fallback defaults exist.
     try:
         load_config(WORKSPACE)
     except ValueError as e:

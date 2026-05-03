@@ -33,11 +33,9 @@ logger = logging.getLogger(__name__)
 
 PROBE_TIMEOUT = 15.0
 
-# Throughput probe defaults. Operator-overridable via
+# Throughput probe constants. Operator-overridable via
 # ``censprobe.yaml::throughput.target_bytes`` and
-# ``censprobe.yaml::throughput.timeout_sec`` — these constants are the
-# fallback when no config is loaded (e.g. probe-core consumed as a
-# library outside the solo/listener startup path). 1 MiB / 30 s ⇒ the
+# ``censprobe.yaml::throughput.timeout_sec``. 1 MiB / 30 s ⇒ the
 # floor of "throttled" detection sits at ~270 kbps.
 THROUGHPUT_BYTES = 1 * 1024 * 1024
 THROUGHPUT_TIMEOUT_SEC = 30.0

@@ -79,12 +79,12 @@ def is_censoring_vantage() -> bool:
     vantage) doesn't get a flood of spurious BLOCKED verdicts from
     heuristics that only make sense behind a state filter.
 
-    The default whitelist is ``[RU, BY]``; extend it via
-    ``vantage.censoring_countries`` in censprobe.yaml when probing
-    from another censoring vantage.
+    The whitelist is configured via ``vantage.censoring_countries``
+    in censprobe.yaml; extend it when probing from another censoring
+    vantage.
     """
-    # Lazy import keeps server_meta importable without the config
-    # singleton having been initialised yet (fall back to defaults).
+    # Lazy import keeps server_meta importable without triggering
+    # a circular import at module load time.
     from censprobe_core.config import get_config
 
     if _VANTAGE_COUNTRY is None:

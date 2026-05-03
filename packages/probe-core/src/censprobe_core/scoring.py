@@ -5,12 +5,11 @@ Computes three scores (entry, exit, relay) and an overall score.
 All scores are in range [0.0, 100.0].
 
 Weights are read from
-:class:`censprobe_core.config.ScoringConfig`. Defaults match the
-historical hardcoded values:
+:class:`censprobe_core.config.ScoringConfig` (censprobe.yaml):
 
-  entry_score = protocol_reachability·0.6 + uplink·0.3 + latency·0.1
-  exit_score  = uplink·0.6 + censorship_low·0.4
-  relay_score = tcp·0.7 + latency·0.3
+  entry_score = protocol_reachability·W_p + uplink·W_u + latency·W_l
+  exit_score  = uplink·W_u + censorship·W_c
+  relay_score = tcp·W_t + latency·W_l
   overall     = max(entry, exit, relay)
 
 The recommended-protocol list is built from
@@ -122,8 +121,7 @@ def compute_scores(
     # ── Entry score ───────────────────────────────────────────────────────────
     # entry = protocol·W_p + uplink·W_u + latency·W_l   (×100)
     #
-    # Weights come from censprobe.yaml's scoring.entry section; defaults
-    # match the historical 60/30/10 split.
+    # Weights come from censprobe.yaml's scoring.entry section.
     w_e = weights.entry
     scores.entry_score = round(
         (proto_ok * w_e.protocol +

@@ -2,10 +2,13 @@
 # censprobe.yaml — top-level configuration for solo / listener / client.
 # ─────────────────────────────────────────────────────────────────────────────
 #
-# Every key in this file is OPTIONAL. The shipped defaults match the
-# historical hardcoded values, so deleting this file (or leaving it
-# empty) yields the same behaviour as before. Override only what you
-# care about — pydantic merges your overrides on top of the defaults.
+# This file is REQUIRED. Every field must be present and explicitly set.
+# There are no fallback defaults anywhere in the code — if a field is
+# missing, startup fails with a validation error.
+#
+# This is by design: the operator must always see the exact current
+# state of the project configuration in one place. Edit only what you
+# care about, but never delete fields — a missing field is an error.
 #
 # Schema lives in packages/probe-core/src/censprobe_core/config.py
 # (CensprobeConfig). A typo in a field name produces a fatal startup
@@ -40,60 +43,58 @@ vantage:
 # Each measurement module can be turned off independently with
 # ``enabled: false``. Disabled modules produce zero results and zero
 # failures — the dashboard simply shows their categories empty.
-#
-# Each module's per-knob defaults are listed below; uncomment and edit
-# what you need.
 
 modules:
   dns:
     enabled: true
-    # repeats: 3
-    # doh_resolvers:
-    #   - https://cloudflare-dns.com/dns-query
-    #   - https://dns.google/dns-query
-    #   - https://mozilla.cloudflare-dns.com/dns-query
-    # doh_timeout_sec: 10.0
-    # asn_lookup_backoff_sec: 90.0   # ipapi.is rate-limit cool-off
+    repeats: 3
+    doh_resolvers:
+      - https://cloudflare-dns.com/dns-query
+      - https://dns.google/dns-query
+      - https://mozilla.cloudflare-dns.com/dns-query
+    doh_timeout_sec: 10.0
+    asn_lookup_backoff_sec: 90.0   # ipapi.is rate-limit cool-off
 
   tcp:
     enabled: true
-    # repeats: 3
-    # syn_timeout_sec: 5.0
-    # fast_rst_threshold_ms: 30      # below this → SUSPECTED RST_INJECTED
-    # max_parallel: 16
+    repeats: 3
+    syn_timeout_sec: 5.0
+    fast_rst_threshold_ms: 30      # below this → SUSPECTED RST_INJECTED
+    max_parallel: 16
 
   tls:
     enabled: true
-    # repeats: 2
-    # timeout_sec: 10.0
-    # max_parallel: 6
+    repeats: 2
+    timeout_sec: 10.0
+    max_parallel: 6
 
   http:
     enabled: true
-    # repeats: 3
-    # body_cap_bytes: 524288         # stop reading after this many bytes
-    # timeout_connect_sec: 10.0
-    # timeout_read_sec: 30.0
-    # max_parallel: 8
+    repeats: 3
+    body_cap_bytes: 524288         # stop reading after this many bytes
+    timeout_connect_sec: 10.0
+    timeout_read_sec: 30.0
+    max_parallel: 8
 
   telegram:
     enabled: true
-    # targets_file: telegram         # picks up targets/telegram.yaml
-    # timeout_sec: 8.0
+    targets_file: telegram         # picks up targets/telegram.yaml
+    timeout_sec: 8.0
 
   cloudflare:
     enabled: true
-    # targets_file: cloudflare       # picks up targets/cloudflare.yaml
+    targets_file: cloudflare       # picks up targets/cloudflare.yaml
 
   throttling:
     enabled: true
-    # require_censoring_vantage: true
-    # target_url:    https://speedtest.selectel.ru/100MB
-    # correct_sni:   speedtest.selectel.ru
-    # typo_sni:      speedtset.selectel.ru
-    # trigger_sni:   1-googlevideo.com
-    # bandwidth_ratio_threshold: 0.25  # trigger < 25% × correct → throttled
-    # curl_timeout_sec: 35.0
+    require_censoring_vantage: true
+    target_url:    https://speedtest.selectel.ru/100MB
+    correct_sni:   speedtest.selectel.ru
+    typo_sni:      speedtset.selectel.ru
+    trigger_sni:   1-googlevideo.com
+    sequential_runs: 3
+    bandwidth_ratio_threshold: 0.25  # trigger < 25% × correct → throttled
+    curl_timeout_sec: 35.0
 
   middlebox:
     enabled: true
@@ -146,8 +147,8 @@ protocols:
 #   1 MiB / 30 s ≈ ~280 kbps below which throughput_throttled fires.
 throughput:
   enabled: true
-  # target_bytes: 1048576
-  # timeout_sec:  30.0
+  target_bytes: 1048576
+  timeout_sec:  30.0
 
 
 # ── Scoring ──────────────────────────────────────────────────────────────────
