@@ -137,14 +137,19 @@ async def _async_main(test_id: str, session_id: str, creds_port: int) -> None:
     # Each session gets its own one-time credential set; nothing is written
     # to disk. The cred_server below hands them to the client over a
     # TLS-pinned channel and is shut down on Ctrl+C.
+    #
+    # Bind ports come from censprobe.yaml::protocols.ports (validated in
+    # ProtocolsConfig — every enabled protocol must have an entry, no
+    # fallback defaults). Passing the map explicitly here means a typo
+    # in the yaml fails before any subprocess is spawned.
     console.print("[dim]Generating one-time credentials...[/dim]")
-    creds = generate_credentials()
+    cfg = get_config()
+    creds = generate_credentials(cfg.protocols.ports)
 
     # ── Step 2: Start the credentials HTTPS endpoint ──────────────────────────
     # Pass the operator-enabled protocol subset alongside credentials so
     # the client mirrors exactly what the listener brought up — no
     # mismatched probe attempts when the operator narrows the list.
-    cfg = get_config()
     cred_server = CredServer(
         creds_yaml=creds_to_yaml(creds, enabled_protocols=cfg.protocols.enabled),
         port=creds_port,
@@ -540,6 +545,7 @@ def _print_responder_status(responders: dict, errors: dict, creds: ProtocolCrede
         "shadowsocks":   ("ss_port", "TCP"),
         "vless_reality": ("vless_port", "TCP"),
         "hysteria2":     ("hy2_port", "UDP"),
+        "mtproto_proxy": ("mtproxy_port", "TCP"),
     }
 
     for spec in enabled_protocols(cfg.protocols.enabled):

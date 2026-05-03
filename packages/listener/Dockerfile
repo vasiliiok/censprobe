@@ -44,11 +44,19 @@ RUN git clone https://github.com/amnezia-vpn/amneziawg-go.git /tmp/awg-go && \
     rm -rf /tmp/awg-go /root/.cache/go-build /root/go
 
 # Build mtg (MTProto-proxy) → /usr/local/bin/mtg.
-# mtg v2 uses `make mtg` to build the binary in the root of the project.
-ARG MTG_COMMIT=b80f0c0ee8cb1ab4a5f4f8101a9386fc751a084c
+# mtg has no Makefile; the upstream Dockerfile uses `go build` directly.
+# Pinned to v2.1.7 (releases tagged in the repo) so a future force-push or
+# breaking change to master can't silently switch the build to a different tree.
+ARG MTG_COMMIT=269852a4f1287ef10762a0d27b1f2605532804c1
 RUN git clone https://github.com/9seconds/mtg.git /tmp/mtg && \
     git -C /tmp/mtg checkout "${MTG_COMMIT}" && \
-    cd /tmp/mtg && make mtg && \
+    cd /tmp/mtg && \
+    CGO_ENABLED=0 go build \
+        -trimpath \
+        -mod=readonly \
+        -ldflags="-extldflags '-static' -s -w -X 'main.version=${MTG_COMMIT}'" \
+        -tags netgo \
+        -o mtg && \
     install -m 0755 mtg /usr/local/bin/mtg && \
     rm -rf /tmp/mtg /root/.cache/go-build /root/go
 

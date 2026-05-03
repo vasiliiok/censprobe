@@ -30,12 +30,18 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ProtocolCredentials:
-    """All credentials needed for one test session."""
+    """All credentials needed for one test session.
+
+    Port fields have NO defaults — every value flows in from
+    ``censprobe.yaml::protocols.ports`` via :func:`generate_credentials`,
+    so a missing config entry surfaces at config-load time rather than as
+    a silent "everyone bound the right port by accident".
+    """
     # OpenVPN: static-key PSK in OpenVPN "Static key V1" PEM format
     # (headers + 2048 hex bits). Raw base64 bytes are NOT valid input for
     # the `secret` directive.
     openvpn_psk_pem: str = ""
-    openvpn_port: int = 1194
+    openvpn_port: int = 0
 
     # WireGuard: server keypair + client pubkey
     wg_server_private: str = ""
@@ -43,7 +49,7 @@ class ProtocolCredentials:
     wg_client_private: str = ""
     wg_client_public: str = ""
     wg_preshared_key: str = ""
-    wg_port: int = 51820
+    wg_port: int = 0
 
     # AmneziaWG: WG keypair + junk params
     awg_server_private: str = ""
@@ -51,7 +57,7 @@ class ProtocolCredentials:
     awg_client_private: str = ""
     awg_client_public: str = ""
     awg_preshared_key: str = ""
-    awg_port: int = 51821
+    awg_port: int = 0
     awg_jc: int = 4
     awg_jmin: int = 40
     awg_jmax: int = 70
@@ -63,12 +69,12 @@ class ProtocolCredentials:
     awg_h4: int = 0
 
     # Shadowsocks 2022
-    ss_port: int = 8388
+    ss_port: int = 0
     ss_method: str = "2022-blake3-aes-256-gcm"
     ss_password_b64: str = ""
 
     # VLESS + Reality
-    vless_port: int = 443
+    vless_port: int = 0
     vless_uuid: str = ""
     vless_pbk: str = ""           # Reality public key
     vless_pvk: str = ""           # Reality private key (server only)
@@ -76,19 +82,59 @@ class ProtocolCredentials:
     vless_server_name: str = "apimaps.yandex.ru"   # Reality SNI
 
     # Hysteria 2
-    hy2_port: int = 443
+    hy2_port: int = 0
     hy2_auth: str = ""
     hy2_obfs_password: str = ""
 
     # MTProto Proxy (mtg)
     mtproxy_secret: str = ""
-    mtproxy_port: int = 8443
+    mtproxy_port: int = 0
 
 
+# Map from canonical protocol name → credential-port attribute. Used when
+# applying ``cfg.protocols.ports`` onto a fresh ProtocolCredentials.
+# Adding a protocol requires extending this map alongside the dataclass
+# field; the symmetry is enforced by ``_apply_ports`` (KeyError on a name
+# without a known attr).
+_PROTOCOL_PORT_ATTR: dict[str, str] = {
+    "openvpn":       "openvpn_port",
+    "wireguard":     "wg_port",
+    "amneziawg":     "awg_port",
+    "shadowsocks":   "ss_port",
+    "vless_reality": "vless_port",
+    "hysteria2":     "hy2_port",
+    "mtproto_proxy": "mtproxy_port",
+}
 
-def generate_credentials() -> ProtocolCredentials:
-    """Generate fresh one-time credentials for all protocols."""
+
+def _apply_ports(creds: ProtocolCredentials, ports: dict[str, int]) -> None:
+    """Stamp every port from ``cfg.protocols.ports`` onto ``creds``.
+
+    Raises ``KeyError`` on a protocol name that has no matching attr —
+    that's a programmer error (registry got a new protocol but
+    credentials.py didn't), not an operator error, and we want it to
+    surface immediately instead of being papered over.
+    """
+    for name, port in ports.items():
+        attr = _PROTOCOL_PORT_ATTR.get(name)
+        if attr is None:
+            raise KeyError(
+                f"protocols.ports contains '{name}' but no port attribute "
+                f"is registered in _PROTOCOL_PORT_ATTR — extend "
+                f"censprobe_listener.credentials when adding a protocol."
+            )
+        setattr(creds, attr, port)
+
+
+def generate_credentials(ports: dict[str, int]) -> ProtocolCredentials:
+    """Generate fresh one-time credentials for all protocols.
+
+    ``ports`` MUST be a complete map of protocol-name → bind-port,
+    typically ``cfg.protocols.ports`` (validated in
+    :class:`ProtocolsConfig` so every enabled protocol is covered).
+    """
     creds = ProtocolCredentials()
+    _apply_ports(creds, ports)
 
     # OpenVPN PSK: must be in OpenVPN's "Static key V1" PEM envelope
     # (16 lines of 32 hex chars wrapped in BEGIN/END markers). Raw random

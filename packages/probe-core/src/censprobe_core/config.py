@@ -22,7 +22,7 @@ import logging
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -145,10 +145,60 @@ class ProtocolsConfig(BaseModel):
 
     ``priority`` orders the recommendation list in scoring output —
     first protocol with verdict==OK wins. Same name policy as ``enabled``.
+
+    ``ports`` is the per-protocol bind port the listener uses. Every
+    protocol in ``enabled`` MUST have a corresponding entry — a missing
+    key is a fatal validation error, not a fallback. Unknown protocol
+    names in ``ports`` are also rejected so a typo can't silently route
+    a port to nowhere.
     """
     model_config = ConfigDict(extra="forbid")
     enabled: list[str]
     priority: list[str]
+    ports: dict[str, int]
+
+    @model_validator(mode="after")
+    def _check_ports_cover_enabled(self) -> "ProtocolsConfig":
+        # Cross-check ``ports`` against ``enabled`` so a half-edited yaml
+        # (operator added a protocol to ``enabled`` but forgot to give it
+        # a port) fails loudly at startup. Names that aren't in the
+        # registry are tolerated here — :func:`enabled_protocols` already
+        # warns about typos at runtime, and we don't want to import the
+        # registry from inside config.py (that would create a cycle since
+        # the registry is a pure-data module today and could grow config
+        # imports tomorrow).
+        missing = [name for name in self.enabled if name not in self.ports]
+        if missing:
+            raise ValueError(
+                f"protocols.ports missing entries for enabled protocols: "
+                f"{missing}. Every protocol in protocols.enabled must have "
+                f"a port in protocols.ports — no fallback defaults exist."
+            )
+        # Reject ports for protocols that are unknown to the registry —
+        # a phantom name in ``ports`` usually means the operator misspelt
+        # something (e.g. ``mtproto-proxy`` vs ``mtproto_proxy``) and
+        # the listener would then bind nothing on that port.
+        # We can't import the registry here without risking a cycle, but
+        # we can at least detect ports that aren't referenced by either
+        # ``enabled`` or ``priority`` — those are guaranteed dead config.
+        referenced = set(self.enabled) | set(self.priority)
+        orphan = [name for name in self.ports if name not in referenced]
+        if orphan:
+            raise ValueError(
+                f"protocols.ports contains entries not listed in "
+                f"protocols.enabled or protocols.priority: {orphan}. "
+                f"Remove the dead entries or add the protocol names."
+            )
+        bad_ports = [
+            (name, p) for name, p in self.ports.items()
+            if not (1 <= p <= 65535)
+        ]
+        if bad_ports:
+            raise ValueError(
+                f"protocols.ports contains invalid port numbers "
+                f"(must be 1..65535): {bad_ports}"
+            )
+        return self
 
 
 # ─────────────────────────────────────────────────────────────────────────────

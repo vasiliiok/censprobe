@@ -123,6 +123,7 @@ protocols:
     - shadowsocks
     - vless_reality
     - hysteria2
+    - mtproto_proxy
   # First-match-wins recommendation order in the scoring summary. The
   # priority list may include protocols not in `enabled` (they will
   # simply be ignored at runtime).
@@ -131,8 +132,39 @@ protocols:
     - hysteria2
     - amneziawg
     - shadowsocks
+    - mtproto_proxy
     - wireguard
     - openvpn
+  # Per-protocol listener bind ports. Every protocol in `enabled` MUST
+  # have an entry here — a missing key is a fatal validation error at
+  # startup, no fallback defaults exist anywhere in the code.
+  #
+  # Port-collision rules:
+  #   * Two TCP responders cannot share a port. vless_reality (TCP/443)
+  #     and mtproto_proxy (TCP) both want 443 in an ideal world — only
+  #     one can have it per session. Pick the protocol you need a
+  #     fully-realistic DPI signal for; the other goes on an alt port.
+  #   * UDP and TCP on the same number do NOT collide (hysteria2 UDP/443
+  #     coexists with vless_reality TCP/443).
+  #   * 8443/tcp is reserved for the listener's creds-server (CREDS_PORT
+  #     in .env) — do not assign it here.
+  #
+  # Why mtproto_proxy = 443 by default:
+  #   mtg uses fakeTLS to mimic HTTPS. RU TSPU/DPI inspects 443 as TLS
+  #   and decides to pass or drop based on the handshake content; on a
+  #   non-standard port the inspector may apply different rules
+  #   (sometimes more permissive, sometimes a blanket drop) that
+  #   confound the censorship signal. To preserve the realistic 443
+  #   path, vless_reality is moved to 8444 in this default profile —
+  #   swap them back if your priority is the VLESS+Reality realism.
+  ports:
+    openvpn: 1194         # UDP
+    wireguard: 51820      # UDP
+    amneziawg: 51821      # UDP
+    shadowsocks: 8388     # TCP
+    vless_reality: 8444   # TCP — moved off 443 to free it for mtproto_proxy
+    hysteria2: 443        # UDP — different transport, does not clash with TCP/443
+    mtproto_proxy: 443    # TCP — fakeTLS realism: DPI inspects 443 as HTTPS
 
 
 # ── Throughput probe ─────────────────────────────────────────────────────────

@@ -902,100 +902,274 @@ async def _tunnel_via_singbox_or_xray(
 # ─────────────────────────────────────────────────────────────────────────────
 # MTProto Proxy probe
 # ─────────────────────────────────────────────────────────────────────────────
+#
+# mtg (the responder we run server-side) speaks **fake-TLS** — a Telegram
+# client opens a connection that looks like TLS 1.2 on the wire and the
+# proxy validates the ClientHello via an HMAC over its own bytes (with the
+# 32-byte client_random nullified) keyed on the secret. If the HMAC check
+# fails, mtg falls back to **domain fronting**: it transparently proxies
+# the connection to the secret-embedded host (google.com by default), so
+# *any* TCP connect — including a censor's active-probe — gets a real TLS
+# response back. That makes "did we get bytes?" a useless reachability
+# signal: the only meaningful probe is one that constructs a valid fake-
+# TLS ClientHello and verifies the proxy's matching ServerHello.
+#
+# Reference for the on-wire format:
+#   - mtg (server side):  mtglib/internal/tls/fake/{client,server}_side.go
+#   - alexbers/mtprotoproxy (server-side handler that documents the same
+#     algorithm in Python):  handle_fake_tls_handshake()
+#
+# The HMAC trick (Telegram's spec):
+#   1. Build the full 517-byte ClientHello with the 32 random bytes
+#      placeholder-zeroed.
+#   2. Compute digest = HMAC-SHA256(secret_key, clientHello_with_zero_random).
+#   3. Real client_random = digest[0:28] || (digest[28:32] XOR LE(now_unix)).
+#      The server XORs digest into received random and gets back zeros +
+#      timestamp; both equal-prefix and freshness are checked.
 async def probe_mtproto_proxy(host: str, port: int, secret_hex: str) -> ProbeResult:
     import hashlib
-    import os
-    import struct
-    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    import hmac
+    import secrets as _secrets
 
     result = ProbeResult()
 
-    if secret_hex.startswith("dd"):
-        secret = bytes.fromhex(secret_hex[2:34])
-    elif secret_hex.startswith("ee"):
-        secret = bytes.fromhex(secret_hex[2:34])
-    else:
-        try:
-            secret = bytes.fromhex(secret_hex)
-        except ValueError:
-            result.error = "Invalid MTProxy secret format"
-            return result
+    # ── Parse the ee-secret ────────────────────────────────────────────────
+    # ee-secret = 'ee' || 16-byte random key || hostname (latin1 ASCII).
+    # 'dd'-prefixed and prefixless legacy formats predate fake-TLS and are
+    # not accepted by mtg, so we reject them here rather than building a
+    # ClientHello the server can't possibly validate.
+    try:
+        secret_bytes = bytes.fromhex(secret_hex)
+    except ValueError:
+        result.error = "secret_not_hex"
+        result.verdict = Verdict.ERROR
+        return result
 
-    init_payload = bytearray(os.urandom(64))
+    if len(secret_bytes) < 18 or secret_bytes[0] != 0xee:
+        result.error = "secret_not_faketls"
+        result.verdict = Verdict.ERROR
+        return result
 
-    while init_payload[0] == 0xef or \
-          init_payload[:4] in (b'\x48\x4f\x53\x54', b'\x50\x4f\x53\x54', b'\x47\x45\x54\x20', b'\xee\xee\xee\xee') or \
-          init_payload[4:8] == b'\x00\x00\x00\x00':
-        init_payload = bytearray(os.urandom(64))
+    secret_key = secret_bytes[1:17]
+    try:
+        sni_host = secret_bytes[17:].decode("ascii")
+    except UnicodeDecodeError:
+        result.error = "secret_sni_not_ascii"
+        result.verdict = Verdict.ERROR
+        return result
+    if not sni_host:
+        result.error = "secret_sni_empty"
+        result.verdict = Verdict.ERROR
+        return result
 
-    init_payload[56:60] = b'\xef\xef\xef\xef'
+    # ── Build the fake-TLS ClientHello (517 bytes total on the wire) ───────
+    # Layout copied from the reference implementations; the ciphersuite list,
+    # session-id length (32), and extension layout are all checked by mtg's
+    # parser, so we cannot freely mutate them. The 32-byte session_id is
+    # tracked locally and must be echoed back by the proxy in ServerHello.
+    session_id = _secrets.token_bytes(32)
+    sni_bytes = sni_host.encode("ascii")
 
-    encrypt_key_base = init_payload[8:40]
-    encrypt_iv = bytes(init_payload[40:56])
-    
-    reversed_payload = init_payload[::-1]
-    decrypt_key_base = reversed_payload[8:40]
-    decrypt_iv = bytes(reversed_payload[40:56])
+    hello = bytearray()
+    # TLS record header: ContentType=22 (Handshake), version=0x0301 (TLS 1.0
+    # for record-layer compatibility), record length=0x0200 (=512). The
+    # record-layer total is 5 (header) + 512 = 517 bytes.
+    hello += b"\x16\x03\x01\x02\x00"
+    # HandshakeType=1 (ClientHello), 24-bit length=0x0001fc (=508), version
+    # 0x0303 (TLS 1.2).
+    hello += b"\x01\x00\x01\xfc\x03\x03"
+    random_offset = len(hello)  # 11 bytes of headers precede client_random
+    hello += b"\x00" * 32         # client_random placeholder (zeroed for HMAC)
+    hello += b"\x20" + session_id   # session_id_len=32, then session_id
+    # Cipher suites + compression methods (verbatim from mtprotoproxy
+    # reference; mtg accepts any non-GREASE suite, but we use a known-good
+    # modern list to look like a stock browser handshake).
+    hello += (
+        b"\x00\x22\x4a\x4a\x13\x01\x13\x02\x13\x03\xc0\x2b\xc0\x2f"
+        b"\xc0\x2c\xc0\x30\xcc\xa9\xcc\xa8\xc0\x13\xc0\x14\x00\x9c"
+        b"\x00\x9d\x00\x2f\x00\x35\x00\x0a"
+    )
+    hello += b"\x01\x00"  # compression_methods_len=1, value=null
 
-    encrypt_key = hashlib.sha256(encrypt_key_base + secret).digest()
-    decrypt_key = hashlib.sha256(decrypt_key_base + secret).digest()
+    # Extensions block — total length is patched in once we know it.
+    ext = bytearray()
+    # extended_master_secret (no payload).
+    ext += b"\x00\x17\x00\x00"
+    # renegotiation_info (length=1, value=0).
+    ext += b"\xff\x01\x00\x01\x00"
+    # SNI (server_name).
+    sni_ext = bytearray()
+    sni_ext += b"\x00"  # name_type = host_name
+    sni_ext += len(sni_bytes).to_bytes(2, "big") + sni_bytes
+    sni_list = len(sni_ext).to_bytes(2, "big") + bytes(sni_ext)
+    ext += b"\x00\x00" + len(sni_list).to_bytes(2, "big") + sni_list
+    # supported_groups (curves).
+    ext += b"\x00\x0a\x00\x08\x00\x06\x00\x1d\x00\x17\x00\x18"
+    # ec_point_formats.
+    ext += b"\x00\x0b\x00\x02\x01\x00"
+    # signature_algorithms.
+    ext += (
+        b"\x00\x0d\x00\x14\x00\x12\x04\x03\x08\x04\x04\x01\x05\x03"
+        b"\x02\x03\x08\x05\x05\x01\x08\x06\x06\x01\x02\x01"
+    )
+    # supported_versions: TLS 1.3, 1.2.
+    ext += b"\x00\x2b\x00\x05\x04\x03\x04\x03\x03"
+    # psk_key_exchange_modes.
+    ext += b"\x00\x2d\x00\x02\x01\x01"
+    # key_share — single x25519 group with a 32-byte random "public" (mtg
+    # never decrypts past the handshake, so the bytes need only have the
+    # right length).
+    ext += (
+        b"\x00\x33\x00\x26\x00\x24\x00\x1d\x00\x20"
+        + _secrets.token_bytes(32)
+    )
 
-    encryptor = Cipher(algorithms.AES(encrypt_key), modes.CTR(encrypt_iv)).encryptor()
-    decryptor = Cipher(algorithms.AES(decrypt_key), modes.CTR(decrypt_iv)).decryptor()
+    # Pad the extensions out so the final record is exactly 517 bytes.
+    # (mtg validates record length structurally — too short or too long
+    # both fail parseClientHello.)
+    target_total = 517
+    # 5 (record hdr) + 4 (handshake hdr) + 2 (version) + 32 (random)
+    #   + 1 (sid_len) + 32 (sid) + 2 (cs_len) + 34 (cs) + 1 (comp_len)
+    #   + 1 (comp) + 2 (ext_total_len) + len(ext) + padding == 517
+    fixed_prefix = 5 + 4 + 2 + 32 + 1 + 32 + 2 + 34 + 1 + 1 + 2
+    pad_len = target_total - fixed_prefix - len(ext)
+    if pad_len >= 4:
+        # padding extension (type 0x0015, len=N-4, then zeros).
+        ext += b"\x00\x15"
+        ext += (pad_len - 4).to_bytes(2, "big")
+        ext += b"\x00" * (pad_len - 4)
+    elif pad_len > 0:
+        # Should never happen with the chosen extension set, but keep the
+        # length invariant intact rather than emitting a malformed record.
+        ext += b"\x00" * pad_len
 
-    encrypted_payload = bytearray(init_payload)
-    encrypted_payload[56:64] = encryptor.update(init_payload[56:64])
+    hello += len(ext).to_bytes(2, "big") + bytes(ext)
 
+    if len(hello) != target_total:
+        result.error = f"clienthello_len={len(hello)}"
+        result.verdict = Verdict.ERROR
+        return result
+
+    # ── Compute the HMAC-derived client_random ─────────────────────────────
+    digest = hmac.new(secret_key, bytes(hello), hashlib.sha256).digest()
+    timestamp = int(time.time())
+    ts_bytes = timestamp.to_bytes(4, "little")
+    new_random = bytearray(digest)
+    for i in range(4):
+        new_random[28 + i] ^= ts_bytes[i]
+    hello[random_offset:random_offset + 32] = new_random
+
+    # ── Send and validate the ServerHello ──────────────────────────────────
+    writer = None
     try:
         t0 = time.monotonic()
-        reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(host, port),
-            timeout=PROBE_TIMEOUT
-        )
-        rtt_connect = (time.monotonic() - t0) * 1000
-
-        writer.write(encrypted_payload)
-        await writer.drain()
-
-        msg_id = int(time.time() * 2**32) & ((1 << 63) - 1)
-        mtproto = struct.pack("<qqi", 0, msg_id, 4) + b"\xf1\x8e\x7e\xbe"
-        packet = b"\xef" + bytes([len(mtproto) // 4]) + mtproto
-        
-        writer.write(encryptor.update(packet))
-        await writer.drain()
-
         try:
-            resp = await asyncio.wait_for(reader.read(1024), timeout=5.0)
-            if len(resp) > 0:
-                result.handshake_ok = True
-                result.data_ok = True
-                result.rtt_ms = rtt_connect
-                result.verdict = Verdict.OK
-            else:
-                result.handshake_ok = True
-                result.data_ok = False
-                result.rtt_ms = rtt_connect
-                result.verdict = Verdict.HANDSHAKE_ONLY
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(host, port),
+                timeout=PROBE_TIMEOUT,
+            )
         except asyncio.TimeoutError:
-            result.handshake_ok = True
-            result.data_ok = False
-            result.rtt_ms = rtt_connect
-            result.verdict = Verdict.HANDSHAKE_ONLY
+            result.error = "tcp_timeout"
+            result.verdict = Verdict.BLOCKED
+            return result
+        except ConnectionRefusedError:
+            result.error = "connection_refused"
+            result.verdict = Verdict.BLOCKED
+            return result
+        except OSError as e:
+            result.error = str(e).lower()
+            result.verdict = Verdict.BLOCKED
+            return result
 
-        writer.close()
+        rtt_ms = (time.monotonic() - t0) * 1000
+
+        writer.write(bytes(hello))
         try:
-            await writer.wait_closed()
-        except Exception:
-            pass
+            await asyncio.wait_for(writer.drain(), timeout=5.0)
+        except (asyncio.TimeoutError, ConnectionResetError, BrokenPipeError) as e:
+            result.error = f"write_failed:{type(e).__name__}"
+            result.verdict = Verdict.BLOCKED
+            return result
 
-    except asyncio.TimeoutError:
-        result.error = "tcp_timeout"
-        result.verdict = Verdict.BLOCKED
-    except ConnectionRefusedError:
-        result.error = "connection_refused"
-        result.verdict = Verdict.BLOCKED
-    except OSError as e:
-        result.error = str(e).lower()
-        result.verdict = Verdict.BLOCKED
+        # Server response begins with a 5-byte TLS record header. mtg sends
+        # back ContentType=22 (Handshake), version=0x0303, then the
+        # ServerHello record. Any deviation (RST, plain HTTP error, raw
+        # fronted reply that didn't preserve the version) → not a real
+        # mtg responder.
+        try:
+            header = await asyncio.wait_for(reader.readexactly(5), timeout=5.0)
+        except asyncio.IncompleteReadError:
+            result.error = "no_response"
+            result.verdict = Verdict.BLOCKED
+            return result
+        except asyncio.TimeoutError:
+            result.error = "read_timeout"
+            result.verdict = Verdict.BLOCKED
+            return result
 
-    return result
+        if header[0] != 0x16 or header[1:3] != b"\x03\x03":
+            result.error = "not_tls_handshake_record"
+            result.verdict = Verdict.BLOCKED
+            return result
+
+        record_len = int.from_bytes(header[3:5], "big")
+        # Cap to a sane upper bound — a real ServerHello fits in well under
+        # 4 KiB; anything larger is a stalling middlebox or fronted bulk
+        # transfer.
+        if record_len == 0 or record_len > 8192:
+            result.error = f"bad_record_len:{record_len}"
+            result.verdict = Verdict.BLOCKED
+            return result
+
+        try:
+            record = await asyncio.wait_for(
+                reader.readexactly(record_len), timeout=5.0,
+            )
+        except asyncio.IncompleteReadError:
+            result.error = "short_serverhello"
+            result.verdict = Verdict.BLOCKED
+            return result
+        except asyncio.TimeoutError:
+            result.error = "read_timeout_body"
+            result.verdict = Verdict.BLOCKED
+            return result
+
+        # ServerHello starts with: type=0x02, 24-bit length, version(2),
+        # random(32), session_id_len(1), session_id... session_id MUST equal
+        # the one we sent (this is what distinguishes mtg from a domain-
+        # fronted google.com response, which would echo a different sid).
+        if len(record) < 38 or record[0] != 0x02:
+            result.error = "not_server_hello"
+            result.verdict = Verdict.BLOCKED
+            return result
+        sid_len = record[38]
+        if sid_len != 32 or len(record) < 39 + sid_len:
+            result.error = "bad_sid_len"
+            result.verdict = Verdict.BLOCKED
+            return result
+        echoed_sid = record[39:39 + sid_len]
+        if echoed_sid != session_id:
+            # google.com (the doppelganger fallback) does not echo our
+            # session_id — this branch is the smoking gun that we reached
+            # something OTHER than a real mtg responder for our secret.
+            result.error = "session_id_mismatch"
+            result.verdict = Verdict.BLOCKED
+            return result
+
+        # Handshake validated. Censprobe does not exercise the data plane
+        # (that would require a real Telegram DC dial-out), so the verdict
+        # is HANDSHAKE_ONLY — equivalent to the OpenVPN handshake-only
+        # path. Scoring weighs this strictly less than full OK.
+        result.handshake_ok = True
+        result.data_ok = False
+        result.rtt_ms = rtt_ms
+        result.verdict = Verdict.HANDSHAKE_ONLY
+        return result
+
+    finally:
+        if writer is not None:
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except Exception:
+                pass

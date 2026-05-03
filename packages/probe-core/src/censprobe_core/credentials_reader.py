@@ -15,7 +15,16 @@ import yaml
 
 @dataclass
 class ProtocolCredentials:
-    """Parsed credentials YAML received from the listener cred-server."""
+    """Parsed credentials YAML received from the listener cred-server.
+
+    Port fields default to 0 (sentinel for "not set in inbound YAML"); a
+    real value is always populated by :func:`parse_protocols_yaml` from
+    the YAML body the listener serves, which itself reflects the
+    listener's ``censprobe.yaml::protocols.ports``. A missing port in
+    the inbound YAML raises a parse error rather than falling back to a
+    historical default — the client and listener must agree on every
+    bind port for the probe to hit the right responder.
+    """
 
     # ``_protocols_enabled`` mirrors the listener's
     # ``censprobe.yaml::protocols.enabled`` list — the client uses it to
@@ -25,19 +34,19 @@ class ProtocolCredentials:
     _protocols_enabled: list[str] | None = None
 
     openvpn_psk_pem: str = ""
-    openvpn_port: int = 1194
+    openvpn_port: int = 0
 
     wg_server_public: str = ""
     wg_client_private: str = ""
     wg_client_public: str = ""
     wg_preshared_key: str = ""
-    wg_port: int = 51820
+    wg_port: int = 0
 
     awg_server_public: str = ""
     awg_client_private: str = ""
     awg_client_public: str = ""
     awg_preshared_key: str = ""
-    awg_port: int = 51821
+    awg_port: int = 0
     awg_jc: int = 4
     awg_jmin: int = 40
     awg_jmax: int = 70
@@ -48,31 +57,55 @@ class ProtocolCredentials:
     awg_h3: int = 0
     awg_h4: int = 0
 
-    ss_port: int = 8388
+    ss_port: int = 0
     ss_method: str = "2022-blake3-aes-256-gcm"
     ss_password_b64: str = ""
 
-    vless_port: int = 443
+    vless_port: int = 0
     vless_uuid: str = ""
     vless_pbk: str = ""
     vless_short_id: str = ""
     vless_server_name: str = "apimaps.yandex.ru"
 
-    hy2_port: int = 443
+    hy2_port: int = 0
     hy2_auth: str = ""
     hy2_obfs_password: str = ""
 
     mtproxy_secret: str = ""
-    mtproxy_port: int = 8443
+    mtproxy_port: int = 0
 
+
+
+def _required_port(section: dict[str, Any], proto: str) -> int:
+    """Extract ``port`` from a credentials-YAML protocol section.
+
+    A missing or non-int port is a hard error: the listener and client
+    must agree on every bind port for the probe to land on the right
+    responder. There are no fallback defaults — a stale or partial YAML
+    body from the cred-server is a bug worth surfacing immediately.
+    """
+    if "port" not in section:
+        raise ValueError(
+            f"credentials YAML missing {proto}.port — listener and client "
+            f"versions disagree on the credentials schema"
+        )
+    port = section["port"]
+    if not isinstance(port, int) or not (1 <= port <= 65535):
+        raise ValueError(
+            f"credentials YAML has invalid {proto}.port: {port!r}"
+        )
+    return port
 
 
 def parse_protocols_yaml(text: str) -> ProtocolCredentials:
     """Parse the credentials YAML body served by the listener cred-server.
 
-    An empty body → None, a YAML scalar → str/int/list. Either way calling
-    .get() on it would explode at the first access — coerce to {} so the
-    caller transparently gets all-default credentials instead of a crash.
+    Every protocol section is REQUIRED to carry its own ``port`` — the
+    parser raises ``ValueError`` on a missing port rather than falling
+    back to a hardcoded value. The listener-side ``ProtocolsConfig``
+    already validates port coverage at startup, so the only way to land
+    here with a missing port is a schema mismatch between the two ends;
+    silent defaults would mask exactly the bug we want to catch.
     """
     parsed = yaml.safe_load(text)
     raw: dict[str, Any] = parsed if isinstance(parsed, dict) else {}
@@ -87,21 +120,21 @@ def parse_protocols_yaml(text: str) -> ProtocolCredentials:
 
     ovpn = raw.get("openvpn", {})
     c.openvpn_psk_pem = ovpn.get("psk_pem", "")
-    c.openvpn_port = ovpn.get("port", 1194)
+    c.openvpn_port = _required_port(ovpn, "openvpn")
 
     wg = raw.get("wireguard", {})
     c.wg_server_public = wg.get("server_public_key", "")
     c.wg_client_private = wg.get("client_private_key", "")
     c.wg_client_public = wg.get("client_public_key", "")
     c.wg_preshared_key = wg.get("preshared_key", "")
-    c.wg_port = wg.get("port", 51820)
+    c.wg_port = _required_port(wg, "wireguard")
 
     awg = raw.get("amneziawg", {})
     c.awg_server_public = awg.get("server_public_key", "")
     c.awg_client_private = awg.get("client_private_key", "")
     c.awg_client_public = awg.get("client_public_key", "")
     c.awg_preshared_key = awg.get("preshared_key", "")
-    c.awg_port = awg.get("port", 51821)
+    c.awg_port = _required_port(awg, "amneziawg")
     c.awg_jc = awg.get("jc", 4)
     c.awg_jmin = awg.get("jmin", 40)
     c.awg_jmax = awg.get("jmax", 70)
@@ -113,24 +146,24 @@ def parse_protocols_yaml(text: str) -> ProtocolCredentials:
     c.awg_h4 = awg.get("h4", 0)
 
     ss = raw.get("shadowsocks", {})
-    c.ss_port = ss.get("port", 8388)
+    c.ss_port = _required_port(ss, "shadowsocks")
     c.ss_method = ss.get("method", "2022-blake3-aes-256-gcm")
     c.ss_password_b64 = ss.get("password_b64", "")
 
     vless = raw.get("vless_reality", {})
-    c.vless_port = vless.get("port", 443)
+    c.vless_port = _required_port(vless, "vless_reality")
     c.vless_uuid = vless.get("uuid", "")
     c.vless_pbk = vless.get("public_key", "")
     c.vless_short_id = vless.get("short_id", "")
     c.vless_server_name = vless.get("server_name", "apimaps.yandex.ru")
 
     hy2 = raw.get("hysteria2", {})
-    c.hy2_port = hy2.get("port", 443)
+    c.hy2_port = _required_port(hy2, "hysteria2")
     c.hy2_auth = hy2.get("auth", "")
     c.hy2_obfs_password = hy2.get("obfs_password", "")
 
     mtp = raw.get("mtproto_proxy", {})
     c.mtproxy_secret = mtp.get("secret", "")
-    c.mtproxy_port = mtp.get("port", 8443)
+    c.mtproxy_port = _required_port(mtp, "mtproto_proxy")
 
     return c

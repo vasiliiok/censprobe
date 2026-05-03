@@ -104,7 +104,11 @@ PROTOCOLS: tuple[ProtocolSpec, ...] = (
         name="mtproto_proxy",
         label="MTProto Proxy",
         transport="tcp",
-        default_port=443,
+        # 9443: kept off 443 (squatted by vless_reality + hysteria2) AND
+        # off 8443 (the listener's creds-server). Must match
+        # ``ProtocolCredentials.mtproxy_port`` so the responder-status
+        # table prints what the responder actually binds.
+        default_port=9443,
         uses_socks_echo=False,
     ),
 )
