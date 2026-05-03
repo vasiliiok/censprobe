@@ -115,7 +115,7 @@ def compute_scores(
 
     # ── Latency score ─────────────────────────────────────────────────────────
     # Based on median RTT to external resources
-    rtts = [r.rtt_ms for r in solo_results if r.rtt_ms and r.category in ("tcp", "http")]
+    rtts = [r.rtt_ms for r in solo_results if r.rtt_ms is not None and r.category in ("tcp", "http")]
     latency_score = _latency_to_score(rtts) / 100.0 if rtts else 0.5
 
     # ── Entry score ───────────────────────────────────────────────────────────
@@ -123,12 +123,12 @@ def compute_scores(
     #
     # Weights come from censprobe.yaml's scoring.entry section.
     w_e = weights.entry
-    scores.entry_score = round(
+    scores.entry_score = max(0.0, min(100.0, round(
         (proto_ok * w_e.protocol +
          uplink_quality * w_e.uplink +
          latency_score * w_e.latency) * 100.0,
         1,
-    )
+    )))
 
     # ── Exit score ────────────────────────────────────────────────────────────
     # exit = uplink·W_u + censorship·W_c   (×100)
@@ -145,21 +145,21 @@ def compute_scores(
         censorship_low = max(0.0, uplink_quality - 0.2)
     else:
         censorship_low = uplink_quality
-    scores.exit_score = round(
+    scores.exit_score = max(0.0, min(100.0, round(
         (uplink_quality * w_x.uplink +
          censorship_low * w_x.censorship) * 100.0,
         1,
-    )
+    )))
 
     # ── Relay score ───────────────────────────────────────────────────────────
     # relay = tcp·W_t + latency·W_l   (×100)
     w_r = weights.relay
     tcp_results = [r for r in solo_results if r.category == "tcp"]
     tcp_ok = _ok_pct(tcp_results) / 100.0
-    scores.relay_score = round(
+    scores.relay_score = max(0.0, min(100.0, round(
         (tcp_ok * w_r.tcp + latency_score * w_r.latency) * 100.0,
         1,
-    )
+    )))
 
     # ── Overall ───────────────────────────────────────────────────────────────
     scores.overall = round(max(scores.entry_score, scores.exit_score, scores.relay_score), 1)

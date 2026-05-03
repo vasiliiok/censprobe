@@ -62,6 +62,10 @@ class ProtocolCredentials:
     hy2_auth: str = ""
     hy2_obfs_password: str = ""
 
+    mtproxy_secret: str = ""
+    mtproxy_port: int = 8443
+
+
 
 def parse_protocols_yaml(text: str) -> ProtocolCredentials:
     """Parse the credentials YAML body served by the listener cred-server.
@@ -124,5 +128,9 @@ def parse_protocols_yaml(text: str) -> ProtocolCredentials:
     c.hy2_port = hy2.get("port", 443)
     c.hy2_auth = hy2.get("auth", "")
     c.hy2_obfs_password = hy2.get("obfs_password", "")
+
+    mtp = raw.get("mtproto_proxy", {})
+    c.mtproxy_secret = mtp.get("secret", "")
+    c.mtproxy_port = mtp.get("port", 8443)
 
     return c

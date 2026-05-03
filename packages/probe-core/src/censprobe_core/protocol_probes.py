@@ -53,6 +53,7 @@ __all__ = [
     "probe_shadowsocks",
     "probe_vless_reality",
     "probe_wireguard",
+    "probe_mtproto_proxy",
     "ping_echo",
     "proxy_echo",
 ]
@@ -894,5 +895,107 @@ async def _tunnel_via_singbox_or_xray(
         finally:
             await _stop_log_drain(drain_task)
             await graceful_terminate(proc)
+
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MTProto Proxy probe
+# ─────────────────────────────────────────────────────────────────────────────
+async def probe_mtproto_proxy(host: str, port: int, secret_hex: str) -> ProbeResult:
+    import hashlib
+    import os
+    import struct
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+
+    result = ProbeResult()
+
+    if secret_hex.startswith("dd"):
+        secret = bytes.fromhex(secret_hex[2:34])
+    elif secret_hex.startswith("ee"):
+        secret = bytes.fromhex(secret_hex[2:34])
+    else:
+        try:
+            secret = bytes.fromhex(secret_hex)
+        except ValueError:
+            result.error = "Invalid MTProxy secret format"
+            return result
+
+    init_payload = bytearray(os.urandom(64))
+
+    while init_payload[0] == 0xef or \
+          init_payload[:4] in (b'\x48\x4f\x53\x54', b'\x50\x4f\x53\x54', b'\x47\x45\x54\x20', b'\xee\xee\xee\xee') or \
+          init_payload[4:8] == b'\x00\x00\x00\x00':
+        init_payload = bytearray(os.urandom(64))
+
+    init_payload[56:60] = b'\xef\xef\xef\xef'
+
+    encrypt_key_base = init_payload[8:40]
+    encrypt_iv = bytes(init_payload[40:56])
+    
+    reversed_payload = init_payload[::-1]
+    decrypt_key_base = reversed_payload[8:40]
+    decrypt_iv = bytes(reversed_payload[40:56])
+
+    encrypt_key = hashlib.sha256(encrypt_key_base + secret).digest()
+    decrypt_key = hashlib.sha256(decrypt_key_base + secret).digest()
+
+    encryptor = Cipher(algorithms.AES(encrypt_key), modes.CTR(encrypt_iv)).encryptor()
+    decryptor = Cipher(algorithms.AES(decrypt_key), modes.CTR(decrypt_iv)).decryptor()
+
+    encrypted_payload = bytearray(init_payload)
+    encrypted_payload[56:64] = encryptor.update(init_payload[56:64])
+
+    try:
+        t0 = time.monotonic()
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port),
+            timeout=PROBE_TIMEOUT
+        )
+        rtt_connect = (time.monotonic() - t0) * 1000
+
+        writer.write(encrypted_payload)
+        await writer.drain()
+
+        msg_id = int(time.time() * 2**32) & ((1 << 63) - 1)
+        mtproto = struct.pack("<qqi", 0, msg_id, 4) + b"\xf1\x8e\x7e\xbe"
+        packet = b"\xef" + bytes([len(mtproto) // 4]) + mtproto
+        
+        writer.write(encryptor.update(packet))
+        await writer.drain()
+
+        try:
+            resp = await asyncio.wait_for(reader.read(1024), timeout=5.0)
+            if len(resp) > 0:
+                result.handshake_ok = True
+                result.data_ok = True
+                result.rtt_ms = rtt_connect
+                result.verdict = Verdict.OK
+            else:
+                result.handshake_ok = True
+                result.data_ok = False
+                result.rtt_ms = rtt_connect
+                result.verdict = Verdict.HANDSHAKE_ONLY
+        except asyncio.TimeoutError:
+            result.handshake_ok = True
+            result.data_ok = False
+            result.rtt_ms = rtt_connect
+            result.verdict = Verdict.HANDSHAKE_ONLY
+
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+
+    except asyncio.TimeoutError:
+        result.error = "tcp_timeout"
+        result.verdict = Verdict.BLOCKED
+    except ConnectionRefusedError:
+        result.error = "connection_refused"
+        result.verdict = Verdict.BLOCKED
+    except OSError as e:
+        result.error = str(e).lower()
+        result.verdict = Verdict.BLOCKED
 
     return result

@@ -25,6 +25,7 @@ from censprobe_core.protocol_probes import (
     probe_shadowsocks,
     probe_vless_reality,
     probe_wireguard,
+    probe_mtproto_proxy,
 )
 
 
@@ -81,6 +82,10 @@ def _probe_hysteria2(host: str, creds: ProtocolCredentials) -> Awaitable[ProbeRe
     )
 
 
+def _probe_mtproto_proxy(host: str, creds: ProtocolCredentials) -> Awaitable[ProbeResult]:
+    return probe_mtproto_proxy(host, creds.mtproxy_port, creds.mtproxy_secret)
+
+
 CLIENT_PROBES: dict[str, ProbeFactory] = {
     "openvpn": _probe_openvpn,
     "wireguard": _probe_wireguard,
@@ -88,4 +93,5 @@ CLIENT_PROBES: dict[str, ProbeFactory] = {
     "shadowsocks": _probe_shadowsocks,
     "vless_reality": _probe_vless_reality,
     "hysteria2": _probe_hysteria2,
+    "mtproto_proxy": _probe_mtproto_proxy,
 }

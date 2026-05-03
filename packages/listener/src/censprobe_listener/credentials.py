@@ -80,6 +80,11 @@ class ProtocolCredentials:
     hy2_auth: str = ""
     hy2_obfs_password: str = ""
 
+    # MTProto Proxy (mtg)
+    mtproxy_secret: str = ""
+    mtproxy_port: int = 8443
+
+
 
 def generate_credentials() -> ProtocolCredentials:
     """Generate fresh one-time credentials for all protocols."""
@@ -135,6 +140,13 @@ def generate_credentials() -> ProtocolCredentials:
     # Hysteria 2: random auth + obfs password
     creds.hy2_auth = secrets.token_urlsafe(24)
     creds.hy2_obfs_password = secrets.token_urlsafe(20)
+
+    # MTProto Proxy (mtg): Fake-TLS ('ee') secret
+    # Format: 'ee' + 16 random bytes (32 hex chars) + hex-encoded SNI domain.
+    # We use google.com as a safe default for domain fronting / SNI mimicry.
+    sni = b"google.com".hex()
+    random_part = secrets.token_hex(16)
+    creds.mtproxy_secret = f"ee{random_part}{sni}"
 
     return creds
 
@@ -211,6 +223,10 @@ def creds_to_yaml(
             "port": creds.hy2_port,
             "auth": creds.hy2_auth,
             "obfs_password": creds.hy2_obfs_password,
+        },
+        "mtproto_proxy": {
+            "port": creds.mtproxy_port,
+            "secret": creds.mtproxy_secret,
         },
     }
     return yaml.dump(data, allow_unicode=True, sort_keys=False)

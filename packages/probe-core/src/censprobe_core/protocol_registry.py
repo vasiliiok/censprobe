@@ -100,6 +100,13 @@ PROTOCOLS: tuple[ProtocolSpec, ...] = (
         default_port=443,
         uses_socks_echo=True,
     ),
+    ProtocolSpec(
+        name="mtproto_proxy",
+        label="MTProto Proxy",
+        transport="tcp",
+        default_port=443,
+        uses_socks_echo=False,
+    ),
 )
 
 

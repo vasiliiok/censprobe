@@ -25,6 +25,7 @@ from typing import Callable
 from censprobe_listener.credentials import ProtocolCredentials
 from censprobe_listener.echo_server import EchoServer
 from censprobe_listener.hysteria_wrapper import HysteriaResponder
+from censprobe_listener.mtproxy_responder import MTProxyResponder
 from censprobe_listener.openvpn_responder import OpenVPNResponder
 from censprobe_listener.ss_responder import ShadowsocksResponder
 from censprobe_listener.vless_reality_wrapper import VlessRealityResponder
@@ -84,6 +85,10 @@ def _factory_hysteria2(creds: ProtocolCredentials, echo: EchoServer | None) -> o
     return r
 
 
+def _factory_mtproto_proxy(creds: ProtocolCredentials, _echo: EchoServer | None) -> object:
+    return MTProxyResponder(creds.mtproxy_port, creds.mtproxy_secret)
+
+
 # Mapping is keyed by the same canonical name as
 # :data:`censprobe_core.protocol_registry.PROTOCOLS`. Missing entries
 # (a name in the protocol registry without a factory here) raise a
@@ -95,4 +100,5 @@ LISTENER_RESPONDERS: dict[str, ResponderFactory] = {
     "shadowsocks": _factory_shadowsocks,
     "vless_reality": _factory_vless_reality,
     "hysteria2": _factory_hysteria2,
+    "mtproto_proxy": _factory_mtproto_proxy,
 }

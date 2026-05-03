@@ -43,6 +43,15 @@ RUN git clone https://github.com/amnezia-vpn/amneziawg-go.git /tmp/awg-go && \
     install -m 0755 amneziawg-go /usr/local/bin/amneziawg-go && \
     rm -rf /tmp/awg-go /root/.cache/go-build /root/go
 
+# Build mtg (MTProto-proxy) → /usr/local/bin/mtg.
+# mtg v2 uses `make mtg` to build the binary in the root of the project.
+ARG MTG_COMMIT=b80f0c0ee8cb1ab4a5f4f8101a9386fc751a084c
+RUN git clone https://github.com/9seconds/mtg.git /tmp/mtg && \
+    git -C /tmp/mtg checkout "${MTG_COMMIT}" && \
+    cd /tmp/mtg && make mtg && \
+    install -m 0755 mtg /usr/local/bin/mtg && \
+    rm -rf /tmp/mtg /root/.cache/go-build /root/go
+
 # ── Stage 2: runtime image ───────────────────────────────────────────────────
 FROM python:3.12-slim@sha256:46cb7cc2877e60fbd5e21a9ae6115c30ace7a077b9f8772da879e4590c18c2e3
 
@@ -110,6 +119,7 @@ COPY --from=awg-builder \
     /usr/local/bin/awg \
     /usr/local/bin/awg-quick \
     /usr/local/bin/amneziawg-go \
+    /usr/local/bin/mtg \
     /usr/local/bin/
 
 ENV WG_QUICK_USERSPACE_IMPLEMENTATION=amneziawg-go
