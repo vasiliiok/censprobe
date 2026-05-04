@@ -33,13 +33,6 @@ logger = logging.getLogger(__name__)
 
 PROBE_TIMEOUT = 15.0
 
-# Throughput probe constants. Operator-overridable via
-# ``censprobe.yaml::throughput.target_bytes`` and
-# ``censprobe.yaml::throughput.timeout_sec``. 1 MiB / 30 s ⇒ the
-# floor of "throttled" detection sits at ~270 kbps.
-THROUGHPUT_BYTES = 1 * 1024 * 1024
-THROUGHPUT_TIMEOUT_SEC = 30.0
-
 # Re-exported so existing callers that did `from
 # censprobe_core.protocol_probes import ECHO_PORTS` keep working — the
 # canonical home is censprobe_core.echo_ports.
@@ -83,9 +76,10 @@ class ProbeResult:
     # is for operator inspection (CLI + dashboard) only.
     throughput_mbps: float | None = None
     # True iff the throughput download didn't complete inside
-    # ``THROUGHPUT_TIMEOUT_SEC``. That's a strong indication the data
-    # plane is heavily throttled — but it can also fire on a server with
-    # < 270 kbps uplink, so the flag is informational, not a verdict.
+    # ``cfg.throughput.timeout_sec``. That's a strong indication the
+    # data plane is heavily throttled — but it can also fire on a
+    # server with a small uplink, so the flag is informational, not a
+    # verdict.
     throughput_throttled: bool = False
 
 
@@ -358,8 +352,9 @@ async def proxy_echo(
 #   mbps:      client-measured download rate in Mbps; None if the curl
 #              call failed for any reason other than timeout.
 #   throttled: True iff curl exited 28 (operation timed out), i.e. the
-#              tunnel could not deliver THROUGHPUT_BYTES inside the
-#              window. Caller surfaces this as a flag, not a verdict.
+#              tunnel could not deliver cfg.throughput.target_bytes
+#              inside the window. Caller surfaces this as a flag, not a
+#              verdict.
 # ─────────────────────────────────────────────────────────────────────────────
 async def proxy_throughput(
     proxy_port: int,
@@ -384,6 +379,8 @@ async def proxy_throughput(
     from censprobe_core.config import get_config
 
     tcfg = get_config().throughput
+    if not tcfg.enabled:
+        return None, False
     n_bytes = target_bytes if target_bytes is not None else tcfg.target_bytes
     n_timeout = timeout if timeout is not None else tcfg.timeout_sec
     cmd = [

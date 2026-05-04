@@ -29,8 +29,8 @@ class ProtocolCredentials:
     # ``_protocols_enabled`` mirrors the listener's
     # ``censprobe.yaml::protocols.enabled`` list — the client uses it to
     # avoid probing a protocol the listener didn't bring up. ``None``
-    # means "old listener that didn't advertise the field" → client
-    # falls back to every registered probe.
+    # means the listener didn't advertise the field → the client falls
+    # back to whichever protocol sections were present in the YAML.
     _protocols_enabled: list[str] | None = None
 
     openvpn_psk_pem: str = ""
@@ -100,12 +100,15 @@ def _required_port(section: dict[str, Any], proto: str) -> int:
 def parse_protocols_yaml(text: str) -> ProtocolCredentials:
     """Parse the credentials YAML body served by the listener cred-server.
 
-    Every protocol section is REQUIRED to carry its own ``port`` — the
-    parser raises ``ValueError`` on a missing port rather than falling
-    back to a hardcoded value. The listener-side ``ProtocolsConfig``
-    already validates port coverage at startup, so the only way to land
-    here with a missing port is a schema mismatch between the two ends;
-    silent defaults would mask exactly the bug we want to catch.
+    A protocol section that is PRESENT in the YAML must carry a valid
+    ``port`` — otherwise the listener and client disagree on the schema
+    and we want that to fail loud. A protocol section that is ABSENT is
+    treated as "this listener didn't bring up that protocol" — its port
+    fields stay at the dataclass default of ``0`` and the client uses
+    ``_protocols_enabled`` (or the explicit absence of the section) to
+    skip the corresponding probe. That way an operator who sets
+    ``protocols.enabled`` to a strict subset of the registry doesn't
+    break credential parsing.
     """
     parsed = yaml.safe_load(text)
     raw: dict[str, Any] = parsed if isinstance(parsed, dict) else {}
@@ -118,52 +121,59 @@ def parse_protocols_yaml(text: str) -> ProtocolCredentials:
     if isinstance(enabled, list):
         c._protocols_enabled = [str(x) for x in enabled if isinstance(x, str)]
 
-    ovpn = raw.get("openvpn", {})
-    c.openvpn_psk_pem = ovpn.get("psk_pem", "")
-    c.openvpn_port = _required_port(ovpn, "openvpn")
+    if "openvpn" in raw:
+        ovpn = raw["openvpn"] or {}
+        c.openvpn_psk_pem = ovpn.get("psk_pem", "")
+        c.openvpn_port = _required_port(ovpn, "openvpn")
 
-    wg = raw.get("wireguard", {})
-    c.wg_server_public = wg.get("server_public_key", "")
-    c.wg_client_private = wg.get("client_private_key", "")
-    c.wg_client_public = wg.get("client_public_key", "")
-    c.wg_preshared_key = wg.get("preshared_key", "")
-    c.wg_port = _required_port(wg, "wireguard")
+    if "wireguard" in raw:
+        wg = raw["wireguard"] or {}
+        c.wg_server_public = wg.get("server_public_key", "")
+        c.wg_client_private = wg.get("client_private_key", "")
+        c.wg_client_public = wg.get("client_public_key", "")
+        c.wg_preshared_key = wg.get("preshared_key", "")
+        c.wg_port = _required_port(wg, "wireguard")
 
-    awg = raw.get("amneziawg", {})
-    c.awg_server_public = awg.get("server_public_key", "")
-    c.awg_client_private = awg.get("client_private_key", "")
-    c.awg_client_public = awg.get("client_public_key", "")
-    c.awg_preshared_key = awg.get("preshared_key", "")
-    c.awg_port = _required_port(awg, "amneziawg")
-    c.awg_jc = awg.get("jc", 4)
-    c.awg_jmin = awg.get("jmin", 40)
-    c.awg_jmax = awg.get("jmax", 70)
-    c.awg_s1 = awg.get("s1", 0)
-    c.awg_s2 = awg.get("s2", 0)
-    c.awg_h1 = awg.get("h1", 0)
-    c.awg_h2 = awg.get("h2", 0)
-    c.awg_h3 = awg.get("h3", 0)
-    c.awg_h4 = awg.get("h4", 0)
+    if "amneziawg" in raw:
+        awg = raw["amneziawg"] or {}
+        c.awg_server_public = awg.get("server_public_key", "")
+        c.awg_client_private = awg.get("client_private_key", "")
+        c.awg_client_public = awg.get("client_public_key", "")
+        c.awg_preshared_key = awg.get("preshared_key", "")
+        c.awg_port = _required_port(awg, "amneziawg")
+        c.awg_jc = awg.get("jc", 4)
+        c.awg_jmin = awg.get("jmin", 40)
+        c.awg_jmax = awg.get("jmax", 70)
+        c.awg_s1 = awg.get("s1", 0)
+        c.awg_s2 = awg.get("s2", 0)
+        c.awg_h1 = awg.get("h1", 0)
+        c.awg_h2 = awg.get("h2", 0)
+        c.awg_h3 = awg.get("h3", 0)
+        c.awg_h4 = awg.get("h4", 0)
 
-    ss = raw.get("shadowsocks", {})
-    c.ss_port = _required_port(ss, "shadowsocks")
-    c.ss_method = ss.get("method", "2022-blake3-aes-256-gcm")
-    c.ss_password_b64 = ss.get("password_b64", "")
+    if "shadowsocks" in raw:
+        ss = raw["shadowsocks"] or {}
+        c.ss_port = _required_port(ss, "shadowsocks")
+        c.ss_method = ss.get("method", "2022-blake3-aes-256-gcm")
+        c.ss_password_b64 = ss.get("password_b64", "")
 
-    vless = raw.get("vless_reality", {})
-    c.vless_port = _required_port(vless, "vless_reality")
-    c.vless_uuid = vless.get("uuid", "")
-    c.vless_pbk = vless.get("public_key", "")
-    c.vless_short_id = vless.get("short_id", "")
-    c.vless_server_name = vless.get("server_name", "apimaps.yandex.ru")
+    if "vless_reality" in raw:
+        vless = raw["vless_reality"] or {}
+        c.vless_port = _required_port(vless, "vless_reality")
+        c.vless_uuid = vless.get("uuid", "")
+        c.vless_pbk = vless.get("public_key", "")
+        c.vless_short_id = vless.get("short_id", "")
+        c.vless_server_name = vless.get("server_name", "apimaps.yandex.ru")
 
-    hy2 = raw.get("hysteria2", {})
-    c.hy2_port = _required_port(hy2, "hysteria2")
-    c.hy2_auth = hy2.get("auth", "")
-    c.hy2_obfs_password = hy2.get("obfs_password", "")
+    if "hysteria2" in raw:
+        hy2 = raw["hysteria2"] or {}
+        c.hy2_port = _required_port(hy2, "hysteria2")
+        c.hy2_auth = hy2.get("auth", "")
+        c.hy2_obfs_password = hy2.get("obfs_password", "")
 
-    mtp = raw.get("mtproto_proxy", {})
-    c.mtproxy_secret = mtp.get("secret", "")
-    c.mtproxy_port = _required_port(mtp, "mtproto_proxy")
+    if "mtproto_proxy" in raw:
+        mtp = raw["mtproto_proxy"] or {}
+        c.mtproxy_secret = mtp.get("secret", "")
+        c.mtproxy_port = _required_port(mtp, "mtproto_proxy")
 
     return c

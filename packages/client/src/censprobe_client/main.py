@@ -7,7 +7,7 @@ Lifecycle:
      all of these).
   2. Fetch credentials from the listener's one-shot HTTPS endpoint,
      pinning the cert via SHA-256 fingerprint.
-  3. Run handshake probes for all 6 protocols (with jitter between them).
+  3. Run handshake probes for every enabled protocol (with jitter between them).
   4. Print results to stdout — NO git commits, NO network writes.
   5. Exit.
 
@@ -28,6 +28,7 @@ import random
 import socket
 import ssl
 import sys
+from pathlib import Path
 
 import click
 from rich.console import Console
@@ -35,11 +36,14 @@ from rich.logging import RichHandler
 from rich.panel import Panel
 from rich.table import Table
 
+from censprobe_core.config import load_config
 from censprobe_core.credentials_reader import parse_protocols_yaml
 from censprobe_core.models import Verdict
 from censprobe_core.protocol_probes import ProbeResult
 from censprobe_core.protocol_registry import enabled_protocols, known_names
 from censprobe_client._probe_dispatch import CLIENT_PROBES
+
+WORKSPACE = Path("/workspace")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -123,6 +127,17 @@ async def _async_main(
     creds_cert_sha256: str,
     no_jitter: bool,
 ) -> dict[str, ProbeResult]:
+    # ── Step 0: Load top-level config ────────────────────────────────────────
+    # proxy_throughput (called from the SS / VLESS+Reality / Hysteria-2
+    # probes after a successful echo) reads target_bytes / timeout_sec
+    # from cfg.throughput. Without this call get_config() raises and the
+    # broad except in the per-probe loop turns OK verdicts into ERROR.
+    try:
+        load_config(WORKSPACE)
+    except ValueError as e:
+        console.print(f"[red]Config error:[/red] {e}")
+        sys.exit(1)
+
     # ── Step 1: Fetch credentials from listener's one-shot HTTPS endpoint ────
     console.print(f"[dim]Fetching credentials from https://{server_host}:{creds_port}/creds...[/dim]")
     try:

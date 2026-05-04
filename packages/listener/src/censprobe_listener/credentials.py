@@ -197,11 +197,64 @@ def generate_credentials(ports: dict[str, int]) -> ProtocolCredentials:
     return creds
 
 
+_SECTION_BUILDERS: dict[str, Any] = {
+    "openvpn": lambda c: {
+        "port": c.openvpn_port,
+        "protocol": "udp",
+        "psk_pem": c.openvpn_psk_pem,
+    },
+    "wireguard": lambda c: {
+        "port": c.wg_port,
+        "server_public_key": c.wg_server_public,
+        "client_private_key": c.wg_client_private,
+        "client_public_key": c.wg_client_public,
+        "preshared_key": c.wg_preshared_key,
+    },
+    "amneziawg": lambda c: {
+        "port": c.awg_port,
+        "server_public_key": c.awg_server_public,
+        "client_private_key": c.awg_client_private,
+        "client_public_key": c.awg_client_public,
+        "preshared_key": c.awg_preshared_key,
+        "jc": c.awg_jc,
+        "jmin": c.awg_jmin,
+        "jmax": c.awg_jmax,
+        "s1": c.awg_s1,
+        "s2": c.awg_s2,
+        "h1": c.awg_h1,
+        "h2": c.awg_h2,
+        "h3": c.awg_h3,
+        "h4": c.awg_h4,
+    },
+    "shadowsocks": lambda c: {
+        "port": c.ss_port,
+        "method": c.ss_method,
+        "password_b64": c.ss_password_b64,
+    },
+    "vless_reality": lambda c: {
+        "port": c.vless_port,
+        "uuid": c.vless_uuid,
+        "public_key": c.vless_pbk,
+        "short_id": c.vless_short_id,
+        "server_name": c.vless_server_name,
+    },
+    "hysteria2": lambda c: {
+        "port": c.hy2_port,
+        "auth": c.hy2_auth,
+        "obfs_password": c.hy2_obfs_password,
+    },
+    "mtproto_proxy": lambda c: {
+        "port": c.mtproxy_port,
+        "secret": c.mtproxy_secret,
+    },
+}
+
+
 def creds_to_yaml(
     creds: ProtocolCredentials,
     enabled_protocols: list[str] | None = None,
 ) -> str:
-    """Serialise the full credential set (server + client material) for the
+    """Serialise the credential set (server + client material) for the
     one-shot HTTPS endpoint.
 
     Server-private keys (WG/AWG server_private, Reality private_key) are
@@ -214,67 +267,28 @@ def creds_to_yaml(
     sides parse the same YAML schema.
 
     ``enabled_protocols`` is the operator-configured subset the listener
-    actually started. The client mirrors this exact list so we never
-    probe a protocol the listener didn't bring up. ``None`` means "all
-    six historical protocols" — which is what an old listener would
-    naturally produce, so a new client paired with an old listener
-    keeps working.
+    actually started. Only those sections are emitted, so a protocol the
+    operator removed from ``protocols.enabled`` (and therefore from
+    ``protocols.ports``) does not show up in the YAML at all — the client
+    sees the absence via ``_protocols_enabled`` and skips that probe.
+    ``None`` means "every protocol this listener knows about", which
+    matches the historical no-filter behaviour. Listener and client
+    upgrade in lockstep (same docker-compose image), so the schema is
+    versioned by deployment, not by best-effort back-compat.
     """
+    if enabled_protocols is None:
+        names = list(_SECTION_BUILDERS.keys())
+    else:
+        names = [n for n in enabled_protocols if n in _SECTION_BUILDERS]
+
     data: dict[str, Any] = {
         "_note": "One-time test credentials. Do not use for production VPN.",
         "_protocols_enabled": list(enabled_protocols)
         if enabled_protocols is not None
         else None,
-        "openvpn": {
-            "port": creds.openvpn_port,
-            "protocol": "udp",
-            "psk_pem": creds.openvpn_psk_pem,
-        },
-        "wireguard": {
-            "port": creds.wg_port,
-            "server_public_key": creds.wg_server_public,
-            "client_private_key": creds.wg_client_private,
-            "client_public_key": creds.wg_client_public,
-            "preshared_key": creds.wg_preshared_key,
-        },
-        "amneziawg": {
-            "port": creds.awg_port,
-            "server_public_key": creds.awg_server_public,
-            "client_private_key": creds.awg_client_private,
-            "client_public_key": creds.awg_client_public,
-            "preshared_key": creds.awg_preshared_key,
-            "jc": creds.awg_jc,
-            "jmin": creds.awg_jmin,
-            "jmax": creds.awg_jmax,
-            "s1": creds.awg_s1,
-            "s2": creds.awg_s2,
-            "h1": creds.awg_h1,
-            "h2": creds.awg_h2,
-            "h3": creds.awg_h3,
-            "h4": creds.awg_h4,
-        },
-        "shadowsocks": {
-            "port": creds.ss_port,
-            "method": creds.ss_method,
-            "password_b64": creds.ss_password_b64,
-        },
-        "vless_reality": {
-            "port": creds.vless_port,
-            "uuid": creds.vless_uuid,
-            "public_key": creds.vless_pbk,
-            "short_id": creds.vless_short_id,
-            "server_name": creds.vless_server_name,
-        },
-        "hysteria2": {
-            "port": creds.hy2_port,
-            "auth": creds.hy2_auth,
-            "obfs_password": creds.hy2_obfs_password,
-        },
-        "mtproto_proxy": {
-            "port": creds.mtproxy_port,
-            "secret": creds.mtproxy_secret,
-        },
     }
+    for name in names:
+        data[name] = _SECTION_BUILDERS[name](creds)
     return yaml.dump(data, allow_unicode=True, sort_keys=False)
 
 

@@ -90,6 +90,13 @@ services:
       - "/dev/net/tun:/dev/net/tun"
     environment:
       CREDS_PORT: ${CREDS_PORT}
+    # Mount the repo so the client can load censprobe.yaml at startup —
+    # the throughput probe (proxy_throughput) reads target_bytes /
+    # timeout_sec from cfg.throughput, and load_config() must run before
+    # any successful SS / VLESS+Reality / Hysteria-2 probe.
+    volumes:
+      - ./:/workspace
+    working_dir: /workspace
     restart: "no"
 
   # ─────────────────────────────────────────────────────────────────
