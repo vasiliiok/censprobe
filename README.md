@@ -87,13 +87,13 @@ git clone https://github.com/<YOUR_GITHUB_USERNAME>/censprobe.git
 cd censprobe
 ```
 
-Файл `.env` в репо коммитится с placeholder'ами для localhost-only сервисов (Postgres / Grafana). **Перед `docker compose up` для dashboard-профиля нужно заполнить**:
+Файл `.env` в репо коммитится с safe defaults для localhost-only сервисов (Postgres / Grafana) — `docker compose up` работает out of the box. Если разворачиваете dashboard на машине, до которой кто-то может дотянуться по сети, перегенерируйте пароли локально:
 
 ```bash
 # Сгенерировать пароль для Postgres
-sed -i "s/^DB_PASSWORD=$/DB_PASSWORD=$(openssl rand -base64 24)/" .env
+sed -i -E "s/^DB_PASSWORD=.*/DB_PASSWORD=$(openssl rand -base64 24)/" .env
 # Установить Grafana admin пароль
-sed -i "s/^GRAFANA_PASSWORD=$/GRAFANA_PASSWORD=$(openssl rand -base64 16)/" .env
+sed -i -E "s/^GRAFANA_PASSWORD=.*/GRAFANA_PASSWORD=$(openssl rand -base64 16)/" .env
 ```
 
 Опционально — ASN/geo enrichment через ipapi.is:
@@ -411,7 +411,7 @@ docker compose --profile dashboard up -d
 ```
 
 1. Откройте `http://localhost:3000`.
-2. Логин — `admin`, пароль — из `GRAFANA_PASSWORD` в `.env` (заполните перед `up`).
+2. Логин — `admin`, пароль — из `GRAFANA_PASSWORD` в `.env` (default: `admin`; перегенерируйте при удалённом доступе).
 3. Чтобы подтянуть новые отчёты — выполните `git pull` в репо. `sync-api` сканирует `reports/` в фоне (`CENSPROBE_IMPORT_INTERVAL_SEC`, дефолт 60 с) и импортирует новые `.json` в Postgres автоматически.
 
 ### Grafana stripped to dashboards-only
@@ -456,15 +456,15 @@ Schema создаётся при первом старте через SQLAlchemy
 
 ## Переменные окружения (`.env`)
 
-`.env` — статическая конфигурация (порты, пароли, ключи, тюнинг). Закоммичен в репо с placeholder'ами. Per-run параметры (`--test-id`, `--session-id` и т.д.) — CLI-аргументы `docker compose run`, не env.
+`.env` — статическая конфигурация (порты, пароли, ключи, тюнинг). Закоммичен в репо с safe defaults для localhost-only сервисов. Per-run параметры (`--test-id`, `--session-id` и т.д.) — CLI-аргументы `docker compose run`, не env.
 
 | Переменная | Профили | Дефолт в `.env` | Описание |
 |------------|---------|-----------------|----------|
 | `DOCKERHUB_USERNAME` | все | `outtakes` | Docker Hub аккаунт, из которого pull-ятся образы. Поменяйте на свой при fork'е. |
 | `DOCKERHUB_TAG` | все | `main` | Тег образа. |
 | `CREDS_PORT` | listener, client | `8443` | Порт credentials-эндпоинта на listener'е. |
-| `DB_PASSWORD` | dashboard | (пустой) | **Заполните** перед `up dashboard`. Postgres password (loopback-only сервис). |
-| `GRAFANA_PASSWORD` | dashboard | (пустой) | **Заполните** перед `up dashboard`. `GF_SECURITY_ADMIN_PASSWORD` для admin Grafana. |
+| `DB_PASSWORD` | dashboard | (случайный 32-hex) | Postgres password. Loopback-only сервис; перегенерируйте при удалённом доступе. |
+| `GRAFANA_PASSWORD` | dashboard | `admin` | `GF_SECURITY_ADMIN_PASSWORD` для admin Grafana. Перегенерируйте при удалённом доступе. |
 | `DATABASE_URL` | dashboard | (закомментирован) | Опциональный override `sync-api → postgres` URL для external DB. |
 | `RUNS_COUNT` | solo | `3` | Количество повторных замеров (solo). |
 | `CENSPROBE_IMPORT_INTERVAL_SEC` | dashboard | `60` | Интервал импорта отчётов в Postgres (с). |
@@ -616,7 +616,7 @@ gh pr create  # или через GitHub UI
 
 ```
 censprobe/
-├── .env                              # static config с placeholder'ами (заполнить локально)
+├── .env                              # static config с safe defaults (override локально перед удалённым деплоем)
 ├── docker-compose.yml                # 4 профиля: solo, listener, client, dashboard
 ├── censprobe.yaml                    # все runtime knobs (валидируется CensprobeConfig)
 ├── pyproject.toml                    # workspace deps + ruff/mypy/bandit/pytest/coverage конфиги
