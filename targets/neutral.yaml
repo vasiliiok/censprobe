@@ -1,0 +1,68 @@
+# Neutral targets — not blocked in Russia (VK, Yandex, Wikipedia)
+# Used for baseline mixing, MTU tests, and negative controls
+
+targets:
+  - domain: vk.com
+    urls:
+      - https://vk.com/
+    expected_status: 200
+    category: neutral
+    notes: "Russian social network — should be fully accessible"
+
+  - domain: yandex.ru
+    urls:
+      - https://yandex.ru/
+    expected_status: 200
+    category: neutral
+    notes: "Russian search engine — fully accessible"
+
+  - domain: wikipedia.org
+    urls:
+      - https://ru.wikipedia.org/wiki/%D0%97%D0%B0%D0%B3%D0%BB%D0%B0%D0%B2%D0%BD%D0%B0%D1%8F_%D1%81%D1%82%D1%80%D0%B0%D0%BD%D0%B8%D1%86%D0%B0
+      - https://en.wikipedia.org/
+    expected_status: 200
+    category: neutral
+    notes: "Wikipedia — previously blocked in RU 2017, now accessible"
+
+  - domain: google.com
+    urls:
+      - https://www.google.com/
+    expected_status: 200
+    category: neutral
+    notes: "Google — accessible from RU (unlike YouTube CDN)"
+
+  - domain: cloudflare.com
+    urls:
+      - https://www.cloudflare.com/cdn-cgi/trace
+    expected_status: 200
+    category: neutral
+    notes: "Used for exit-IP and ASN detection"
+
+  - domain: crypto.cloudflare.com
+    urls:
+      - https://crypto.cloudflare.com/cdn-cgi/trace
+    expected_status: 200
+    category: neutral
+    ech_advertised: true
+    notes: "ECH reference: Cloudflare domain that advertises ECH in its HTTPS record. Used to detect ТСПУ ECH blocking — should be OK from clean jurisdictions, BLOCKED if ТСПУ drops ECH ClientHellos."
+
+# Cross-vendor TCP reachability targets — used by modules/tcp.py to compute
+# raw uplink connectivity (relay_score in scoring.py). Public DNS resolvers are
+# the most stable choice: each provider owns its anycast IPs, so blocking any
+# one of them is a deliberate per-vendor decision and signals exactly that.
+# Telegram DC TCP probes live in modules/telegram.py — keeping them out of
+# here avoids double-counting Telegram reachability into the TCP score.
+tcp_targets:
+  - {ip: "1.1.1.1",  port: 443, name: "cloudflare_dns_443"}
+  - {ip: "1.1.1.1",  port: 853, name: "cloudflare_dot_853"}
+  - {ip: "8.8.8.8",  port: 443, name: "google_dns_443"}
+  - {ip: "8.8.8.8",  port: 853, name: "google_dot_853"}
+  - {ip: "9.9.9.9",  port: 443, name: "quad9_dns_443"}
+  - {ip: "77.88.8.8", port: 443, name: "yandex_dns_443"}
+
+# Note: DNS resolver lists (PUBLIC_RESOLVERS / DOH_RESOLVERS / DOT_RESOLVERS)
+# live in modules/dns.py as constants — wiring them through YAML would be
+# pointless overhead since changing the resolvers requires a code release
+# anyway (verdict logic is tied to the specific providers).
+#
+# Method-B throttling endpoints live in modules/throttling.py:_METHOD_B_CONFIG.

@@ -1,0 +1,23 @@
+extends: default
+rules:
+  line-length:
+    max: 200
+  document-start: disable
+  truthy:
+    # GitHub Actions uses `on:` as a mapping key, which yamllint flags as a
+    # truthy value without this setting. check-keys: false lets bare `on` and
+    # `off` appear as keys (YAML spec allows it; it's just not idiomatic outside
+    # of CI systems).
+    allowed-values: ['true', 'false']
+    check-keys: false
+  colons:
+    max-spaces-before: 0
+    # -1 means no upper limit — allows alignment spacing in config files
+    # like censprobe.yaml where extra spaces after colons improve readability.
+    max-spaces-after: -1
+  commas:
+    max-spaces-before: 0
+    min-spaces-after: 1
+    # -1 means no upper limit — allows alignment in YAML flow-style mappings
+    # (e.g. {ip: "1.1.1.1",  port: 443} where the double-space aids alignment).
+    max-spaces-after: -1

@@ -1,0 +1,287 @@
+{
+  "title": "06 — Analytics & Compare",
+  "uid": "censprobe-06",
+  "tags": [
+    "censprobe"
+  ],
+  "schemaVersion": 39,
+  "version": 5,
+  "refresh": "30s",
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "group_by",
+        "label": "Group By",
+        "type": "custom",
+        "options": [
+          {
+            "selected": true,
+            "text": "Company",
+            "value": "test_runs.server_meta->'asn'->>'org'"
+          },
+          {
+            "selected": false,
+            "text": "ASN",
+            "value": "'AS' || (test_runs.server_meta->'asn'->>'asn')"
+          },
+          {
+            "selected": false,
+            "text": "Datacenter",
+            "value": "COALESCE(test_runs.server_meta->'datacenter'->>'name', 'No DC')"
+          },
+          {
+            "selected": false,
+            "text": "Country",
+            "value": "test_runs.server_meta->'location'->>'country_code'"
+          },
+          {
+            "selected": false,
+            "text": "City",
+            "value": "test_runs.server_meta->'location'->>'city'"
+          },
+          {
+            "selected": false,
+            "text": "Server ID",
+            "value": "test_runs.test_id"
+          }
+        ],
+        "query": "test_runs.server_meta->'asn'->>'org','AS' || (test_runs.server_meta->'asn'->>'asn'),COALESCE(test_runs.server_meta->'datacenter'->>'name', 'No DC'),test_runs.server_meta->'location'->>'country_code',test_runs.server_meta->'location'->>'city',test_runs.test_id"
+      },
+      {
+        "name": "var_company",
+        "label": "Company Filter",
+        "type": "query",
+        "datasource": {
+          "type": "postgres",
+          "uid": "DS_CENSPROBE_PG"
+        },
+        "query": "SELECT DISTINCT server_meta->'asn'->>'org' FROM test_runs WHERE server_meta->'asn'->>'org' IS NOT NULL",
+        "multi": true,
+        "includeAll": true,
+        "allValue": "ALL"
+      },
+      {
+        "name": "var_asn",
+        "label": "ASN Filter",
+        "type": "query",
+        "datasource": {
+          "type": "postgres",
+          "uid": "DS_CENSPROBE_PG"
+        },
+        "query": "SELECT DISTINCT 'AS' || (server_meta->'asn'->>'asn') FROM test_runs WHERE server_meta->'asn'->>'asn' IS NOT NULL",
+        "multi": true,
+        "includeAll": true,
+        "allValue": "ALL"
+      },
+      {
+        "name": "var_datacenter",
+        "label": "Datacenter Filter",
+        "type": "query",
+        "datasource": {
+          "type": "postgres",
+          "uid": "DS_CENSPROBE_PG"
+        },
+        "query": "SELECT DISTINCT COALESCE(server_meta->'datacenter'->>'name', 'No DC') FROM test_runs",
+        "multi": true,
+        "includeAll": true,
+        "allValue": "ALL"
+      },
+      {
+        "name": "var_country",
+        "label": "Country Filter",
+        "type": "query",
+        "datasource": {
+          "type": "postgres",
+          "uid": "DS_CENSPROBE_PG"
+        },
+        "query": "SELECT DISTINCT server_meta->'location'->>'country_code' FROM test_runs WHERE server_meta->'location'->>'country_code' IS NOT NULL",
+        "multi": true,
+        "includeAll": true,
+        "allValue": "ALL"
+      },
+      {
+        "name": "var_test_id",
+        "label": "Test ID Filter",
+        "type": "query",
+        "datasource": {
+          "type": "postgres",
+          "uid": "DS_CENSPROBE_PG"
+        },
+        "query": "SELECT test_id FROM test_runs",
+        "multi": true,
+        "includeAll": true,
+        "allValue": "ALL"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 100,
+      "title": "Other dashboards",
+      "type": "text",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 2
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "**Jump to:** [01 Overview](/d/censprobe-01) · [02 Blocking Matrix](/d/censprobe-02) · [03 Telegram](/d/censprobe-03) · [04 Protocol Reachability](/d/censprobe-04) · [05 Technique Attribution](/d/censprobe-05) · [06 Analytics & Compare](/d/censprobe-06) · [07 Cloudflare & WARP](/d/censprobe-07) · [08 QUIC & ECH](/d/censprobe-08) · [09 DNS](/d/censprobe-09) · [10 TLS](/d/censprobe-10)"
+      }
+    },
+    {
+      "id": 1,
+      "title": "Average Scores by Group",
+      "type": "barchart",
+      "gridPos": {
+        "x": 0,
+        "y": 2,
+        "w": 16,
+        "h": 10
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "DS_CENSPROBE_PG"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT ${group_by:raw} AS group_name, AVG(test_runs.overall_score) AS overall, AVG(test_runs.entry_score) AS entry, AVG(test_runs.exit_score) AS exit, AVG(test_runs.relay_score) AS relay FROM test_runs \nWHERE \n    ('ALL' IN (${var_company:singlequote}) OR test_runs.server_meta->'asn'->>'org' IN (${var_company:singlequote}))\n    AND ('ALL' IN (${var_asn:singlequote}) OR 'AS' || (test_runs.server_meta->'asn'->>'asn') IN (${var_asn:singlequote}))\n    AND ('ALL' IN (${var_datacenter:singlequote}) OR COALESCE(test_runs.server_meta->'datacenter'->>'name', 'No DC') IN (${var_datacenter:singlequote}))\n    AND ('ALL' IN (${var_country:singlequote}) OR test_runs.server_meta->'location'->>'country_code' IN (${var_country:singlequote}))\n    AND ('ALL' IN (${var_test_id:singlequote}) OR test_runs.test_id IN (${var_test_id:singlequote}))\n GROUP BY 1 ORDER BY overall DESC",
+          "format": "table",
+          "refId": "A",
+          "editorMode": "code",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "DS_CENSPROBE_PG"
+          }
+        }
+      ],
+      "options": {
+        "xField": "group_name"
+      }
+    },
+    {
+      "id": 2,
+      "title": "Servers Matched",
+      "type": "stat",
+      "gridPos": {
+        "x": 16,
+        "y": 2,
+        "w": 8,
+        "h": 10
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "DS_CENSPROBE_PG"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT COUNT(DISTINCT test_runs.test_id) AS matched FROM test_runs \nWHERE \n    ('ALL' IN (${var_company:singlequote}) OR test_runs.server_meta->'asn'->>'org' IN (${var_company:singlequote}))\n    AND ('ALL' IN (${var_asn:singlequote}) OR 'AS' || (test_runs.server_meta->'asn'->>'asn') IN (${var_asn:singlequote}))\n    AND ('ALL' IN (${var_datacenter:singlequote}) OR COALESCE(test_runs.server_meta->'datacenter'->>'name', 'No DC') IN (${var_datacenter:singlequote}))\n    AND ('ALL' IN (${var_country:singlequote}) OR test_runs.server_meta->'location'->>'country_code' IN (${var_country:singlequote}))\n    AND ('ALL' IN (${var_test_id:singlequote}) OR test_runs.test_id IN (${var_test_id:singlequote}))\n",
+          "format": "table",
+          "refId": "A",
+          "editorMode": "code",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "DS_CENSPROBE_PG"
+          }
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Score Trend Over Time",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 24,
+        "h": 10
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "DS_CENSPROBE_PG"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT test_runs.created_at AS \"time\", ${group_by:raw} AS metric, AVG(test_runs.overall_score) AS value FROM test_runs \nWHERE \n    ('ALL' IN (${var_company:singlequote}) OR test_runs.server_meta->'asn'->>'org' IN (${var_company:singlequote}))\n    AND ('ALL' IN (${var_asn:singlequote}) OR 'AS' || (test_runs.server_meta->'asn'->>'asn') IN (${var_asn:singlequote}))\n    AND ('ALL' IN (${var_datacenter:singlequote}) OR COALESCE(test_runs.server_meta->'datacenter'->>'name', 'No DC') IN (${var_datacenter:singlequote}))\n    AND ('ALL' IN (${var_country:singlequote}) OR test_runs.server_meta->'location'->>'country_code' IN (${var_country:singlequote}))\n    AND ('ALL' IN (${var_test_id:singlequote}) OR test_runs.test_id IN (${var_test_id:singlequote}))\n GROUP BY 1, 2 ORDER BY 1",
+          "format": "time_series",
+          "refId": "A",
+          "editorMode": "code",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "DS_CENSPROBE_PG"
+          }
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Detected Techniques Breakdown",
+      "type": "barchart",
+      "gridPos": {
+        "x": 0,
+        "y": 22,
+        "w": 24,
+        "h": 10
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "DS_CENSPROBE_PG"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT ${group_by:raw} AS group_name, tr.method, COUNT(*) AS detections FROM test_results tr JOIN test_runs ON test_runs.id = tr.test_run_id \nWHERE \n    ('ALL' IN (${var_company:singlequote}) OR test_runs.server_meta->'asn'->>'org' IN (${var_company:singlequote}))\n    AND ('ALL' IN (${var_asn:singlequote}) OR 'AS' || (test_runs.server_meta->'asn'->>'asn') IN (${var_asn:singlequote}))\n    AND ('ALL' IN (${var_datacenter:singlequote}) OR COALESCE(test_runs.server_meta->'datacenter'->>'name', 'No DC') IN (${var_datacenter:singlequote}))\n    AND ('ALL' IN (${var_country:singlequote}) OR test_runs.server_meta->'location'->>'country_code' IN (${var_country:singlequote}))\n    AND ('ALL' IN (${var_test_id:singlequote}) OR test_runs.test_id IN (${var_test_id:singlequote}))\n AND tr.method IS NOT NULL AND tr.verdict = 'BLOCKED' GROUP BY 1, 2 ORDER BY 1, 3 DESC",
+          "format": "table",
+          "refId": "A",
+          "editorMode": "code",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "DS_CENSPROBE_PG"
+          }
+        }
+      ],
+      "options": {
+        "xField": "group_name",
+        "stacking": {
+          "mode": "normal"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Matched Server List",
+      "type": "table",
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 24,
+        "h": 10
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "DS_CENSPROBE_PG"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT test_runs.test_id, 'AS' || (test_runs.server_meta->'asn'->>'asn') AS asn, test_runs.server_meta->'asn'->>'org' AS org, COALESCE(test_runs.server_meta->'datacenter'->>'name', 'No DC') AS datacenter, test_runs.server_meta->'location'->>'city' AS city, test_runs.server_meta->'location'->>'country_code' AS country, test_runs.overall_score FROM test_runs \nWHERE \n    ('ALL' IN (${var_company:singlequote}) OR test_runs.server_meta->'asn'->>'org' IN (${var_company:singlequote}))\n    AND ('ALL' IN (${var_asn:singlequote}) OR 'AS' || (test_runs.server_meta->'asn'->>'asn') IN (${var_asn:singlequote}))\n    AND ('ALL' IN (${var_datacenter:singlequote}) OR COALESCE(test_runs.server_meta->'datacenter'->>'name', 'No DC') IN (${var_datacenter:singlequote}))\n    AND ('ALL' IN (${var_country:singlequote}) OR test_runs.server_meta->'location'->>'country_code' IN (${var_country:singlequote}))\n    AND ('ALL' IN (${var_test_id:singlequote}) OR test_runs.test_id IN (${var_test_id:singlequote}))\n ORDER BY test_runs.overall_score ASC",
+          "format": "table",
+          "refId": "A",
+          "editorMode": "code",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "DS_CENSPROBE_PG"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,140 @@
+{
+  "$defs": {
+    "BlockingMethod": {
+      "description": "Attribution of the blocking/censorship technique.",
+      "enum": [
+        "dns_poisoning",
+        "dns_blocked_nxdomain",
+        "doh_blocked",
+        "ip_dropped",
+        "tcp_rst_injection",
+        "tcp_rst_after_tls_ch",
+        "tls_handshake_failure",
+        "ech_blocked",
+        "sni_throttling",
+        "quic_dropped",
+        "openvpn_signature_blocked",
+        "wireguard_signature_blocked",
+        "shadowsocks_active_probed",
+        "vpn_data_phase_blocked",
+        "middlebox_http_manipulation",
+        "unknown"
+      ],
+      "title": "BlockingMethod",
+      "type": "string"
+    },
+    "Verdict": {
+      "description": "Top-level verdict for a single test.",
+      "enum": [
+        "OK",
+        "BLOCKED",
+        "HANDSHAKE_ONLY",
+        "ANOMALY",
+        "GEOBLOCK_NOT_CENSORSHIP",
+        "ERROR",
+        "INCONCLUSIVE",
+        "DNS_POISONING",
+        "DNS_BLOCKED",
+        "DOH_BLOCKED",
+        "IP_DROPPED",
+        "RST_INJECTED",
+        "REFUSED",
+        "YOUTUBE_SNI_THROTTLED"
+      ],
+      "title": "Verdict",
+      "type": "string"
+    }
+  },
+  "description": "Single test result \u2014 one measurement of one target.\n\n``subcategory`` is auto-derived from ``test`` + ``category`` via\n:mod:`censprobe_core.subcategories` \u2014 modules don't set it\nexplicitly. Grafana SQL filters on this stable column instead of\nfragile ``test LIKE '...'`` patterns; see the subcategories module\nfor the prefix\u2192name contract.",
+  "properties": {
+    "attempts": {
+      "default": 1,
+      "title": "Attempts",
+      "type": "integer"
+    },
+    "category": {
+      "description": "Module category: dns|tcp|tls|http|telegram|throttling|protocols|middlebox",
+      "title": "Category",
+      "type": "string"
+    },
+    "confidence": {
+      "default": 1.0,
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Confidence",
+      "type": "number"
+    },
+    "evidence": {
+      "additionalProperties": true,
+      "title": "Evidence",
+      "type": "object"
+    },
+    "method": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/BlockingMethod"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "notes": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Notes"
+    },
+    "rtt_ms": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Rtt Ms"
+    },
+    "subcategory": {
+      "default": "",
+      "description": "Stable family identifier auto-derived from `test`/`category`",
+      "title": "Subcategory",
+      "type": "string"
+    },
+    "target": {
+      "description": "Target URL, domain, or IP:port",
+      "title": "Target",
+      "type": "string"
+    },
+    "test": {
+      "description": "Test name, e.g. 'dns_meduza_io_system'",
+      "title": "Test",
+      "type": "string"
+    },
+    "timestamp": {
+      "format": "date-time",
+      "title": "Timestamp",
+      "type": "string"
+    },
+    "verdict": {
+      "$ref": "#/$defs/Verdict"
+    }
+  },
+  "required": [
+    "test",
+    "category",
+    "target",
+    "verdict"
+  ],
+  "title": "TestResult",
+  "type": "object"
+}

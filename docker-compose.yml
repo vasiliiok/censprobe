@@ -1,0 +1,218 @@
+## Pre-built images are pulled from Docker Hub when available.
+## pull_policy: missing — uses local cache if present, pulls from registry
+## if not, falls back to local build if the pull fails.
+##
+## Docker Hub images are public — no `docker login` required to pull.
+##
+## All defaults live in the committed `.env` at repo root. Edit it locally
+## to override — your working-tree changes won't auto-publish anywhere.
+
+services:
+
+  # ─────────────────────────────────────────────────────────────────
+  # 1. SOLO — тесты с перспективы тестируемого RU-сервера
+  # Usage: docker compose --profile solo run --rm solo --test-id selectel-spb-001
+  # ─────────────────────────────────────────────────────────────────
+  solo:
+    profiles: [solo]
+    image: ${DOCKERHUB_USERNAME}/censprobe-solo:${DOCKERHUB_TAG}
+    pull_policy: missing
+    build:
+      context: .
+      dockerfile: packages/solo/Dockerfile
+    network_mode: host
+    cap_add: [NET_RAW, NET_ADMIN]
+    environment:
+      RUNS_COUNT: ${RUNS_COUNT}
+      IPAPI_IS_KEY: ${IPAPI_IS_KEY}
+    volumes:
+      - ./:/workspace
+      # systemd-resolved upstreams — when /etc/resolv.conf points at the
+      # 127.0.0.53 stub (Ubuntu/Debian cloud images), the real ISP/upstream
+      # resolver is recorded here. modules/dns.py:_get_isp_resolver reads
+      # this so the cross-resolver comparison isn't a useless self-check
+      # against the local stub. Bind-mounted read-only; on hosts without
+      # systemd-resolved Docker creates an empty directory and the code
+      # falls back to /etc/resolv.conf's primary entry.
+      - /run/systemd/resolve:/run/systemd/resolve:ro
+    working_dir: /workspace
+    restart: "no"
+
+  # ─────────────────────────────────────────────────────────────────
+  # 2. LISTENER — VPN-порты на тестируемом сервере
+  # Usage: docker compose --profile listener run --rm listener --test-id ... --session-id client-home-rt-spb
+  # ─────────────────────────────────────────────────────────────────
+  listener:
+    profiles: [listener]
+    image: ${DOCKERHUB_USERNAME}/censprobe-listener:${DOCKERHUB_TAG}
+    pull_policy: missing
+    build:
+      context: .
+      dockerfile: packages/listener/Dockerfile
+    # network_mode: host — needed both for the VPN responders (raw UDP
+    # binds, OpenVPN tun device) and for the credentials HTTPS endpoint
+    # on TCP 8443. Make sure the firewall on the test server allows
+    # inbound TCP 8443 from the client network during the session.
+    network_mode: host
+    cap_add: [NET_ADMIN, NET_RAW]
+    # OpenVPN responder needs /dev/net/tun.
+    devices:
+      - "/dev/net/tun:/dev/net/tun"
+    environment:
+      CREDS_PORT: ${CREDS_PORT}
+      IPAPI_IS_KEY: ${IPAPI_IS_KEY}
+    volumes:
+      - ./:/workspace
+    working_dir: /workspace
+    # 30s covers responder shutdown (parallel, ~1s each) + the synchronous
+    # JSON write that follows. Auto-push is gone, so we no longer need
+    # the wider window earlier deployments allowed for git operations.
+    stop_grace_period: 30s
+    restart: "no"
+
+  # ─────────────────────────────────────────────────────────────────
+  # 3. CLIENT — handshake-тесты с клиентской сети
+  # Run the one-liner printed by the listener startup banner — it bakes
+  # in TEST_ID / SESSION_ID / SERVER_HOST / CREDS_TOKEN / CREDS_CERT_SHA256.
+  # ─────────────────────────────────────────────────────────────────
+  client:
+    profiles: [client]
+    image: ${DOCKERHUB_USERNAME}/censprobe-client:${DOCKERHUB_TAG}
+    pull_policy: missing
+    build:
+      context: .
+      dockerfile: packages/client/Dockerfile
+    network_mode: host
+    # NET_ADMIN: required for `ip link add wireguard`/awg-quick.
+    # /dev/net/tun: required for OpenVPN client tunnel.
+    cap_add: [NET_RAW, NET_ADMIN]
+    devices:
+      - "/dev/net/tun:/dev/net/tun"
+    environment:
+      CREDS_PORT: ${CREDS_PORT}
+    # Mount the repo so the client can load censprobe.yaml at startup —
+    # the throughput probe (proxy_throughput) reads target_bytes /
+    # timeout_sec from cfg.throughput, and load_config() must run before
+    # any successful SS / VLESS+Reality / Hysteria-2 probe.
+    volumes:
+      - ./:/workspace
+    working_dir: /workspace
+    restart: "no"
+
+  # ─────────────────────────────────────────────────────────────────
+  # 4. DASHBOARD — Grafana + Postgres + sync-api
+  # Usage: docker compose --profile dashboard up -d
+  # Open: http://localhost:3000 (admin/admin)
+  # ─────────────────────────────────────────────────────────────────
+  postgres:
+    profiles: [dashboard]
+    # Digest pinned alongside the tag so a future minor bump on Docker
+    # Hub can't silently change the binary in an existing deployment.
+    # Bump both together when upgrading.
+    image: postgres:16@sha256:71e27bf60b70bded003791b5573f8b808365613f341df20ffcf0c1ed7bc13ddf
+    environment:
+      POSTGRES_DB: censprobe
+      POSTGRES_USER: censprobe
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      # Pin -d so the probe is satisfied only after Postgres has finished
+      # creating POSTGRES_DB ("censprobe") — `pg_isready` returns 0 as soon
+      # as the postmaster accepts connections, which happens before the
+      # database itself is ready for queries.
+      test: ["CMD-SHELL", "pg_isready -U censprobe -d censprobe"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  sync-api:
+    profiles: [dashboard]
+    image: ${DOCKERHUB_USERNAME}/censprobe-sync-api:${DOCKERHUB_TAG}
+    pull_policy: missing
+    build:
+      context: .
+      dockerfile: packages/dashboard/sync-api/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+asyncpg://censprobe:${DB_PASSWORD}@postgres/censprobe
+      CENSPROBE_IMPORT_INTERVAL_SEC: ${CENSPROBE_IMPORT_INTERVAL_SEC}
+    volumes:
+      - ./:/workspace
+    # Bind to loopback only — the API has no authentication, and the only
+    # in-cluster consumer is Grafana (read-only via Postgres anyway).
+    ports:
+      - "127.0.0.1:8080:8080"
+    healthcheck:
+      # Wrapped in `python -c` so we don't need curl/wget in the slim
+      # image. /health returns 200 once init_db() finishes and FastAPI
+      # is serving — that's the signal Grafana is waiting for below.
+      test:
+        - "CMD-SHELL"
+        - "python -c 'import urllib.request,sys; sys.exit(0 if urllib.request.urlopen(\"http://127.0.0.1:8080/health\", timeout=2).status == 200 else 1)'"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  grafana:
+    profiles: [dashboard]
+    # 11.5.x is the long-term support line maintained alongside 13.x;
+    # 11.2.0 missed several CVE fixes published in 2025. Bumping the
+    # minor only keeps the schemaVersion: 39 dashboards compatible.
+    # Digest pinned alongside the tag — bump both together.
+    image: grafana/grafana:11.5.4@sha256:7c06aabc89f593c7dbb53bb346829e8d884acf75dafa304a09041dd2cae883ec
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
+      GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s:%(http_port)s/"
+      DB_PASSWORD: ${DB_PASSWORD}
+      # ── strip Grafana to dashboards only ──────────────────────────────
+      # We use Grafana solely as a viewer over the censprobe Postgres
+      # datasource. Everything below disables features we don't use,
+      # hides their nav entries, and stops outbound calls.
+      GF_EXPLORE_ENABLED: "false"
+      GF_ALERTING_ENABLED: "false"
+      GF_UNIFIED_ALERTING_ENABLED: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_ANALYTICS_FEEDBACK_LINKS_ENABLED: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      GF_USERS_DEFAULT_THEME: "dark"
+      GF_USERS_HOME_PAGE: "/d/censprobe-01"
+      # default_home_dashboard_path makes the "Home" nav item open 01 directly
+      # instead of the empty Grafana welcome screen.
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: "/var/lib/grafana/dashboards/01-test-overview.json"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_USERS_ALLOW_ORG_CREATE: "false"
+      GF_USERS_VIEWERS_CAN_EDIT: "false"
+      GF_PLUGINS_PUBLIC_KEY_RETRIEVAL_DISABLED: "true"
+      GF_PLUGINS_PLUGIN_ADMIN_ENABLED: "false"
+      GF_SNAPSHOTS_EXTERNAL_ENABLED: "false"
+      GF_SNAPSHOTS_PUBLIC_MODE: "false"
+      GF_HELP_ENABLED: "false"
+      GF_SECURITY_DISABLE_GRAVATAR: "true"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./packages/dashboard/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./packages/dashboard/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      # Without service_healthy, Grafana would race ahead of Postgres /
+      # sync-api on `up`, log datasource errors, and leave the user
+      # staring at a "Database connection failed" toast.
+      postgres:
+        condition: service_healthy
+      sync-api:
+        condition: service_healthy
+    restart: unless-stopped
+
+
+volumes:
+  db_data:
+  grafana_data:

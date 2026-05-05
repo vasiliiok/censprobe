@@ -1,0 +1,48 @@
+# Social media targets — blocked/throttled in Russia
+
+targets:
+  - domain: youtube.com
+    urls:
+      - https://www.youtube.com/
+    expected_status: 200
+    category: social
+    notes: "Throttled by ТСПУ since ~2024, SNI-based (see throttling Method B)"
+
+  - domain: instagram.com
+    urls:
+      - https://www.instagram.com/
+    expected_status: 200
+    category: social
+    notes: "Blocked since March 2022 (Meta recognized as extremist)"
+
+  - domain: facebook.com
+    urls:
+      - https://www.facebook.com/
+    expected_status: 200
+    category: social
+    notes: "Blocked since March 2022"
+
+  - domain: twitter.com
+    urls:
+      - https://twitter.com/
+      - https://x.com/
+    expected_status: 200
+    category: social
+    notes: "Throttled since March 2021, eventually unblocked but still monitored"
+
+  - domain: tiktok.com
+    urls:
+      - https://www.tiktok.com/
+    expected_status: 200
+    category: social
+
+  - domain: linkedin.com
+    urls:
+      - https://www.linkedin.com/
+    expected_status: 200
+    category: social
+    notes: "Blocked since November 2016 for GDPR-like data localization"
+
+# Note: YouTube SNI throttling (Method B) is hardcoded in
+# modules/throttling.py:_METHOD_B_CONFIG — it always probes googlevideo.com SNI
+# against speedtest.selectel.ru, no per-target wiring needed.

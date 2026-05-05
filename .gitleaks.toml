@@ -1,0 +1,24 @@
+[extend]
+useDefault = true
+
+# Suppress false positives. The `[[allowlists]]` array form is silently
+# ignored in the `[extend] useDefault = true` path of gitleaks 8.24.3
+# (the version pinned by gitleaks-action@v2 in CI), so we use the
+# singular [allowlist] block. Each regex is documented inline.
+[allowlist]
+description = "Documented false positives — see comments per pattern"
+regexTarget = "line"
+regexes = [
+    # xray-core release tarball SHA256 checksums pinned in our Dockerfiles.
+    # Gitleaks' `jfrog-identity-token` rule fires on any 64-char hex string on
+    # `ARG XRAY_SHA256_*` lines. The variable name says SHA256; these are
+    # public, verifiable hashes from XTLS/Xray-core GitHub releases.
+    '''ARG\s+XRAY_SHA256_(AMD64|ARM64)=[a-f0-9]{64}''',
+
+    # AmneziaWG magic-header generator. The `generic-api-key` rule fires on
+    # `creds.awg_h4 = _awg_magic_headers()` because the underscore-prefixed
+    # function name resembles a key assignment. It's a private helper that
+    # returns four small ints — see
+    # packages/listener/src/censprobe_listener/credentials.py.
+    '''_awg_magic_headers\(\)''',
+]

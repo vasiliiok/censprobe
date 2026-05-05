@@ -1,0 +1,59 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+*.log
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Docker volumes (local dev)
+pgdata/
+
+# Stray secrets — defensive guardrail; censprobe itself never writes these
+*.pem
+*.key
+id_rsa
+id_ed25519
+
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.hypothesis/
+.tox/
+
+# Coverage + junit — pytest --cov локального запуска. CI кладёт те же
+# файлы в рабочую директорию (coverage-${slug}.xml, junit-${slug}.xml)
+# и грузит как Actions artifacts; в репо им не место.
+.coverage
+.coverage.*
+coverage.xml
+coverage-*.xml
+junit.xml
+junit-*.xml
+htmlcov/
+
+# CI security-scan outputs — Trivy / gitleaks / CodeQL emit SARIF (and
+# sometimes JSON) into the workspace root when a contributor reproduces
+# the security-fast or codeql jobs locally. CI uploads these as Actions
+# artifacts / Security-tab entries; the repo itself never needs them.
+*.sarif
+results.sarif
+trivy-*.json
+
+# Editor / OS junk
+*.swo
+*~
+Thumbs.db
+desktop.ini
+
+# .env is intentionally tracked — it ships safe defaults that work out of
+# the box (localhost-only services). Local edits live in your working
+# tree; only push them if you really mean to publish them.
+# reports/ and targets/ are tracked (they're the product).
+# Credentials never touch disk (cred_server hands them over a one-shot
+# TLS endpoint), so no per-protocol-yaml ignore rule is needed.

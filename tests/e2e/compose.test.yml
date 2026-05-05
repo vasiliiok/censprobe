@@ -1,0 +1,19 @@
+# Overlay for the dashboard E2E job in ci.yml. The job builds sync-api
+# locally (tagged `${DOCKERHUB_USERNAME}/censprobe-sync-api:${DOCKERHUB_TAG}`
+# with both env vars set to local-only sentinels), then brings the stack
+# up via:
+#
+#   docker compose -f docker-compose.yml -f tests/e2e/compose.test.yml \
+#     --profile dashboard up -d --wait postgres sync-api
+#
+# The overlay only diverges from production where collisions on a CI
+# runner force it (host port 18080 to avoid stomping on the runner's
+# port 8080). Postgres pulls a digest-pinned image directly from the
+# base compose; sync-api uses the local build under the env-pinned tag.
+services:
+  sync-api:
+    ports:
+      # 18080 chosen to avoid colliding with anything else the runner
+      # might bind on 8080. The integration test reads this port from
+      # CENSPROBE_E2E_SYNC_API_PORT (defaulted in the test).
+      - "127.0.0.1:18080:8080"

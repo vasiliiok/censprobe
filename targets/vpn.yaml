@@ -1,0 +1,28 @@
+# VPN service targets — connectivity indicators
+#
+# Only the `targets:` block is consumed by the runner (HTTP/TLS/DNS modules).
+# Method-B SNI throttling parameters are hardcoded in
+# probe-core/.../modules/throttling.py (search _METHOD_B_CONFIG).
+
+targets:
+  - domain: nordvpn.com
+    urls:
+      - https://nordvpn.com/
+    expected_status: 200
+    notes: "NordVPN website"
+
+  - domain: protonvpn.com
+    urls:
+      - https://protonvpn.com/
+    expected_status: 200
+    notes: "Proton VPN website"
+
+  - domain: expressvpn.com
+    urls:
+      - https://www.expressvpn.com/
+    expected_status: 200
+
+  - domain: mullvad.net
+    urls:
+      - https://mullvad.net/
+    expected_status: 200

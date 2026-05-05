@@ -1,0 +1,214 @@
+name: Build & Push
+
+# Build images after CI completes on `main`. The `workflow_run` trigger
+# fires for any CI conclusion; we then check job-by-job that everything
+# except `SonarCloud` succeeded — a sonar-only failure is permitted to
+# push because the SonarCloud Quality Gate (`new_coverage >= 80`) is a
+# paid-tier setting we cannot lower, and gating the registry on it would
+# block every PR until the long-tail coverage debt is paid down. Other
+# CI failures (lint, tests, security-fast, e2e-dashboard, …) still hard-
+# block the push. PRs build in parallel with CI (push=false) for fast
+# reviewer feedback. Tag pushes build directly because by the time a tag
+# exists the underlying commit has already merged through CI.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  push:
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    # 1. Skip on forks (they lack DOCKERHUB_USERNAME/TOKEN — login would fail).
+    # 2. On workflow_run, allow `success` outright; on `failure` defer to
+    #    the per-job check below (the only acceptable failure is a sonar-
+    #    only failure). `cancelled` and other conclusions still hard-skip.
+    if: |
+      github.repository == 'vasiliiok/censprobe' &&
+      (
+        github.event_name != 'workflow_run' ||
+        github.event.workflow_run.conclusion == 'success' ||
+        github.event.workflow_run.conclusion == 'failure'
+      )
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # paths-filter calls GET /repos/:owner/:repo/pulls/:n/files on PR runs.
+      # Without an explicit grant, the workflow-level permissions block
+      # restricts GITHUB_TOKEN and the API call returns 403.
+      pull-requests: read
+      # `gh run view --json jobs` (CI-jobs-status step) reads workflow run
+      # jobs; needs actions:read on the GITHUB_TOKEN.
+      actions: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: solo
+            dockerfile: packages/solo/Dockerfile
+            path: solo
+            # solo, listener, client all run as root by design — wg-quick /
+            # awg-quick / openvpn / raw-socket probes need CAP_NET_ADMIN +
+            # CAP_NET_RAW + /dev/net/tun, which the runtime grants via
+            # `cap_add` in docker-compose.yml. Dropping privileges inside
+            # the image would just push that complexity into per-binary
+            # `setcap` invocations during build with no real isolation
+            # gain (the container is already privileged at runtime).
+            allow_root: true
+            # Image budgets in MB. solo bundles every protocol binary
+            # (openvpn, wg, mtg, xray, hysteria2, awg) so it is fattest.
+            size_budget_mb: 600
+          - name: listener
+            dockerfile: packages/listener/Dockerfile
+            path: listener
+            allow_root: true
+            size_budget_mb: 400
+          - name: client
+            dockerfile: packages/client/Dockerfile
+            path: client
+            allow_root: true
+            size_budget_mb: 400
+          - name: sync-api
+            dockerfile: packages/dashboard/sync-api/Dockerfile
+            path: dashboard/sync-api
+            # sync-api is the one image that has no privileged runtime
+            # need — it's a stateless FastAPI process. The gate enforces
+            # this here so a future Dockerfile edit can't silently make
+            # the dashboard container run as root.
+            allow_root: false
+            size_budget_mb: 250
+
+    steps:
+      # On a workflow_run with conclusion=='failure', verify that the only
+      # failed job was `SonarCloud` (sonar-only failures are permitted to
+      # push images — see workflow header). Any other failure aborts here
+      # before we touch the registry. On success / non-workflow_run runs
+      # this step is a no-op.
+      - name: Check CI jobs status (allow sonar-only failure)
+        if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          # `gh run view --json jobs` returns every job's name + conclusion.
+          # We allow conclusions 'success' (passed) or 'skipped' (gated out
+          # by an `if:`); flag anything else.
+          jobs_json=$(gh run view "$RUN_ID" --repo "${{ github.repository }}" --json jobs -q '.jobs')
+          echo "$jobs_json" | jq -r '.[] | "\(.name)\t\(.conclusion)"'
+          bad=$(echo "$jobs_json" | jq -r '
+            .[]
+            | select(.conclusion != "success" and .conclusion != "skipped")
+            | select(.name != "SonarCloud")
+            | .name
+          ')
+          if [[ -n "$bad" ]]; then
+            echo "::error::CI run $RUN_ID has non-sonar failures; refusing to push images:"
+            echo "$bad" | sed 's/^/  - /'
+            exit 1
+          fi
+          echo "::notice::Only SonarCloud failed on CI run $RUN_ID — proceeding with image push (coverage Quality Gate is paid-tier and not blockable)."
+
+      # On workflow_run, GITHUB_REF points at the workflow file's ref
+      # (the default branch), NOT the commit that triggered CI. Pin the
+      # checkout to the SHA that CI just validated so we build exactly
+      # the bytes that passed the gate.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+
+      # Path filtering only makes sense on PR + tag (where there's a
+      # natural diff base). On workflow_run after a green CI on main, we
+      # always rebuild — CI passed, so refresh the registry images.
+      - uses: dorny/paths-filter@v3
+        id: changes
+        if: github.event_name == 'pull_request'
+        with:
+          filters: |
+            rebuild:
+              - 'packages/${{ matrix.path }}/**'
+              - 'packages/probe-core/**'
+              - '.github/workflows/build.yml'
+
+      - name: Decide whether to rebuild
+        id: gate
+        run: |
+          # Always rebuild on workflow_run (post-CI on main) and on tag pushes.
+          # On PR, defer to paths-filter.
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "rebuild=${{ steps.changes.outputs.rebuild }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "rebuild=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/setup-buildx-action@v4
+        if: steps.gate.outputs.rebuild == 'true'
+
+      - uses: docker/login-action@v4
+        if: steps.gate.outputs.rebuild == 'true' && github.event_name != 'pull_request'
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/metadata-action@v6
+        id: meta
+        if: steps.gate.outputs.rebuild == 'true'
+        with:
+          images: ${{ vars.DOCKERHUB_USERNAME }}/censprobe-${{ matrix.name }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=main,enable=${{ github.event_name == 'workflow_run' }}
+
+      - uses: docker/build-push-action@v7
+        id: build
+        if: steps.gate.outputs.rebuild == 'true'
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          # Always load the image into the local Docker daemon so the
+          # post-build security gates below can `docker run`/`inspect` it.
+          # On PRs we still suppress the registry push.
+          load: true
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+      # ────────────────────────────────────────────────────────────────
+      # Image security gates. These run on the locally-loaded image, so
+      # a failing gate aborts BEFORE the registry push has any effect on
+      # downstream consumers (workflow_run gate already prevents broken
+      # CI from reaching here; this catches packaging-level regressions
+      # the test suite cannot see).
+      # ────────────────────────────────────────────────────────────────
+      - name: Verify image runs as non-root
+        if: steps.gate.outputs.rebuild == 'true' && matrix.allow_root == false
+        run: |
+          img=$(echo "${{ steps.meta.outputs.tags }}" | head -n1)
+          uid=$(docker run --rm --entrypoint=id "$img" -u)
+          echo "Image $img runs as uid=$uid"
+          if [[ "$uid" == "0" ]]; then
+            echo "::error::$img runs as root (uid 0); only solo is permitted to."
+            exit 1
+          fi
+
+      - name: Verify image size budget
+        if: steps.gate.outputs.rebuild == 'true'
+        run: |
+          img=$(echo "${{ steps.meta.outputs.tags }}" | head -n1)
+          size_bytes=$(docker image inspect "$img" --format='{{.Size}}')
+          size_mb=$(( size_bytes / 1024 / 1024 ))
+          budget=${{ matrix.size_budget_mb }}
+          echo "Image $img size: ${size_mb} MB (budget: ${budget} MB)"
+          if (( size_mb > budget )); then
+            echo "::error::$img is ${size_mb} MB > ${budget} MB budget"
+            exit 1
+          fi

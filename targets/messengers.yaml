@@ -1,0 +1,35 @@
+# Messenger targets (excluding Telegram — see telegram.yaml)
+
+targets:
+  - domain: signal.org
+    urls:
+      - https://signal.org/
+    expected_status: 200
+    category: messenger
+    notes: "Blocked in RU since August 2024"
+
+  - domain: whatsapp.com
+    urls:
+      - https://www.whatsapp.com/
+    expected_status: 200
+    category: messenger
+    notes: "Periodic throttling in RU"
+
+  - domain: web.whatsapp.com
+    urls:
+      - https://web.whatsapp.com/
+    expected_status: 200
+    category: messenger
+
+  - domain: discord.com
+    urls:
+      - https://discord.com/
+    expected_status: 200
+    category: messenger
+    notes: "Throttled in RU"
+
+  - domain: viber.com
+    urls:
+      - https://www.viber.com/
+    expected_status: 200
+    category: messenger

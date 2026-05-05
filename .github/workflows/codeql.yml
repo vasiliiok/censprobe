@@ -1,0 +1,59 @@
+name: CodeQL
+
+# Static taint-style analysis from GitHub. Complements ruff + bandit
+# + Sonar by tracing flows across function boundaries (e.g. an
+# unsanitized HTTP query parameter reaching a subprocess argv).
+#
+# Schedule + opt-in PR runs:
+#   * Weekly cron — historical baseline + scanning unchanged code.
+#   * PR run — only when Python sources change, so reviewers see new
+#     findings inline before merge. We deliberately skip CodeQL on
+#     workflow / config-only PRs because a full CodeQL build costs
+#     ~5 minutes and offers nothing for non-Python changes.
+on:
+  schedule:
+    - cron: "0 4 * * 1"
+  pull_request:
+    branches: [main]
+    paths:
+      - "**/*.py"
+      - ".github/workflows/codeql.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    name: Analyze (Python)
+    runs-on: ubuntu-latest
+    if: github.repository == 'vasiliiok/censprobe'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install probe-core (so CodeQL can resolve internal imports)
+        run: pip install -e packages/probe-core
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: python
+          # security-and-quality is the broader pack — covers reliability
+          # and maintainability flows in addition to security. Slightly
+          # noisier than `security-extended` but the extra signal is
+          # worth it for a single-developer project where Sonar already
+          # filters most of the obvious style noise.
+          queries: security-and-quality
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:python"

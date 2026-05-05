@@ -1,0 +1,423 @@
+{
+  "$defs": {
+    "AsnInfo": {
+      "description": "Network-operator-level identity (one ASN = one routing entity).",
+      "properties": {
+        "asn": {
+          "title": "Asn",
+          "type": "integer"
+        },
+        "descr": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Descr"
+        },
+        "domain": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Domain"
+        },
+        "org": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Org"
+        },
+        "route": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Route"
+        }
+      },
+      "required": [
+        "asn"
+      ],
+      "title": "AsnInfo",
+      "type": "object"
+    },
+    "CompanyInfo": {
+      "description": "Legal-entity-level identity (often == AsnInfo.org but not always).",
+      "properties": {
+        "domain": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Domain"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "network": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Network"
+        }
+      },
+      "title": "CompanyInfo",
+      "type": "object"
+    },
+    "DatacenterInfo": {
+      "description": "Physical-DC identity. Populated only when is_datacenter is true.",
+      "properties": {
+        "domain": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Domain"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "network": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Network"
+        }
+      },
+      "title": "DatacenterInfo",
+      "type": "object"
+    },
+    "EndpointMeta": {
+      "description": "IP-free network identity for one endpoint (server or client).\n\n`is_datacenter` is the primary QA signal for client endpoints: a\nclient whose source IP belongs to a hosting provider is almost\ncertainly behind a self-hosted VPN, which taints VPN-protocol\nverdicts in this run. This is more reliable than ipapi.is's\n`is_vpn`/`is_proxy` flags, which only catch services that mark\nthemselves.\n\n`is_mobile` distinguishes mobile-carrier networks; mobile uplinks\nin RU are subject to heavier filtering than residential, so it\nmatters as a comparison axis.",
+      "properties": {
+        "asn": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AsnInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "company": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompanyInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "datacenter": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DatacenterInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "is_datacenter": {
+          "default": false,
+          "title": "Is Datacenter",
+          "type": "boolean"
+        },
+        "is_mobile": {
+          "default": false,
+          "title": "Is Mobile",
+          "type": "boolean"
+        },
+        "location": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LocationInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "EndpointMeta",
+      "type": "object"
+    },
+    "LocationInfo": {
+      "description": "Geographic identity. country_code is ISO-3166 alpha-2.",
+      "properties": {
+        "city": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "City"
+        },
+        "country_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Country Code"
+        }
+      },
+      "title": "LocationInfo",
+      "type": "object"
+    },
+    "ProtocolResult": {
+      "description": "Aggregated result for one protocol in a listener session.\n\n``avg_throughput_mbps`` and ``throughput_throttled`` are populated only\nfor the SOCKS-routed protocols (Shadowsocks, VLESS+Reality, Hysteria 2)\nvia the listener's loopback echo-server's ``/throughput`` handler.\nOpenVPN / WireGuard / AmneziaWG keep both fields ``None``/``False``\nbecause their data-phase verification is a single ICMP ping, not a\nbulk download. The numeric value is *informational only* \u2014 never\nconsumed by scoring, so a narrow server uplink isn't mis-attributed\nas censorship. ``throughput_throttled=True`` flags the case where the\ndownload didn't complete inside the timeout, i.e. sustained data\nplane is heavily throttled (or absent).",
+      "properties": {
+        "avg_data_echo_ms": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Avg Data Echo Ms"
+        },
+        "avg_rtt_ms": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Avg Rtt Ms"
+        },
+        "avg_throughput_mbps": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Avg Throughput Mbps"
+        },
+        "data_transfer_ok": {
+          "default": false,
+          "title": "Data Transfer Ok",
+          "type": "boolean"
+        },
+        "first_handshake_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "First Handshake At"
+        },
+        "handshake_count": {
+          "default": 0,
+          "title": "Handshake Count",
+          "type": "integer"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        },
+        "throughput_throttled": {
+          "default": false,
+          "title": "Throughput Throttled",
+          "type": "boolean"
+        },
+        "verdict": {
+          "$ref": "#/$defs/Verdict",
+          "default": "BLOCKED"
+        }
+      },
+      "title": "ProtocolResult",
+      "type": "object"
+    },
+    "Verdict": {
+      "description": "Top-level verdict for a single test.",
+      "enum": [
+        "OK",
+        "BLOCKED",
+        "HANDSHAKE_ONLY",
+        "ANOMALY",
+        "GEOBLOCK_NOT_CENSORSHIP",
+        "ERROR",
+        "INCONCLUSIVE",
+        "DNS_POISONING",
+        "DNS_BLOCKED",
+        "DOH_BLOCKED",
+        "IP_DROPPED",
+        "RST_INJECTED",
+        "REFUSED",
+        "YOUTUBE_SNI_THROTTLED"
+      ],
+      "title": "Verdict",
+      "type": "string"
+    }
+  },
+  "description": "Output of censprobe-listener \u2014 reports/<test_id>/server-listener-<session>-<ts>.json\n\n`client_connected` and `client` describe whether the operator-side\nclient reached the listener's credentials HTTPS endpoint at all, and\nif so, what network it came from. Three valid states:\n\n  1. client_connected=True, client=<EndpointMeta>\n     \u2014 normal session, enrichment succeeded.\n  2. client_connected=True, client=None\n     \u2014 client hit the endpoint but ipapi.is enrichment failed\n       (rate-limit, transient network). Per-protocol verdicts are\n       still meaningful.\n  3. client_connected=False, client=None\n     \u2014 client never reached the endpoint. Strongest blocking\n       signal: credentials were issued but the network did not\n       even allow the cred fetch to complete. Per-protocol BLOCKED\n       verdicts in this state are network-level, not protocol-level.",
+  "properties": {
+    "client": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EndpointMeta"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "client_connected": {
+      "default": false,
+      "title": "Client Connected",
+      "type": "boolean"
+    },
+    "duration_sec": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Duration Sec"
+    },
+    "listener_started_at": {
+      "format": "date-time",
+      "title": "Listener Started At",
+      "type": "string"
+    },
+    "listener_stopped_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Listener Stopped At"
+    },
+    "results": {
+      "additionalProperties": {
+        "$ref": "#/$defs/ProtocolResult"
+      },
+      "title": "Results",
+      "type": "object"
+    },
+    "session_id": {
+      "title": "Session Id",
+      "type": "string"
+    },
+    "test_id": {
+      "title": "Test Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "test_id",
+    "session_id",
+    "listener_started_at"
+  ],
+  "title": "ListenerReport",
+  "type": "object"
+}

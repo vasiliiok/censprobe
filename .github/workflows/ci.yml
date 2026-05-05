@@ -1,0 +1,508 @@
+name: CI
+
+# Triggers: every push (any branch) + every PR targeting main + manual
+# dispatch. Pushing to a feature branch runs the full suite so a developer
+# sees breakage before opening the PR (no `branches:` filter on `push:`).
+# Forks are still gated where it matters: jobs needing org secrets
+# (security-fast, sonar) carry an `if: github.repository == ...` guard.
+# Permissions are pinned at workflow-level (least privilege); individual jobs
+# escalate only when needed (security-events: write for SARIF upload, etc.).
+on:
+  push:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+# Strict CI from day one: every gate is required for merge. The local
+# venv (uv venv --python 3.11 .venv) reproduces the CI environment one-to-one
+# so failures here mirror what `pytest`, `ruff check`, `mypy` produce locally.
+jobs:
+  # ────────────────────────────────────────────────────────────────────
+  # 1. Lint — fast static checks. ~30s budget.
+  # ────────────────────────────────────────────────────────────────────
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: "**/pyproject.toml"
+
+      - name: Install ruff + yamllint
+        run: pip install "ruff>=0.6" "yamllint>=1.35"
+
+      - name: ruff check
+        run: ruff check .
+
+      - name: ruff format --check
+        run: ruff format --check .
+
+      - name: yamllint
+        # .yamllint.yaml at repo root configures truthy.check-keys: false (for
+        # GitHub Actions `on:` key) and allows alignment spacing in colons/commas.
+        run: yamllint .github/ targets/ censprobe.yaml docker-compose.yml
+
+      - name: actionlint (workflow yaml)
+        uses: reviewdog/action-actionlint@v1
+        with:
+          reporter: github-check
+          fail_on_error: "true"
+
+      - name: hadolint (Dockerfiles)
+        # recursive: true scans all Dockerfiles in the workspace.
+        # hadolint-action@v3.1.0 `dockerfile:` accepts only a single path;
+        # use recursive mode instead of a multi-file list.
+        # DL3008 (apt version pins) and DL3003 (WORKDIR vs cd) are ignored:
+        # pinning system/VPN build tools is impractical, and cd inside complex
+        # multi-stage build scripts is intentional.
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          recursive: true
+          failure-threshold: warning
+          ignore: DL3008 DL3003
+
+      # ────────────────────────────────────────────────────────────────
+      # mypy. Phase 8 is complete — every src/ module across the 5
+      # packages is opted into `[[tool.mypy.overrides]] strict = true`,
+      # so a single invocation of `mypy packages/*/src` (and the nested
+      # sync-api path) is enough. Tests trees are excluded: pytest fixture
+      # parameters carry too many Any-bleeding edges to enforce strict
+      # there without tooling-specific noise.
+      # ────────────────────────────────────────────────────────────────
+      - name: Install workspace for mypy
+        run: |
+          pip install -e packages/probe-core \
+                      -e packages/solo \
+                      -e packages/listener \
+                      -e packages/client \
+                      -e packages/dashboard/sync-api \
+                      "mypy>=1.10" "pydantic>=2.7" "types-PyYAML"
+
+      - name: mypy — full src tree (all strict)
+        run: |
+          mypy \
+            packages/probe-core/src \
+            packages/solo/src \
+            packages/listener/src \
+            packages/client/src \
+            packages/dashboard/sync-api/src
+
+  # ────────────────────────────────────────────────────────────────────
+  # 2. Validate config — Pydantic-load every YAML so a typo fails CI
+  #    instead of blowing up at container startup.
+  # ────────────────────────────────────────────────────────────────────
+  validate-config:
+    name: Validate config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: "**/pyproject.toml"
+
+      - name: Install probe-core
+        run: pip install -e packages/probe-core
+
+      - name: Load censprobe.yaml + targets/*.yaml via Pydantic
+        run: |
+          python <<'PY'
+          import logging, sys
+          from pathlib import Path
+          # Capture WARNING-level logs from load_targets (it currently
+          # warn-skips malformed files) so we can promote them to errors.
+          warnings: list[str] = []
+          class _CapHandler(logging.Handler):
+              def emit(self, record: logging.LogRecord) -> None:
+                  if record.levelno >= logging.WARNING:
+                      warnings.append(self.format(record))
+          handler = _CapHandler()
+          handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
+          logging.getLogger().addHandler(handler)
+          logging.getLogger().setLevel(logging.INFO)
+          from censprobe_core.config import load_config
+          from censprobe_core.targets import load_targets
+          load_config(Path("."))
+          ts = load_targets(Path("targets"))
+          assert ts.files, "no target files were discovered under targets/"
+          if warnings:
+              print("Promoting load_targets warnings to errors:", file=sys.stderr)
+              for w in warnings:
+                  print(f"  {w}", file=sys.stderr)
+              sys.exit(1)
+          print(f"OK: censprobe.yaml + {len(ts.files)} target files parsed cleanly")
+          PY
+
+  # ────────────────────────────────────────────────────────────────────
+  # 3. Test — per-package matrix. Each entry installs probe-core +
+  #    its own [test] extras, runs pytest with coverage, uploads
+  #    coverage-${name}.xml + junit-${name}.xml as artifacts. The
+  #    `sonar` job downloads them all.
+  # ────────────────────────────────────────────────────────────────────
+  test:
+    name: Test (${{ matrix.package }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: probe-core
+            path: packages/probe-core
+            slug: probe-core
+          - package: solo
+            path: packages/solo
+            slug: solo
+          - package: listener
+            path: packages/listener
+            slug: listener
+          - package: client
+            path: packages/client
+            slug: client
+          - package: sync-api
+            path: packages/dashboard/sync-api
+            slug: sync-api
+    services:
+      # Postgres only used by sync-api integration tests (Phase 4). Lightweight
+      # enough to run for every matrix entry; conditional services in matrix
+      # add YAML noise without saving meaningful CI time.
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: censprobe
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: censprobe_ci
+        options: >-
+          --health-cmd "pg_isready -U censprobe"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+        ports:
+          - 5432:5432
+    env:
+      DATABASE_URL: postgresql+asyncpg://censprobe:ci@localhost:5432/censprobe_ci
+      CENSPROBE_IMPORT_INTERVAL_SEC: "60"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: "**/pyproject.toml"
+
+      - name: Install package + test extras
+        # probe-core editable is needed by every other package; install it first
+        # then the package under test with [test] extras.
+        run: |
+          pip install -e packages/probe-core
+          pip install -e "${{ matrix.path }}[test]"
+
+      - name: pytest ${{ matrix.package }}
+        run: |
+          pytest "${{ matrix.path }}/tests" \
+            --cov \
+            --cov-report=xml:coverage-${{ matrix.slug }}.xml \
+            --cov-report=term \
+            --junitxml=junit-${{ matrix.slug }}.xml \
+            -v
+
+      - name: Upload coverage + junit artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.slug }}
+          path: |
+            coverage-${{ matrix.slug }}.xml
+            junit-${{ matrix.slug }}.xml
+          if-no-files-found: warn
+          retention-days: 7
+
+  # ────────────────────────────────────────────────────────────────────
+  # 3b. Cross-package tests — repo-root tests/ that don't fit any single
+  #     package matrix entry: contract tests (Grafana ↔ subcategories,
+  #     censprobe.yaml round-trip, targets/*.yaml validate) and byte-level
+  #     wire-format snapshots. They're listed under [tool.pytest] testpaths
+  #     in pyproject.toml but the matrix above pins pytest to a single
+  #     package path, which overrides testpaths and silently skips these.
+  #     Coverage uploaded under the same coverage-* pattern so the sonar
+  #     job picks it up.
+  # ────────────────────────────────────────────────────────────────────
+  cross-package-tests:
+    name: Cross-package tests (contracts + snapshots)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: "**/pyproject.toml"
+
+      - name: Install probe-core with test extras
+        # probe-core[test] pulls pytest-regressions (snapshot tests) and
+        # everything else the contract/snapshot tests need.
+        run: pip install -e "packages/probe-core[test]"
+
+      - name: pytest tests/contracts + tests/snapshots
+        run: |
+          pytest tests/contracts tests/snapshots \
+            --cov=censprobe_core \
+            --cov-report=xml:coverage-cross.xml \
+            --cov-report=term \
+            --junitxml=junit-cross.xml \
+            -v
+
+      - name: Upload coverage + junit artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-cross
+          path: |
+            coverage-cross.xml
+            junit-cross.xml
+          if-no-files-found: warn
+          retention-days: 7
+
+  # ────────────────────────────────────────────────────────────────────
+  # 3c. Network-marked tests — exercise live MTProto / DoH / Cloudflare
+  #     ECH so an upstream protocol change is caught on every push.
+  #     Currently a placeholder: 0 tests carry the marker, exit-code 5
+  #     ("no tests collected") is treated as pass. Kept wired so future
+  #     network-marked tests run automatically without a workflow edit.
+  # ────────────────────────────────────────────────────────────────────
+  network-tests:
+    name: Network tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: "**/pyproject.toml"
+
+      - name: Install all packages with test extras
+        run: |
+          pip install -e "packages/probe-core[test]"
+          pip install -e "packages/listener[test]"
+          pip install -e "packages/client[test]"
+          pip install -e "packages/solo[test]"
+          pip install -e "packages/dashboard/sync-api[test]"
+
+      - name: pytest -m network
+        # exit code 5 == "no tests matched the marker"; treat as pass so
+        # the job stays green until network-marked tests are added. Other
+        # non-zero codes still fail (and the log is the signal that an
+        # upstream protocol shifted).
+        run: |
+          set +e
+          pytest -m network -v
+          rc=$?
+          if [[ $rc -eq 5 ]]; then
+            echo "::notice::no network-marked tests collected (yet)"
+            exit 0
+          fi
+          exit $rc
+
+  # ────────────────────────────────────────────────────────────────────
+  # 3d. E2E (dashboard) — build sync-api locally, bring up postgres +
+  #     sync-api, probe /health and /test-runs/. Catches schema migration
+  #     or Postgres-driver regressions that pass unit tests but break on
+  #     a real container start. Builds locally rather than pulling
+  #     `:main` from Docker Hub so a PR's own sync-api changes are what
+  #     actually gets exercised (the previous nightly variant pulled the
+  #     PUBLISHED image, which couldn't see in-flight changes).
+  # ────────────────────────────────────────────────────────────────────
+  e2e-dashboard:
+    name: E2E (dashboard)
+    runs-on: ubuntu-latest
+    env:
+      # docker-compose.yml interpolates these into the image: line
+      # (`${DOCKERHUB_USERNAME}/censprobe-sync-api:${DOCKERHUB_TAG}`).
+      # Pinning to a local-only tag means `docker compose up` will use
+      # the image we just built and never reach Docker Hub.
+      DOCKERHUB_USERNAME: censprobe-ci
+      DOCKERHUB_TAG: e2e-local
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install pytest + httpx
+        run: pip install "pytest>=8" "httpx>=0.27"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build sync-api locally
+        # Buildx with `load: true` puts the image into the local Docker
+        # daemon under the tag docker-compose.yml expects.
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: packages/dashboard/sync-api/Dockerfile
+          load: true
+          push: false
+          tags: censprobe-ci/censprobe-sync-api:e2e-local
+          cache-from: type=gha,scope=sync-api-e2e
+          cache-to: type=gha,mode=max,scope=sync-api-e2e
+
+      - name: docker compose up
+        run: |
+          docker compose -f docker-compose.yml -f tests/e2e/compose.test.yml \
+            --profile dashboard up -d --wait --wait-timeout 60 postgres sync-api
+
+      - name: Run E2E
+        run: pytest tests/e2e/test_dashboard_stack.py -m e2e -v
+
+      - name: Compose logs on failure
+        if: failure()
+        run: |
+          docker compose -f docker-compose.yml -f tests/e2e/compose.test.yml \
+            --profile dashboard logs --no-color > compose.log 2>&1 || true
+          echo "::group::sync-api logs"
+          docker compose -f docker-compose.yml -f tests/e2e/compose.test.yml \
+            --profile dashboard logs sync-api || true
+          echo "::endgroup::"
+
+      - name: Compose down
+        if: always()
+        run: |
+          docker compose -f docker-compose.yml -f tests/e2e/compose.test.yml \
+            --profile dashboard down -v || true
+
+      - name: Upload compose logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-compose-logs
+          path: compose.log
+          if-no-files-found: warn
+          retention-days: 7
+
+  # ────────────────────────────────────────────────────────────────────
+  # 4. Security-fast — bandit + gitleaks + pip-audit + trivy-fs.
+  #    Heavier image-registry CVE scanning previously lived in nightly
+  #    against published `outtakes/*:main` tags; that job was removed
+  #    along with the rest of nightly.yml. CodeQL still runs weekly.
+  # ────────────────────────────────────────────────────────────────────
+  security-fast:
+    name: Security (fast)
+    runs-on: ubuntu-latest
+    if: github.repository == 'vasiliiok/censprobe'
+    permissions:
+      contents: read
+      pull-requests: read
+      # codeql-action/upload-sarif (Trivy fs scan below) calls
+      # GET /repos/.../actions/runs/<id>; without actions:read it 403s.
+      actions: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # gitleaks needs full history on push to main; on PR we limit
+          # to the PR diff via --log-opts (next step).
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install scanners
+        run: pip install "bandit>=1.7" "pip-audit>=2.7"
+
+      - name: bandit
+        run: bandit -r packages/ -ll -c pyproject.toml
+
+      - name: pip-audit
+        # Install the two packages with the largest external dep graphs, then
+        # audit all third-party deps. --skip-editable excludes our own local
+        # packages (censprobe-core, censprobe-sync-api) which aren't on PyPI
+        # and cannot be audited by pip-audit anyway.
+        # Upgrade pip first so the runner's pip itself isn't flagged as vulnerable.
+        run: |
+          pip install --upgrade pip
+          pip install -e packages/probe-core -e packages/dashboard/sync-api
+          pip-audit --skip-editable
+
+      - name: gitleaks (PR diff only on PR; full history on push)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # GITLEAKS_LICENSE only needed for org accounts; personal repos are free.
+
+      - name: Dependency review (PR only)
+        if: github.event_name == 'pull_request'
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+
+      - name: Trivy filesystem scan
+        # Covers Dockerfile config issues, leaked secrets, and Python deps.
+        # Overlap with pip-audit/bandit/gitleaks is intentional — Trivy uses
+        # a different feed (Aqua DB) so the union catches strictly more.
+        # exit-code: 0 — surfaced via SARIF + Security tab, not the run
+        # conclusion, so a transient feed update can't mark a green PR red.
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy-fs.sarif
+          severity: HIGH,CRITICAL
+          exit-code: "0"
+          scanners: vuln,secret,config
+
+      - name: Upload Trivy SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-fs.sarif
+          category: trivy-fs
+
+  # ────────────────────────────────────────────────────────────────────
+  # 5. SonarCloud — coverage + code quality. Depends on test artifacts.
+  # ────────────────────────────────────────────────────────────────────
+  sonar:
+    name: SonarCloud
+    runs-on: ubuntu-latest
+    if: github.repository == 'vasiliiok/censprobe'
+    needs: [test, cross-package-tests]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # SonarCloud needs full history for accurate `git blame` data.
+          fetch-depth: 0
+
+      - name: Download all coverage artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          path: .
+          merge-multiple: true
+
+      - name: List downloaded coverage files
+        run: ls -la coverage-*.xml junit-*.xml || echo "no coverage artifacts found"
+
+      - name: SonarCloud scan
+        uses: SonarSource/sonarqube-scan-action@v6
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.host.url=https://sonarcloud.io

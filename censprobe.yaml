@@ -1,0 +1,227 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# censprobe.yaml — top-level configuration for solo / listener / client.
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# This file is REQUIRED. Every field must be present and explicitly set.
+# There are no fallback defaults anywhere in the code — if a field is
+# missing, startup fails with a validation error.
+#
+# This is by design: the operator must always see the exact current
+# state of the project configuration in one place. Edit only what you
+# care about, but never delete fields — a missing field is an error.
+#
+# Schema lives in packages/probe-core/src/censprobe_core/config.py
+# (CensprobeConfig). A typo in a field name produces a fatal startup
+# error rather than a silent fallback, so you find out about your
+# misconfiguration immediately.
+#
+# After editing this file, restart solo / listener / client. Hot reload
+# is intentionally not supported: each tool is a short-lived CLI and a
+# config change between runs is the contract.
+
+# ── Vantage ──────────────────────────────────────────────────────────────────
+# Censor-specific timing heuristics (TCP fast-RST attribution, QUIC
+# drop attribution, Method-B SNI throttling) are only meaningful when
+# the probe runs from inside a network with a state-level filter on
+# the path. Outside this list those heuristics either downgrade to
+# neutral verdicts or skip entirely to avoid false positives on
+# uncensored networks.
+#
+# Add country codes (ISO-3166 alpha-2) here when probing from another
+# vantage with a known active filter — Iran (IR), China (CN),
+# Kazakhstan (KZ), Belarus (BY) are the obvious candidates.
+vantage:
+  censoring_countries: [RU, BY]
+  # Force a country regardless of ipapi.is auto-detection. Useful for
+  # testing the heuristics or running from a tunnelled host whose
+  # ipapi-detected country doesn't match the network being measured.
+  # null disables the override.
+  override: null
+
+
+# ── Modules ──────────────────────────────────────────────────────────────────
+# Each measurement module can be turned off independently with
+# ``enabled: false``. Disabled modules produce zero results and zero
+# failures — the dashboard simply shows their categories empty.
+
+modules:
+  dns:
+    enabled: true
+    repeats: 3
+    doh_resolvers:
+      - https://cloudflare-dns.com/dns-query
+      - https://dns.google/dns-query
+      - https://mozilla.cloudflare-dns.com/dns-query
+    doh_timeout_sec: 10.0
+    asn_lookup_backoff_sec: 90.0   # ipapi.is rate-limit cool-off
+
+  tcp:
+    enabled: true
+    repeats: 3
+    syn_timeout_sec: 5.0
+    fast_rst_threshold_ms: 30      # below this → SUSPECTED RST_INJECTED
+    max_parallel: 16
+
+  tls:
+    enabled: true
+    repeats: 2
+    timeout_sec: 10.0
+    max_parallel: 6
+
+  http:
+    enabled: true
+    repeats: 3
+    body_cap_bytes: 524288         # stop reading after this many bytes
+    timeout_connect_sec: 10.0
+    timeout_read_sec: 30.0
+    max_parallel: 8
+
+  telegram:
+    enabled: true
+    targets_file: telegram         # picks up targets/telegram.yaml
+    timeout_sec: 8.0
+
+  cloudflare:
+    enabled: true
+    targets_file: cloudflare       # picks up targets/cloudflare.yaml
+
+  throttling:
+    enabled: true
+    require_censoring_vantage: true
+    target_url:    https://speedtest.selectel.ru/100MB
+    correct_sni:   speedtest.selectel.ru
+    typo_sni:      speedtset.selectel.ru
+    trigger_sni:   1-googlevideo.com
+    sequential_runs: 3
+    bandwidth_ratio_threshold: 0.25  # trigger < 25% × correct → throttled
+    curl_timeout_sec: 35.0
+
+  middlebox:
+    enabled: true
+
+
+# ── Protocols ────────────────────────────────────────────────────────────────
+# The six VPN protocols tested by the listener+client phase. Names must
+# match the registry in
+# packages/probe-core/src/censprobe_core/protocol_registry.py — typos
+# are dropped with a warning at startup, never silently.
+#
+# To add a protocol (e.g. MTProto-proxy, TUIC):
+#   1. Append a ProtocolSpec to protocol_registry.py.
+#   2. Add a responder factory to
+#      packages/listener/src/censprobe_listener/_responder_dispatch.py.
+#   3. Add a probe factory to
+#      packages/client/src/censprobe_client/_probe_dispatch.py.
+#   4. Extend ProtocolCredentials in listener/credentials.py and
+#      probe-core/credentials_reader.py.
+#   5. Done — listener and client pick the new protocol up via this list.
+protocols:
+  enabled:
+    - openvpn
+    - wireguard
+    - amneziawg
+    - shadowsocks
+    - vless_reality
+    - hysteria2
+    - mtproto_proxy
+  # First-match-wins recommendation order in the scoring summary. The
+  # priority list may include protocols not in `enabled` (they will
+  # simply be ignored at runtime).
+  priority:
+    - vless_reality
+    - hysteria2
+    - amneziawg
+    - shadowsocks
+    - mtproto_proxy
+    - wireguard
+    - openvpn
+  # Per-protocol listener bind ports. Every protocol in `enabled` MUST
+  # have an entry here — a missing key is a fatal validation error at
+  # startup, no fallback defaults exist anywhere in the code.
+  #
+  # Port-collision rules:
+  #   * Two TCP responders cannot share a port. vless_reality (TCP/443)
+  #     and mtproto_proxy (TCP) both want 443 in an ideal world — only
+  #     one can have it per session. Pick the protocol you need a
+  #     fully-realistic DPI signal for; the other goes on an alt port.
+  #   * UDP and TCP on the same number do NOT collide (hysteria2 UDP/443
+  #     coexists with vless_reality TCP/443).
+  #   * 8443/tcp is reserved for the listener's creds-server (CREDS_PORT
+  #     in .env) — do not assign it here.
+  #
+  # Why mtproto_proxy = 443 by default:
+  #   mtg uses fakeTLS to mimic HTTPS. RU TSPU/DPI inspects 443 as TLS
+  #   and decides to pass or drop based on the handshake content; on a
+  #   non-standard port the inspector may apply different rules
+  #   (sometimes more permissive, sometimes a blanket drop) that
+  #   confound the censorship signal. To preserve the realistic 443
+  #   path, vless_reality is moved to 8444 in this default profile —
+  #   swap them back if your priority is the VLESS+Reality realism.
+  ports:
+    openvpn: 1194         # UDP
+    wireguard: 51820      # UDP
+    amneziawg: 51821      # UDP
+    shadowsocks: 8388     # TCP
+    vless_reality: 8444   # TCP — moved off 443 to free it for mtproto_proxy
+    hysteria2: 443        # UDP — different transport, does not clash with TCP/443
+    mtproto_proxy: 443    # TCP — fakeTLS realism: DPI inspects 443 as HTTPS
+
+
+# ── Throughput probe ─────────────────────────────────────────────────────────
+# Sustained-data probe that runs through the SOCKS-routed protocols
+# (Shadowsocks, VLESS+Reality, Hysteria 2) after the handshake has
+# succeeded. Server-side measurement persists into the listener report
+# and surfaces as the "Throughput" column in the protocol dashboard.
+# OpenVPN / WireGuard / AmneziaWG ignore these knobs — they verify the
+# data plane via a single ICMP ping instead.
+#
+# target_bytes / timeout_sec set the floor of "throttled" detection:
+#   1 MiB / 30 s ≈ ~280 kbps below which throughput_throttled fires.
+throughput:
+  enabled: true
+  target_bytes: 1048576
+  timeout_sec:  30.0
+
+
+# ── Scoring ──────────────────────────────────────────────────────────────────
+# Linear-combination weights for the three suitability scores. Each
+# score = sum(component·weight) × 100. Weights need not sum to 1 — the
+# resulting score is whatever the math produces, capped to [0, 100] by
+# the underlying components.
+scoring:
+  entry:
+    # entry_score = protocol_reachability·W_p + uplink·W_u + latency·W_l
+    protocol: 0.6
+    uplink:   0.3
+    latency:  0.1
+
+  exit:
+    # exit_score = uplink·W_u + censorship·W_c
+    uplink:     0.6
+    censorship: 0.4
+
+  relay:
+    # relay_score = tcp_reachability·W_t + latency·W_l
+    tcp:     0.7
+    latency: 0.3
+
+
+# ── Target discovery ─────────────────────────────────────────────────────────
+# Every YAML in `directory` is auto-loaded and validated against
+# packages/probe-core/src/censprobe_core/targets.py::TargetFile. Drop a
+# new YAML in (matching the documented field set — see existing files
+# for examples) and the runner picks it up on the next run with no
+# Python edits.
+#
+# `module_owned` lists basenames consumed by specialised modules
+# (telegram.yaml, cloudflare.yaml). They are still loaded but excluded
+# from the generic view fed to dns/tcp/tls/http so those modules don't
+# try to probe Telegram's MTProto-shaped entries.
+#
+# `files` (when non-empty) overrides auto-discovery with an explicit
+# list of basenames — useful if you want to skip some YAMLs for a
+# particular run without removing them from disk.
+targets:
+  directory: targets
+  files: []                          # empty = auto-discover *.yaml
+  module_owned: [telegram, cloudflare]

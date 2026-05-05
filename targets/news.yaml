@@ -1,0 +1,73 @@
+# News targets — blocked/restricted in Russia
+# Fields: url, domain, expected_status, category, notes
+
+targets:
+  - domain: meduza.io
+    urls:
+      - https://meduza.io/
+    expected_status: 200
+    category: news
+    notes: "Latvian outlet, blocked in RU since 2021"
+
+  - domain: novayagazeta.eu
+    urls:
+      - https://novayagazeta.eu/
+    expected_status: 200
+    category: news
+    ech_advertised: true
+    notes: "Novaya Gazeta Europe, blocked in RU; advertises ECH via HTTPS-RR"
+
+  - domain: mediazona.ca
+    urls:
+      - https://mediazona.ca/
+    expected_status: 200
+    category: news
+    ech_advertised: true
+    notes: "Mediazona Canada mirror; advertises ECH via HTTPS-RR"
+
+  - domain: tvrain.ru
+    urls:
+      - https://tvrain.ru/
+    expected_status: 200
+    category: news
+    notes: "TV Rain / Дождь, blocked since March 2022"
+
+  - domain: bbc.com
+    urls:
+      - https://www.bbc.com/russian/
+    expected_status: 200
+    category: news
+    notes: "BBC Russian Service"
+
+  - domain: dw.com
+    urls:
+      - https://www.dw.com/ru/
+    expected_status: 200
+    category: news
+    notes: "Deutsche Welle Russian"
+
+  - domain: rferl.org
+    urls:
+      - https://www.rferl.org/
+    expected_status: 200
+    category: news
+    notes: "Radio Free Europe / Radio Liberty"
+
+  - domain: currenttime.tv
+    urls:
+      - https://www.currenttime.tv/
+    expected_status: 200
+    category: news
+    notes: "Настоящее Время, RFE/RL"
+
+  - domain: inopressa.ru
+    urls:
+      - https://www.inopressa.ru/
+    expected_status: 200
+    category: news
+
+  - domain: bellingcat.com
+    urls:
+      - https://www.bellingcat.com/
+    expected_status: 200
+    category: news

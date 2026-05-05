@@ -1,0 +1,3 @@
+ignore:
+  - DL3008  # pin apt-get versions — impractical for VPN/build-system packages
+  - DL3003  # use WORKDIR instead of cd — legitimate in complex multi-stage build scripts
