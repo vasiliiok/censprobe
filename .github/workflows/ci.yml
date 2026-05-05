@@ -335,6 +335,11 @@ jobs:
       # the image we just built and never reach Docker Hub.
       DOCKERHUB_USERNAME: censprobe-ci
       DOCKERHUB_TAG: e2e-local
+      # The committed .env keeps DB_PASSWORD empty so production never
+      # starts with a known default; CI sets it here so postgres has a
+      # non-empty password and `docker compose up --wait` doesn't fail
+      # the healthcheck on an unhealthy postgres container.
+      DB_PASSWORD: ci
     steps:
       - uses: actions/checkout@v4
 
