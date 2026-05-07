@@ -24,7 +24,6 @@ from urllib.parse import urlparse
 import httpx
 
 from censprobe_core._evidence import describe_exception
-
 from censprobe_core.config import get_config
 from censprobe_core.models import BlockingMethod, TestResult, Verdict
 

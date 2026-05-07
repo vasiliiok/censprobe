@@ -10,8 +10,9 @@ falls back to the cause chain and finally the exception class name.
 from __future__ import annotations
 
 import httpx
-from censprobe_core.models import BlockingMethod, Verdict
+
 from censprobe_core._evidence import describe_exception
+from censprobe_core.models import BlockingMethod, Verdict
 from censprobe_core.modules.http import _classify_connect_error
 
 
