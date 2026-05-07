@@ -200,8 +200,11 @@ services:
       - grafana_data:/var/lib/grafana
       - ./packages/dashboard/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./packages/dashboard/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    # Bind to loopback only — the committed GRAFANA_PASSWORD=admin is safe
+    # default only because the port isn't reachable off-host. SSH-tunnel
+    # (`ssh -L 3000:127.0.0.1:3000 host`) when accessing remotely.
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     depends_on:
       # Without service_healthy, Grafana would race ahead of Postgres /
       # sync-api on `up`, log datasource errors, and leave the user

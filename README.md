@@ -87,14 +87,7 @@ git clone https://github.com/<YOUR_GITHUB_USERNAME>/censprobe.git
 cd censprobe
 ```
 
-Файл `.env` в репо коммитится с safe defaults для localhost-only сервисов (Postgres / Grafana) — `docker compose up` работает out of the box. Если разворачиваете dashboard на машине, до которой кто-то может дотянуться по сети, перегенерируйте пароли локально:
-
-```bash
-# Сгенерировать пароль для Postgres
-sed -i -E "s/^DB_PASSWORD=.*/DB_PASSWORD=$(openssl rand -base64 24)/" .env
-# Установить Grafana admin пароль
-sed -i -E "s/^GRAFANA_PASSWORD=.*/GRAFANA_PASSWORD=$(openssl rand -base64 16)/" .env
-```
+Файл `.env` в репо коммитится с safe defaults для localhost-only сервисов (Postgres / Grafana) — `docker compose up` работает out of the box. Если разворачиваете dashboard на машине, до которой кто-то может дотянуться по сети, перегенерируйте `DB_PASSWORD` и `GRAFANA_PASSWORD` в своём working tree.
 
 Опционально — ASN/geo enrichment через ipapi.is:
 
@@ -422,7 +415,7 @@ docker compose --profile dashboard up -d
 - `GF_USERS_ALLOW_SIGN_UP=false`, `GF_USERS_ALLOW_ORG_CREATE=false`
 - `GF_SNAPSHOTS_EXTERNAL_ENABLED=false`, `GF_PLUGINS_PLUGIN_ADMIN_ENABLED=false`
 
-Grafana порт `3000:3000` (всё локально); sync-api на `127.0.0.1:8080:8080` (loopback only — нет auth, единственный потребитель в кластере — Grafana через Postgres datasource).
+Grafana на `127.0.0.1:3000:3000` (loopback only — committed `GRAFANA_PASSWORD=admin` безопасен только из-за этого; для удалённого доступа — SSH-туннель); sync-api на `127.0.0.1:8080:8080` (loopback only — нет auth, единственный потребитель в кластере — Grafana через Postgres datasource).
 
 Postgres + Grafana образы pinned по digest (`postgres:16@sha256:...`, `grafana/grafana:11.5.4@sha256:...`) — minor bumps на Docker Hub не могут silently изменить бинарь.
 
@@ -669,6 +662,6 @@ censprobe/
 - Пропущенный `ports:` в `targets/telegram.yaml` для `TelegramDC` → pydantic `ValidationError` (с момента mai 2026 — `Field(min_length=1)`).
 - Пропущенное поле в credentials YAML (например `vless_reality.server_name`) → `parse_protocols_yaml` raises `ValueError`. Listener и client деплоятся в lockstep одной compose-сборкой, schema mismatch → баг.
 
-Единственные намеренные исключения:
-- **Секреты** (`IPAPI_IS_KEY`, `DB_PASSWORD`, `GRAFANA_PASSWORD`) — в `.env`, не в YAML. Это явный карвaут от правила «yaml only» — секреты в публично-коммитнутом YAML недопустимы.
-- **`DOCKERHUB_USERNAME` / `DOCKERHUB_TAG`** — Docker-level config, не runtime application config.
+Единственное намеренное исключение — `.env`. Закоммичен в репо с safe defaults для loopback-only сервисов (`DOCKERHUB_USERNAME`/`DOCKERHUB_TAG`, `CREDS_PORT`, `DB_PASSWORD` (случайный 32-hex), `GRAFANA_PASSWORD=admin`, `RUNS_COUNT`, `CENSPROBE_IMPORT_INTERVAL_SEC`), чтобы `docker compose up` работал out of the box. Полная таблица значений — в [Переменные окружения](#переменные-окружения-env); перегенерируйте `DB_PASSWORD`/`GRAFANA_PASSWORD` в своём working tree перед удалённым деплоем.
+
+Единственное поле в `.env`, которое коммитится пустым — `IPAPI_IS_KEY`. Это настоящий пользовательский секрет (API-ключ ipapi.is); реальное значение храните только локально. Проект работает и без него — через rate-limited free tier.
