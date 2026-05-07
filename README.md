@@ -331,7 +331,12 @@ Sustained-data probe через SOCKS-routed протоколы (Shadowsocks, VL
 
 ## Восемь модулей измерения
 
-`packages/probe-core/src/censprobe_core/modules/`. Все async, регистрируются через `module_registry.py`. Phase: `parallel` (dns/tcp/tls/http/throttling/telegram/cloudflare/middlebox запускаются параллельно через `asyncio.gather(return_exceptions=True)`); упавший модуль отображается в `module_failures` summary, не сабатирует остальное.
+`packages/probe-core/src/censprobe_core/modules/`. Все async, регистрируются через `module_registry.py`. Запуск двухфазный (`runner.py`):
+
+- **Phase A — parallel**: `dns`, `tcp`, `tls`, `http`, `telegram`, `cloudflare` (6 модулей через `asyncio.gather(return_exceptions=True)`, каждый с собственным внутренним throttling'ом).
+- **Phase B — serial**: `throttling` и `middlebox` (sequential, чтобы bandwidth-/RTT-чувствительные пробы шли по тихому uplink'у и не искажались параллельной нагрузкой).
+
+Упавший модуль отображается в `module_failures` summary, не сабатирует остальное.
 
 ### `dns.py`
 Per-domain ladder: системный resolver → ISP upstream (parsed from `/etc/resolv.conf` или systemd-resolved) → public 8.8.8.8 / 1.1.1.1 / 77.88.8.8 (Yandex) / 9.9.9.9 (Quad9) → DoH (`cloudflare-dns.com`, `dns.google`, `mozilla.cloudflare-dns.com`) → DoT (`1.1.1.1:853`, `8.8.8.8:853`). Для каждого IP — TLS-cert validation (CERTainty-style). Обогащение через `ipapi.is` (опционально через `IPAPI_IS_KEY`).
@@ -385,10 +390,12 @@ OONI-style detection. HTTP Header Field Manipulation: меняет регист�
 - **`entry_score`** — насколько хорошо клиент может **войти** на сервер (handshake протоколов с client side, latency, uplink reachability).
 - **`exit_score`** — насколько хорошо сервер может **выходить** в публичный интернет с RU-вантажа (uplink reachability + censorship pressure).
 - **`relay_score`** — TCP-метрики + latency без учёта протоколов (для серверов в роли transit relay, не endpoint).
-- **`overall`** — `(entry + exit + relay) / 3`.
+- **`overall`** — среднее арифметическое (`scoring.py:190`):
+  - **Есть listener-данные**: `mean(entry, exit, relay)`.
+  - **Нет listener-данных**: `mean(exit, relay)` — `entry_score` исключён, потому что `_protocol_reachability()` возвращает нейтральное `0.5` без listener_reports и иначе несправедливо тянул бы среднее вниз. CLI и поле `listener_session_count` (0 ⇒ partial) помечают такой `overall` как partial.
 
 Также:
-- **`techniques_detected`** — list[BlockingMethod] (DNS_POISONED, RST_INJECTED, SNI_BLOCKED, GEOBLOCK_NOT_CENSORSHIP, QUIC_DROPPED, YOUTUBE_SNI_THROTTLED).
+- **`techniques_detected`** — отсортированный список `BlockingMethod` (см. `models.py:55`), собранный по результатам с `verdict ∈ BLOCKING_VERDICTS`. Полный набор значений: `dns_poisoning`, `dns_blocked_nxdomain`, `doh_blocked`, `ip_dropped`, `tcp_rst_injection`, `tcp_rst_after_tls_ch`, `tls_handshake_failure`, `ech_blocked`, `sni_throttling`, `quic_dropped`, `openvpn_signature_blocked`, `wireguard_signature_blocked`, `shadowsocks_active_probed`, `vpn_data_phase_blocked`, `middlebox_http_manipulation`, `unknown`.
 - **`recommended_protocols`** — список протоколов, упорядоченных по `protocols.priority` где handshake прошёл (signature-blocked отфильтрованы).
 
 Веса все настраиваются через `scoring.entry/exit/relay` в `censprobe.yaml`.

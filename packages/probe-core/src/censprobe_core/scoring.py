@@ -10,7 +10,14 @@ Weights are read from
   entry_score = protocol_reachability·W_p + uplink·W_u + latency·W_l
   exit_score  = uplink·W_u + censorship·W_c
   relay_score = tcp·W_t + latency·W_l
-  overall     = max(entry, exit, relay)
+  overall     = mean(entry, exit, relay)         # listener data present
+  overall     = mean(exit, relay)                # listener data missing —
+                                                  # entry is built on a
+                                                  # neutral 0.5 fallback
+                                                  # for protocol_reach,
+                                                  # so averaging it in
+                                                  # would unfairly drag
+                                                  # the score down.
 
 The recommended-protocol list is built from
 :data:`censprobe_core.protocol_registry.PROTOCOLS` ordered by the
@@ -187,17 +194,30 @@ def compute_scores(
     )
 
     # ── Overall ───────────────────────────────────────────────────────────────
-    scores.overall = round(max(scores.entry_score, scores.exit_score, scores.relay_score), 1)
+    # max() rewarded any one strong axis and silently masked the rest —
+    # a solo-only run with clean TCP would always score 100 even with
+    # detected DPI techniques. Use a mean instead, but skip entry when
+    # there's no listener data: _protocol_reachability() returns 0.5
+    # neutral in that case and would unfairly drag the average down.
+    scores.listener_session_count = len(listener_reports) if listener_reports else 0
+    if scores.listener_session_count > 0:
+        scores.overall = round(
+            (scores.entry_score + scores.exit_score + scores.relay_score) / 3.0,
+            1,
+        )
+    else:
+        scores.overall = round((scores.exit_score + scores.relay_score) / 2.0, 1)
 
     # ── Recommended protocols ─────────────────────────────────────────────────
     scores.recommended_protocols = _recommend_protocols(solo_results, listener_reports)
 
     logger.info(
-        "Scores — entry=%.0f exit=%.0f relay=%.0f overall=%.0f | techniques=%s",
+        "Scores — entry=%.0f exit=%.0f relay=%.0f overall=%.0f%s | techniques=%s",
         scores.entry_score,
         scores.exit_score,
         scores.relay_score,
         scores.overall,
+        "" if scores.listener_session_count > 0 else " (no listener data)",
         scores.detected_techniques or "none",
     )
     return scores

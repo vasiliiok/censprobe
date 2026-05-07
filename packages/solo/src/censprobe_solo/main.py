@@ -207,10 +207,13 @@ async def _async_main(test_id: str, repeats: int) -> None:
         "`git add reports/ && git commit && git push` from the host.[/dim]"
     )
 
+    overall_note = (
+        "" if scores.listener_session_count > 0 else " [dim](no listener data — partial)[/dim]"
+    )
     console.print(
         Panel.fit(
             f"[bold green]Solo complete.[/bold green]\n"
-            f"Overall score: [yellow]{scores.overall}/100[/yellow]\n"
+            f"Overall score: [yellow]{scores.overall}/100[/yellow]{overall_note}\n"
             f"Techniques detected: {', '.join(scores.detected_techniques) or 'none'}",
             title="Done",
         )
@@ -246,11 +249,14 @@ def _print_summary(results: list[TestResult], scores: ServerScores) -> None:
         )
 
     console.print(table)
+    overall_note = (
+        "" if scores.listener_session_count > 0 else " [dim](no listener data)[/dim]"
+    )
     console.print(
         f"\n[bold]Scores:[/bold] entry=[yellow]{scores.entry_score}[/yellow] "
         f"exit=[yellow]{scores.exit_score}[/yellow] "
         f"relay=[yellow]{scores.relay_score}[/yellow] "
-        f"overall=[bold yellow]{scores.overall}[/bold yellow]/100"
+        f"overall=[bold yellow]{scores.overall}[/bold yellow]/100{overall_note}"
     )
 
     if scores.throttling_detected:

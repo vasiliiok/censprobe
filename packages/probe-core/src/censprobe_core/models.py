@@ -291,6 +291,11 @@ class ServerScores(BaseModel):
     exit_score: float = 0.0  # As VPN exit
     relay_score: float = 0.0  # As relay node
     overall: float = 0.0
+    # Number of listener-session reports that fed compute_scores. When 0,
+    # entry_score is built on a neutral 0.5 fallback for protocol
+    # reachability and overall is averaged over (exit, relay) only. Used
+    # by CLI/dashboard to label the score as partial.
+    listener_session_count: int = 0
     telegram_health: float = 0.0
     dns_integrity: float = 0.0
     tls_integrity: float = 0.0

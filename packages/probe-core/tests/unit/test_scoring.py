@@ -192,7 +192,9 @@ class TestComputeScores:
         assert scores.exit_score == pytest.approx(0.0)
         # relay = (0.0*0.7 + 0.5*0.3) * 100 = 15.0
         assert scores.relay_score == pytest.approx(15.0)
-        assert scores.overall == pytest.approx(35.0)
+        # No listener → overall = mean(exit, relay) = (0 + 15) / 2 = 7.5
+        assert scores.listener_session_count == 0
+        assert scores.overall == pytest.approx(7.5)
         assert scores.dns_integrity == pytest.approx(0.0)
         assert scores.tls_integrity == pytest.approx(0.0)
         assert scores.throttling_detected is False
@@ -216,7 +218,53 @@ class TestComputeScores:
         assert scores.exit_score == pytest.approx(100.0)
         # relay = (1.0*0.7 + 1.0*0.3) * 100 = 100.0
         assert scores.relay_score == pytest.approx(100.0)
+        # No listener → overall = mean(exit, relay) = (100 + 100) / 2 = 100
+        assert scores.listener_session_count == 0
         assert scores.overall == pytest.approx(100.0)
+
+    def test_overall_with_listener_averages_three_axes(self) -> None:
+        # entry + exit + relay all distinct → overall = mean of all three.
+        # Listener present: protocol_reach = 1.0 (one OK protocol).
+        # results: 4/4 OK across http/tcp with 20ms RTT.
+        # entry = (1.0*0.6 + 1.0*0.3 + 1.0*0.1) * 100 = 100.0
+        # exit  = (1.0*0.6 + 1.0*0.4) * 100 = 100.0
+        # relay = (1.0*0.7 + 1.0*0.3) * 100 = 100.0
+        # overall = mean(100, 100, 100) = 100
+        results = [
+            _make_result(Verdict.OK, category="http", rtt_ms=20.0),
+            _make_result(Verdict.OK, category="tcp", rtt_ms=20.0),
+        ]
+        listener = _make_listener_report({"wireguard": Verdict.OK})
+        scores = compute_scores(results, [listener])
+        assert scores.listener_session_count == 1
+        assert scores.entry_score == pytest.approx(100.0)
+        assert scores.exit_score == pytest.approx(100.0)
+        assert scores.relay_score == pytest.approx(100.0)
+        assert scores.overall == pytest.approx(100.0)
+
+    def test_overall_no_listener_skips_entry_axis(self) -> None:
+        # Reproduces the solo-only "overall=100 hides DPI" bug: with
+        # listener absent, entry is artificially capped (0.5 neutral
+        # protocol_reach) and must be excluded from overall so the
+        # number reflects actual exit/relay observations only.
+        # uplink = 1.0, latency = 1.0 → entry = 70, exit = 100, relay = 100.
+        # overall (no listener) = mean(100, 100) = 100 — correctly built
+        # from observed signals, not pulled down by the neutral entry.
+        results = [
+            _make_result(Verdict.OK, category="http", rtt_ms=20.0),
+            _make_result(Verdict.OK, category="tcp", rtt_ms=20.0),
+        ]
+        scores = compute_scores(results, None)
+        assert scores.listener_session_count == 0
+        assert scores.entry_score == pytest.approx(70.0)
+        assert scores.overall == pytest.approx(100.0)
+        # And when the same numbers come with listener data (proto=1.0),
+        # overall averages all three axes — entry climbs to 100 too.
+        listener = _make_listener_report({"wireguard": Verdict.OK})
+        scores_full = compute_scores(results, [listener])
+        assert scores_full.listener_session_count == 1
+        assert scores_full.entry_score == pytest.approx(100.0)
+        assert scores_full.overall == pytest.approx(100.0)
 
     def test_throttling_detected_lowers_exit(self) -> None:
         # Method-B SNI throttling should trigger detection AND knock 0.2

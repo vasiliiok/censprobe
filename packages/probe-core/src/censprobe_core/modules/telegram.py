@@ -144,18 +144,37 @@ def _enumerate_dc_endpoints(
     dcs: list[dict[str, Any]],
     skip_ipv6: bool,
 ) -> list[tuple[int, str, str, int]]:
-    """Flatten (dc_id, ip_ver, ip, port) tuples for every reachable DC endpoint."""
+    """Flatten (dc_id, ip_ver, ip, port) tuples for every reachable DC endpoint.
+
+    ``TelegramDC.ipv4`` / ``ipv6`` are typed as ``list[str]`` (with a scalar
+    coerced into a one-element list by ``_coerce_ip_list``). The previous
+    version of this function read ``dc.get(ip_key)`` and passed the list
+    itself as the ``ip`` field of the tuple — ``_test_dc_port`` then called
+    ``asyncio.open_connection([...], port)``, which raises ``TypeError``.
+    Since the only exceptions ``_test_dc_port`` catches are TimeoutError /
+    ConnectionRefusedError / OSError, the TypeError bubbled up to
+    ``_test_dc_reachability``'s ``gather(..., return_exceptions=True)`` and
+    was silently dropped (debug log only). Net effect: zero ``telegram_dc_*``
+    results in every report and a ~55-point underestimate of Telegram
+    health.
+    """
     out: list[tuple[int, str, str, int]] = []
     for dc in dcs:
         dc_id = dc["id"]
         for ip_ver, ip_key in (("v4", "ipv4"), ("v6", "ipv6")):
             if ip_ver == "v6" and skip_ipv6:
                 continue
-            ip = dc.get(ip_key)
-            if not ip:
-                continue
-            for port in dc.get("ports", [443]):
-                out.append((dc_id, ip_ver, ip, port))
+            ips = dc.get(ip_key) or []
+            # Defensive: handle scalar carry-overs from older serialised
+            # forms — the schema is list[str] but model_dump on legacy
+            # data could leak a bare string. Normalise to a list either way.
+            if isinstance(ips, str):
+                ips = [ips]
+            for ip in ips:
+                if not ip:
+                    continue
+                for port in dc.get("ports", [443]):
+                    out.append((dc_id, ip_ver, ip, port))
     return out
 
 
@@ -174,11 +193,35 @@ async def _test_dc_reachability(
     completed = await asyncio.gather(*tasks, return_exceptions=True)
 
     results: list[TestResult] = []
-    for r in completed:
+    for r, ep in zip(completed, endpoints, strict=True):
         if isinstance(r, TestResult):
             results.append(r)
-        elif isinstance(r, Exception):
-            logger.debug("DC test error: %s", r)
+        elif isinstance(r, BaseException):
+            # Surface the failure as a result instead of swallowing it. A
+            # silent debug-log-only drop is what hid the
+            # _enumerate_dc_endpoints list-vs-string bug from every prior
+            # report — every test produced TypeError, every TypeError got
+            # logged at DEBUG, every report shipped with zero DC results
+            # and an artificially-deflated telegram_health_score.
+            dc_id, ip_ver, ip, port = ep
+            logger.warning(
+                "[telegram] DC test telegram_dc%d_%s_%d crashed: %s",
+                dc_id,
+                ip_ver,
+                port,
+                r,
+            )
+            results.append(
+                TestResult(
+                    test=f"telegram_dc{dc_id}_{ip_ver}_{port}",
+                    category="telegram",
+                    target=f"{ip}:{port}",
+                    verdict=Verdict.ERROR,
+                    evidence={"error": repr(r), "error_type": type(r).__name__},
+                    confidence=0.0,
+                    notes="DC probe raised an unexpected exception — see logs.",
+                )
+            )
     return results
 
 
