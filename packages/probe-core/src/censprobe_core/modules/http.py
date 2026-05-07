@@ -23,6 +23,8 @@ from urllib.parse import urlparse
 
 import httpx
 
+from censprobe_core._evidence import describe_exception
+
 from censprobe_core.config import get_config
 from censprobe_core.models import BlockingMethod, TestResult, Verdict
 
@@ -145,27 +147,6 @@ async def _attempt_url(
     )
 
 
-def _describe_exception(e: BaseException) -> str:
-    """Render an exception for `evidence` so it never collapses to ``""``.
-
-    ``str(httpx.ConnectError())`` is empty when the underlying httpcore
-    error chain produced no message — historically that surfaced as
-    ``connect_error: ""`` in saved reports (e.g. the May 2026 ya-a run for
-    currenttime.tv) and gave the dashboard nothing to display. Fall back
-    to the cause chain and finally the class name so something always
-    lands in evidence.
-    """
-    msg = str(e).strip()
-    if msg:
-        return msg
-    cause = getattr(e, "__cause__", None) or getattr(e, "__context__", None)
-    if cause is not None:
-        cause_msg = str(cause).strip()
-        if cause_msg:
-            return f"{type(e).__name__}: {cause_msg}"
-    return f"{type(e).__name__} (no message)"
-
-
 def _classify_connect_error(
     e: httpx.ConnectError,
     url: str,
@@ -173,7 +154,7 @@ def _classify_connect_error(
     attempt: int,
 ) -> TestResult:
     """Map httpx.ConnectError to BLOCKED with the right BlockingMethod."""
-    err_text = _describe_exception(e)
+    err_text = describe_exception(e)
     err_msg = err_text.lower()
     if (
         isinstance(getattr(e, "__cause__", None), ssl.SSLError)

@@ -62,6 +62,7 @@ from typing import Any
 
 import httpx
 
+from censprobe_core._evidence import describe_exception
 from censprobe_core.models import BlockingMethod, TestResult, Verdict
 from censprobe_core.server_meta import is_censoring_vantage
 
@@ -658,10 +659,11 @@ async def _test_http(domain: str, url: str, expected_status: int) -> TestResult:
             evidence={"error": "connect_timeout"},
         )
     except httpx.ConnectError as e:
-        err = str(e).lower()
+        err_text = describe_exception(e)
+        err_lower = err_text.lower()
         method = (
             BlockingMethod.TLS_HANDSHAKE_FAILURE
-            if ("ssl" in err or "certificate" in err)
+            if ("ssl" in err_lower or "certificate" in err_lower)
             else BlockingMethod.IP_DROPPED
         )
         return TestResult(
@@ -670,7 +672,7 @@ async def _test_http(domain: str, url: str, expected_status: int) -> TestResult:
             target=url,
             verdict=Verdict.BLOCKED,
             method=method,
-            evidence={"error": str(e)},
+            evidence={"error": err_text},
         )
     except Exception as e:
         return TestResult(
@@ -678,5 +680,5 @@ async def _test_http(domain: str, url: str, expected_status: int) -> TestResult:
             category="cloudflare",
             target=url,
             verdict=Verdict.INCONCLUSIVE,
-            evidence={"error": str(e)},
+            evidence={"error": describe_exception(e)},
         )
