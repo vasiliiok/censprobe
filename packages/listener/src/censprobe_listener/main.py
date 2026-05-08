@@ -564,17 +564,26 @@ def _print_client_run_command(
         f" --creds-token {creds_token}"
         f" --creds-cert-sha256 {creds_cert_sha256}"
     )
+    # Deliberately NOT wrapped in a Rich Panel: the panel borders and any
+    # mid-command line wrapping introduced by Rich become literal `│`
+    # characters when the operator copies the line on Windows terminals,
+    # corrupting the command. We print a short header, then the bare
+    # command on its own line with `soft_wrap=True` so the terminal (not
+    # Rich) handles wrapping — copying still yields a single clean line.
+    console.print()
+    console.rule("[bold green]Client setup command[/bold green]", style="green")
     console.print(
-        Panel.fit(
-            "[bold]Run this on the client machine[/bold] (in your local clone).\n"
-            "Works as-is on Linux, macOS, and Windows (PowerShell or cmd):\n\n"
-            f"[cyan]{cmd}[/cyan]\n\n"
-            "[dim]The credentials are served once over a TLS-pinned channel "
-            "(self-signed cert, fingerprint above). Token is single-use.[/dim]",
-            title="Client setup command",
-            border_style="green",
-        )
+        "[bold]Run this on the client machine[/bold] (in your local clone). "
+        "Works as-is on Linux, macOS, and Windows (PowerShell or cmd):"
     )
+    console.print()
+    console.print(cmd, style="cyan", soft_wrap=True, highlight=False, markup=False)
+    console.print()
+    console.print(
+        "[dim]The credentials are served once over a TLS-pinned channel "
+        "(self-signed cert, fingerprint above). Token is single-use.[/dim]"
+    )
+    console.rule(style="green")
 
 
 def _print_responder_status(
