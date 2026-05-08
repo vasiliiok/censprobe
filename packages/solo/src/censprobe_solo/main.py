@@ -207,9 +207,8 @@ async def _async_main(test_id: str, repeats: int) -> None:
         "`git add reports/ && git commit && git push` from the host.[/dim]"
     )
 
-    overall_note = (
-        "" if scores.listener_session_count > 0 else " [dim](no listener data — partial)[/dim]"
-    )
+    note_partial = " [dim](no listener data — partial)[/dim]"
+    overall_note = "" if scores.listener_session_count > 0 else note_partial
     console.print(
         Panel.fit(
             f"[bold green]Solo complete.[/bold green]\n"
@@ -249,9 +248,7 @@ def _print_summary(results: list[TestResult], scores: ServerScores) -> None:
         )
 
     console.print(table)
-    overall_note = (
-        "" if scores.listener_session_count > 0 else " [dim](no listener data)[/dim]"
-    )
+    overall_note = "" if scores.listener_session_count > 0 else " [dim](no listener data)[/dim]"
     console.print(
         f"\n[bold]Scores:[/bold] entry=[yellow]{scores.entry_score}[/yellow] "
         f"exit=[yellow]{scores.exit_score}[/yellow] "
