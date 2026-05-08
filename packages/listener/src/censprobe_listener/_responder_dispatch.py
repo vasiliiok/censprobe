@@ -41,11 +41,15 @@ from censprobe_listener.wg_responder import (
 class Responder(Protocol):
     """Duck-typed surface every responder exposes to the listener loop.
 
-    The 7 concrete responder classes don't share a base class because
-    OpenVPN / WireGuard / AmneziaWG / MTProxy each wrap a very different
-    foreign tool, and ``SubprocessResponder`` only fits the sing-box /
-    xray / hysteria family. This Protocol captures the read-side
-    contract listener/main.py relies on so the helpers there can be
+    The concrete responder classes (one per foreign tool — OpenVPN,
+    WireGuard, AmneziaWG, MTProxy, sing-box, xray, hysteria) don't share
+    a base class because each wraps a very different binary, and
+    ``SubprocessResponder`` only fits the sing-box / xray / hysteria
+    family. ``MTProxyResponder`` is reused for both ``mtproto_proxy``
+    and ``mtproto_proxy_alt`` (same wire protocol, different bind port),
+    so the count of *responder classes* lags the count of *protocols*
+    in the registry by one. This Protocol captures the read-side
+    contract ``listener/main.py`` relies on so the helpers there can be
     typed without leaking ``Any``.
     """
 
@@ -129,6 +133,14 @@ def _factory_mtproto_proxy(creds: ProtocolCredentials, _echo: EchoServer | None)
     return MTProxyResponder(creds.mtproxy_port, creds.mtproxy_secret)
 
 
+def _factory_mtproto_proxy_alt(creds: ProtocolCredentials, _echo: EchoServer | None) -> Responder:
+    # Same responder class as mtproto_proxy — a second mtg instance on an
+    # alternate port with an independent ee-secret. Two ProtocolResult
+    # rows let the dashboard compare port-443 vs alt-port verdicts and
+    # tell port-keyed DPI from L7-keyed DPI apart.
+    return MTProxyResponder(creds.mtproxy_alt_port, creds.mtproxy_alt_secret)
+
+
 # Mapping is keyed by the same canonical name as
 # :data:`censprobe_core.protocol_registry.PROTOCOLS`. Missing entries
 # (a name in the protocol registry without a factory here) raise a
@@ -141,4 +153,5 @@ LISTENER_RESPONDERS: dict[str, ResponderFactory] = {
     "vless_reality": _factory_vless_reality,
     "hysteria2": _factory_hysteria2,
     "mtproto_proxy": _factory_mtproto_proxy,
+    "mtproto_proxy_alt": _factory_mtproto_proxy_alt,
 }

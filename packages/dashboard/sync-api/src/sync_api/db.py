@@ -250,7 +250,6 @@ class ProtocolResult(Base):
     verdict: Mapped[str] = mapped_column(String(64), nullable=False)
     handshake_count: Mapped[int] = mapped_column(Integer, default=0)
     data_transfer_ok: Mapped[bool] = mapped_column(Boolean, default=False)
-    avg_rtt_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Listener-side sustained-data measurement (only populated for SS /
     # VLESS / Hysteria2 — the three protocols that route through the
     # loopback echo server). NULL for OpenVPN / WireGuard / AmneziaWG

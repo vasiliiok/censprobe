@@ -372,7 +372,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT ls.session_id, COALESCE(ls.client_meta->'asn'->>'org', '—') AS client_org, pr.verdict, pr.handshake_count, pr.data_transfer_ok, pr.avg_rtt_ms FROM protocol_results pr JOIN listener_sessions ls ON ls.id = pr.session_id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE tr.test_id = ${test_id:sqlstring} AND pr.protocol = 'hysteria2' ORDER BY ls.session_id",
+          "rawSql": "SELECT ls.session_id, COALESCE(ls.client_meta->'asn'->>'org', '—') AS client_org, pr.verdict, pr.handshake_count, pr.data_transfer_ok, pr.avg_throughput_mbps FROM protocol_results pr JOIN listener_sessions ls ON ls.id = pr.session_id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE tr.test_id = ${test_id:sqlstring} AND pr.protocol = 'hysteria2' ORDER BY ls.session_id",
           "format": "table",
           "refId": "A",
           "editorMode": "code",

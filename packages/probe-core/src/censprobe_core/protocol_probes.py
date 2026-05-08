@@ -252,13 +252,44 @@ def _classify_proxy_outcome(
     return False, False
 
 
-async def ping_echo(ip: str, timeout: float = 3.0) -> bool:
-    """Ping a tunnel IP to verify data echo."""
-    code, _, _ = await run_cmd(
-        ["ping", "-c", "1", "-W", str(int(timeout)), ip],
-        timeout=timeout + 1,
+async def ping_echo(ip: str, timeout: float = 3.0, count: int = 3, min_received: int = 2) -> bool:
+    """Ping a tunnel IP and verify the peer actually replies.
+
+    Sends ``count`` ICMP echoes, requires at least ``min_received`` replies
+    to declare the data plane working. A single ping is too weak: in some
+    container/host networking edge cases (Windows Docker Desktop with
+    ``network_mode: host``, certain VPN-on-VPN nesting setups) a lone
+    echo can spuriously succeed even when the listener never observed any
+    traffic — producing client-side OK / listener-side BLOCKED splits.
+    Requiring ≥2 echoes out of 3 makes those single-shot quirks visible.
+
+    The ``ping`` exit status is ``0`` only when at least one reply was
+    received, so we additionally parse "N received" out of stdout to apply
+    the stricter ``min_received`` threshold.
+    """
+    deadline = max(int(timeout), 1)
+    code, out, _ = await run_cmd(
+        ["ping", "-c", str(count), "-W", str(deadline), "-i", "0.3", ip],
+        # Worst case: count * deadline (pings can stall up to deadline each).
+        timeout=count * deadline + 2,
     )
-    return code == 0
+    if code != 0:
+        return False
+    # iputils-ping summary line:
+    #   "<count> packets transmitted, <received> received, 0% packet loss, ..."
+    # Exit code 0 means ≥1 reply received, but we need a stricter
+    # threshold to filter the single-shot quirk above.
+    received = 0
+    for line in out.splitlines():
+        stripped = line.strip()
+        if "packets transmitted" in stripped and " received" in stripped:
+            parts = stripped.split(",")
+            if len(parts) >= 2:
+                tokens = parts[1].strip().split()
+                if tokens and tokens[0].isdigit():
+                    received = int(tokens[0])
+                    break
+    return received >= min_received
 
 
 async def _wait_port_listening(
@@ -1050,11 +1081,17 @@ def _parse_mtproto_secret(secret_hex: str) -> tuple[bytes, str] | ProbeResult:
 
 def _build_mtproto_clienthello(
     secret_key: bytes, sni_host: str
-) -> tuple[bytearray, bytes] | ProbeResult:
+) -> tuple[bytearray, bytes, bytes] | ProbeResult:
     """Build the 517-byte fake-TLS ClientHello with HMAC-derived client_random.
 
-    Returns ``(hello_bytes, session_id)`` or a failed ProbeResult if length
-    invariants would be violated.
+    Returns ``(hello_bytes, session_id, client_random)`` or a failed
+    ProbeResult if length invariants would be violated. ``client_random``
+    is the exact 32-byte block we end up writing into the ClientHello —
+    needed verbatim later as the first input to mtg's WelcomePacket HMAC,
+    which is what distinguishes a real mtg response from a domain-fronting
+    fallback (mtg falls back to fronting on ANY validation failure: bad
+    HMAC, ≥3 s clock skew, replay, even a captive-portal MitM serving its
+    own real TLS would clear the session-id-only check).
 
     Layout copied from the reference implementations; the ciphersuite list,
     session-id length (32), and extension layout are all checked by mtg's
@@ -1152,7 +1189,7 @@ def _build_mtproto_clienthello(
     for i in range(4):
         new_random[28 + i] ^= ts_bytes[i]
     hello[random_offset : random_offset + 32] = new_random
-    return hello, session_id
+    return hello, session_id, bytes(new_random)
 
 
 async def _open_mtproto_tcp(
@@ -1182,48 +1219,119 @@ async def _send_clienthello(writer: asyncio.StreamWriter, hello: bytearray) -> P
     return None
 
 
-async def _read_mtproto_record(reader: asyncio.StreamReader) -> bytes | ProbeResult:
-    """Read the 5-byte TLS record header + body. mtg sends back
-    ContentType=22 (Handshake), version=0x0303. Any deviation (RST, plain
-    HTTP error, raw fronted reply that didn't preserve the version) → not
-    a real mtg responder.
+async def _read_mtproto_welcome_packet(reader: asyncio.StreamReader) -> bytes | ProbeResult:
+    """Read mtg's full WelcomePacket — three concatenated TLS records.
+
+    On a valid faketls handshake mtg always sends, in this exact order
+    (mtglib/internal/faketls/welcome.go::SendWelcomePacket):
+
+      1. Handshake (0x16)        — ServerHello with HMAC-bearing random
+      2. ChangeCipherSpec (0x14) — single 0x01 byte payload
+      3. ApplicationData (0x17)  — 1024…4115 bytes of random padding
+
+    All three bear version 0x0303 (TLS 1.2). The HMAC that authenticates
+    the response is computed over the *entire* concatenation (with the
+    32 bytes at WelcomePacketRandomOffset zeroed), so we MUST read all
+    three records to validate. A domain-fronted real-TLS ServerHello may
+    pass the session-id check, but cannot reproduce mtg's HMAC because
+    the fronted server doesn't know the secret key.
+
+    Capped at 16 KiB total (real welcome packet ≤ ~4.2 KiB; anything
+    larger is a stalling middlebox or bulk fronted transfer) so a
+    misbehaving peer can't make us read forever.
     """
-    try:
-        header = await asyncio.wait_for(reader.readexactly(5), timeout=5.0)
-    except asyncio.IncompleteReadError:
-        return _mtg_error_result("no_response", Verdict.BLOCKED)
-    except TimeoutError:
-        return _mtg_error_result("read_timeout", Verdict.BLOCKED)
+    packet = bytearray()
+    expected_types = (0x16, 0x14, 0x17)
+    max_total = 16 * 1024
+    for idx, expected_type in enumerate(expected_types):
+        try:
+            header = await asyncio.wait_for(reader.readexactly(5), timeout=5.0)
+        except asyncio.IncompleteReadError:
+            return _mtg_error_result(f"welcome_truncated_record{idx}", Verdict.BLOCKED)
+        except TimeoutError:
+            return _mtg_error_result(f"welcome_read_timeout_record{idx}", Verdict.BLOCKED)
+        if header[0] != expected_type:
+            return _mtg_error_result(
+                f"welcome_bad_type_record{idx}={header[0]:#x}", Verdict.BLOCKED
+            )
+        if header[1:3] != b"\x03\x03":
+            return _mtg_error_result(f"welcome_bad_version_record{idx}", Verdict.BLOCKED)
+        record_len = int.from_bytes(header[3:5], "big")
+        if record_len == 0:
+            return _mtg_error_result(f"welcome_zero_len_record{idx}", Verdict.BLOCKED)
+        if len(packet) + 5 + record_len > max_total:
+            return _mtg_error_result(f"welcome_oversize_record{idx}={record_len}", Verdict.BLOCKED)
+        try:
+            body = await asyncio.wait_for(reader.readexactly(record_len), timeout=5.0)
+        except asyncio.IncompleteReadError:
+            return _mtg_error_result(f"welcome_short_body_record{idx}", Verdict.BLOCKED)
+        except TimeoutError:
+            return _mtg_error_result(f"welcome_read_timeout_body_record{idx}", Verdict.BLOCKED)
+        packet += header + body
+    return bytes(packet)
 
-    if header[0] != 0x16 or header[1:3] != b"\x03\x03":
-        return _mtg_error_result("not_tls_handshake_record", Verdict.BLOCKED)
 
-    record_len = int.from_bytes(header[3:5], "big")
-    # Cap to a sane upper bound — a real ServerHello fits in well under
-    # 4 KiB; anything larger is a stalling middlebox or fronted bulk transfer.
-    if record_len == 0 or record_len > 8192:
-        return _mtg_error_result(f"bad_record_len:{record_len}", Verdict.BLOCKED)
-
-    try:
-        return await asyncio.wait_for(reader.readexactly(record_len), timeout=5.0)
-    except asyncio.IncompleteReadError:
-        return _mtg_error_result("short_serverhello", Verdict.BLOCKED)
-    except TimeoutError:
-        return _mtg_error_result("read_timeout_body", Verdict.BLOCKED)
+# ServerHello body starts 5 bytes (record hdr) + 4 bytes (handshake hdr) +
+# 2 bytes (server-version) into the packet, so the welcome-random sits at
+# offset 11. mtg's WelcomePacketRandomOffset constant agrees.
+_MTG_WELCOME_RANDOM_OFFSET = 11
+_MTG_WELCOME_RANDOM_LEN = 32
 
 
-def _validate_serverhello(record: bytes, session_id: bytes) -> ProbeResult | None:
-    """ServerHello layout: type=0x02, 24-bit length, version(2), random(32),
-    session_id_len(1), session_id... session_id MUST equal the one we sent —
-    this is what distinguishes mtg from a domain-fronted google.com response.
+def _validate_welcome_packet(
+    packet: bytes, session_id: bytes, client_random: bytes, secret_key: bytes
+) -> ProbeResult | None:
+    """Validate mtg's WelcomePacket. Three checks, in order of strictness:
+
+      1. ServerHello structurally well-formed and echoes our 32-byte
+         session-id (a real TLS server also echoes session-id, so this
+         alone is NOT enough — but it cheaply rejects RST / HTTP error
+         pages before we hit HMAC).
+      2. Welcome random == HMAC-SHA256(secret, client_random || packet
+         with bytes [11:43] zeroed). This is the cryptographic proof
+         that the peer holds the same ee-secret. A domain-fronted
+         google.com cannot fake this, regardless of session-id echo.
+
+    We use ``hmac.compare_digest`` to keep the comparison constant-time
+    against an attacker-controlled HMAC byte string (theoretical here,
+    but the safer default).
     """
-    if len(record) < 38 or record[0] != 0x02:
+    if len(packet) < _MTG_WELCOME_RANDOM_OFFSET + _MTG_WELCOME_RANDOM_LEN:
+        return _mtg_error_result("welcome_too_short", Verdict.BLOCKED)
+    # ServerHello sits at the start of record 1's payload — i.e. byte 5
+    # (after the 5-byte record header). HandshakeType(server) = 0x02.
+    if packet[5] != 0x02:
         return _mtg_error_result("not_server_hello", Verdict.BLOCKED)
-    sid_len = record[38]
-    if sid_len != 32 or len(record) < 39 + sid_len:
-        return _mtg_error_result("bad_sid_len", Verdict.BLOCKED)
-    if record[39 : 39 + sid_len] != session_id:
+    # session_id offset inside record 1: 5 (rec hdr) + 4 (hs hdr) + 2 (ver)
+    # + 32 (random) + 1 (sid_len) = 44; sid follows.
+    sid_offset = 5 + 4 + 2 + 32
+    if len(packet) < sid_offset + 1:
+        return _mtg_error_result("welcome_truncated_pre_sid", Verdict.BLOCKED)
+    sid_len = packet[sid_offset]
+    if sid_len != len(session_id):
+        return _mtg_error_result(f"bad_sid_len={sid_len}", Verdict.BLOCKED)
+    if len(packet) < sid_offset + 1 + sid_len:
+        return _mtg_error_result("welcome_truncated_in_sid", Verdict.BLOCKED)
+    if packet[sid_offset + 1 : sid_offset + 1 + sid_len] != session_id:
         return _mtg_error_result("session_id_mismatch", Verdict.BLOCKED)
+
+    import hashlib
+    import hmac
+
+    received_random = bytes(
+        packet[_MTG_WELCOME_RANDOM_OFFSET : _MTG_WELCOME_RANDOM_OFFSET + _MTG_WELCOME_RANDOM_LEN]
+    )
+    zeroed = bytearray(packet)
+    zeroed[_MTG_WELCOME_RANDOM_OFFSET : _MTG_WELCOME_RANDOM_OFFSET + _MTG_WELCOME_RANDOM_LEN] = (
+        b"\x00" * _MTG_WELCOME_RANDOM_LEN
+    )
+    expected = hmac.new(secret_key, client_random + bytes(zeroed), hashlib.sha256).digest()
+    if not hmac.compare_digest(expected, received_random):
+        # Almost certainly mtg's domain-fronting fallback — the peer
+        # served a real TLS ServerHello (so type/version/sid_echo all
+        # checked out) but did not know our ee-secret. Treat as BLOCKED:
+        # the proxy is not actually reachable by Telegram clients.
+        return _mtg_error_result("welcome_hmac_mismatch", Verdict.BLOCKED)
     return None
 
 
@@ -1236,7 +1344,7 @@ async def probe_mtproto_proxy(host: str, port: int, secret_hex: str) -> ProbeRes
     built = _build_mtproto_clienthello(secret_key, sni_host)
     if isinstance(built, ProbeResult):
         return built
-    hello, session_id = built
+    hello, session_id, client_random = built
 
     opened = await _open_mtproto_tcp(host, port)
     if isinstance(opened, ProbeResult):
@@ -1248,18 +1356,20 @@ async def probe_mtproto_proxy(host: str, port: int, secret_hex: str) -> ProbeRes
         if write_err is not None:
             return write_err
 
-        record = await _read_mtproto_record(reader)
-        if isinstance(record, ProbeResult):
-            return record
+        packet = await _read_mtproto_welcome_packet(reader)
+        if isinstance(packet, ProbeResult):
+            return packet
 
-        validation_err = _validate_serverhello(record, session_id)
+        validation_err = _validate_welcome_packet(packet, session_id, client_random, secret_key)
         if validation_err is not None:
             return validation_err
 
-        # Handshake validated. Censprobe does not exercise the data plane
-        # (that would require a real Telegram DC dial-out), so the verdict
-        # is HANDSHAKE_ONLY — equivalent to the OpenVPN handshake-only
-        # path. Scoring weighs this strictly less than full OK.
+        # Handshake validated by HMAC: peer holds the same ee-secret
+        # (i.e. it really is mtg, not a domain-fronting fallback nor a
+        # captive-portal MitM). Censprobe does not exercise the data
+        # plane — that would require a real Telegram DC dial-out — so
+        # the verdict is HANDSHAKE_ONLY. Scoring weighs this strictly
+        # less than full OK.
         result = ProbeResult()
         result.handshake_ok = True
         result.data_ok = False

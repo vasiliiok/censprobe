@@ -48,6 +48,22 @@ _MAX_THROUGHPUT_BYTES = 16 * 1024 * 1024
 # hold the only echo socket past the listener's session window.
 _THROUGHPUT_RESPONSE_TIMEOUT_SEC = 35.0
 
+# Below this elapsed time, the listener-side measurement is dominated by
+# kernel/loopback buffer absorption (see the long comment in
+# _serve_throughput) and the resulting Mbps figure is meaningless. 100 ms
+# is comfortably above the loopback round-trip but well below the
+# duration of any realistic 1 MiB tunneled transfer (8 ms at 1 Gbps would
+# already saturate sub-Gbps consumer links — we don't see those here).
+_MIN_THROUGHPUT_DURATION_SEC = 0.1
+
+# Even with duration above the floor, anything wildly above what a real
+# remote tunnel can deliver is the same artefact under a different mask
+# (write was very small, kernel still absorbed in <one tick). 2 Gbps is
+# above any consumer / VPS uplink we expect to test against; treat
+# anything beyond as "kernel buffer absorption did not block hard enough"
+# and discard.
+_MAX_PLAUSIBLE_MBPS = 2000.0
+
 
 class EchoServer:
     """Single-process asyncio TCP echo server with per-port counters."""
@@ -218,6 +234,29 @@ class EchoServer:
 
         if duration and duration > 0:
             mbps = (n * 8) / duration / 1_000_000
+            # Listener-side throughput is fundamentally limited: the echo
+            # server sits on 127.0.0.1, behind the tunnel binary
+            # (sing-box/xray/hysteria) running on the same host. drain() and
+            # wait_closed() return when the loopback FIN-ACK is done — i.e.
+            # when the tunnel binary has buffered the bytes locally, NOT
+            # when they have egressed the tunnel and reached the operator.
+            # For payloads that fit in the kernel/loopback buffer (usually
+            # several MiB), the measurement collapses to "kernel buffer
+            # absorption time" and yields multi-Gbps numbers that have no
+            # physical meaning.  Discard the result when it lands in that
+            # regime so the dashboard / report carry an honest "not
+            # measured" instead of fabricated throughput.
+            if duration < _MIN_THROUGHPUT_DURATION_SEC or mbps > _MAX_PLAUSIBLE_MBPS:
+                logger.info(
+                    "throughput[%s]: discarded — %d bytes in %.3fs "
+                    "(would be %.0f Mbps; loopback buffer absorbed the write)",
+                    proto,
+                    n,
+                    duration,
+                    mbps,
+                )
+                self.throughput_mbps[proto] = None
+                return
             self.throughput_mbps[proto] = mbps
             logger.info(
                 "throughput[%s]: %.2f Mbps (%d bytes in %.2fs)",

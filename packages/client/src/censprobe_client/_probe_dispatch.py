@@ -99,6 +99,10 @@ def _probe_mtproto_proxy(host: str, creds: ProtocolCredentials) -> Awaitable[Pro
     return probe_mtproto_proxy(host, creds.mtproxy_port, creds.mtproxy_secret)
 
 
+def _probe_mtproto_proxy_alt(host: str, creds: ProtocolCredentials) -> Awaitable[ProbeResult]:
+    return probe_mtproto_proxy(host, creds.mtproxy_alt_port, creds.mtproxy_alt_secret)
+
+
 CLIENT_PROBES: dict[str, ProbeFactory] = {
     "openvpn": _probe_openvpn,
     "wireguard": _probe_wireguard,
@@ -107,4 +111,5 @@ CLIENT_PROBES: dict[str, ProbeFactory] = {
     "vless_reality": _probe_vless_reality,
     "hysteria2": _probe_hysteria2,
     "mtproto_proxy": _probe_mtproto_proxy,
+    "mtproto_proxy_alt": _probe_mtproto_proxy_alt,
 }

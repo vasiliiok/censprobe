@@ -127,7 +127,7 @@ I/O запретами выгрезает на уровне transport-layer mock
 
 ### Snapshots — `tests/snapshots/`
 
-- **JSON Schema** (`test_report_schemas.py`): `model_json_schema()` от pydantic-моделей `TestResult` / `ListenerReport`, плюс `jsonschema.validate(...)` против фикстур (`fixtures/solo_minimal.json`, `solo_full.json`, `listener_full.json`). Регенерация — `CENSPROBE_REGENERATE_SCHEMAS=1 pytest tests/snapshots/`.
+- **JSON Schema** (`test_report_schemas.py`): `model_json_schema()` от pydantic-моделей `TestResult` / `ListenerReport`, плюс `jsonschema.validate(...)` против фикстур (`tests/snapshots/fixtures/test_result_minimal.json`, `listener_report_minimal.json`). Регенерация — `CENSPROBE_REGENERATE_SCHEMAS=1 pytest tests/snapshots/`.
 - **Wire-format snapshots** (`test_wire_format_byte_snapshots.py`): byte-точные снимки билдеров `_build_quic_vn_trigger`, `_build_wg_handshake_init`, `_build_masque_probe_packet`. Реализовано через `pytest-regressions.data_regression` — первый запуск коммитит baseline, далее сравнение побайтово. Любая перегруппировка байтов, незаметная для type checker и unit-тестов, но рушащая wire-compat, ловится здесь.
 
 ---

@@ -62,6 +62,7 @@ class TestApplyPorts:
                 "vless_reality": 8444,
                 "hysteria2": 443,
                 "mtproto_proxy": 444,
+                "mtproto_proxy_alt": 8888,
             },
         )
         assert creds.openvpn_port == 1194
@@ -71,6 +72,7 @@ class TestApplyPorts:
         assert creds.vless_port == 8444
         assert creds.hy2_port == 443
         assert creds.mtproxy_port == 444
+        assert creds.mtproxy_alt_port == 8888
 
     def test_unknown_protocol_raises_keyerror(self) -> None:
         # A future protocol added to the registry but not to

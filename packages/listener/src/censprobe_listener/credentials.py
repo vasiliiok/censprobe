@@ -1,7 +1,8 @@
 """
 credentials.py — Generate per-test-session VPN credentials.
 
-Generates one-time credentials for all 6 VPN protocols. Persistence is
+Generates one-time credentials for every VPN protocol the listener
+enables. Persistence is
 deliberately not provided: every listener start handed off to a single
 ``SESSION_ID`` produces a fresh set, the credentials live only in
 memory, and ``cred_server.CredServer`` exposes them to the client over a
@@ -88,9 +89,15 @@ class ProtocolCredentials:
     hy2_auth: str = ""
     hy2_obfs_password: str = ""
 
-    # MTProto Proxy (mtg)
+    # MTProto Proxy (mtg) — primary port (typically 443, fakeTLS-on-HTTPS).
     mtproxy_secret: str = ""
     mtproxy_port: int = 0
+
+    # MTProto Proxy (mtg) — sibling instance on an alternate port. Independent
+    # ee-secret so any SNI-keyed DPI artifact applies symmetrically to both
+    # instances and we can attribute a verdict difference to *port* alone.
+    mtproxy_alt_secret: str = ""
+    mtproxy_alt_port: int = 0
 
 
 # Map from canonical protocol name → credential-port attribute. Used when
@@ -106,6 +113,7 @@ _PROTOCOL_PORT_ATTR: dict[str, str] = {
     "vless_reality": "vless_port",
     "hysteria2": "hy2_port",
     "mtproto_proxy": "mtproxy_port",
+    "mtproto_proxy_alt": "mtproxy_alt_port",
 }
 
 
@@ -193,8 +201,11 @@ def generate_credentials(ports: dict[str, int]) -> ProtocolCredentials:
     # Format: 'ee' + 16 random bytes (32 hex chars) + hex-encoded SNI domain.
     # We use google.com as a safe default for domain fronting / SNI mimicry.
     sni = b"google.com".hex()
-    random_part = secrets.token_hex(16)
-    creds.mtproxy_secret = f"ee{random_part}{sni}"
+    creds.mtproxy_secret = f"ee{secrets.token_hex(16)}{sni}"
+    # Alt-port mtg uses an independent random part so any SNI-keyed DPI
+    # artifact applies symmetrically to both — a verdict difference between
+    # the two attributes cleanly to the destination port.
+    creds.mtproxy_alt_secret = f"ee{secrets.token_hex(16)}{sni}"
 
     return creds
 
@@ -248,6 +259,10 @@ _SECTION_BUILDERS: dict[str, Any] = {
     "mtproto_proxy": lambda c: {
         "port": c.mtproxy_port,
         "secret": c.mtproxy_secret,
+    },
+    "mtproto_proxy_alt": lambda c: {
+        "port": c.mtproxy_alt_port,
+        "secret": c.mtproxy_alt_secret,
     },
 }
 

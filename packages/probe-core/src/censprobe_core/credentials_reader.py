@@ -86,6 +86,9 @@ class ProtocolCredentials:
     mtproxy_secret: str = ""
     mtproxy_port: int = 0
 
+    mtproxy_alt_secret: str = ""
+    mtproxy_alt_port: int = 0
+
 
 def _required(section: dict[str, Any], proto: str, key: str) -> Any:
     """Fetch a required key from a credentials-YAML protocol section.
@@ -164,6 +167,11 @@ def _parse_mtproto_proxy(c: ProtocolCredentials, mtp: dict[str, Any]) -> None:
     c.mtproxy_secret = _required_str(mtp, "mtproto_proxy", "secret")
 
 
+def _parse_mtproto_proxy_alt(c: ProtocolCredentials, mtp: dict[str, Any]) -> None:
+    c.mtproxy_alt_port = _required_port(mtp, "mtproto_proxy_alt")
+    c.mtproxy_alt_secret = _required_str(mtp, "mtproto_proxy_alt", "secret")
+
+
 def _parse_amneziawg(c: ProtocolCredentials, awg: dict[str, Any]) -> None:
     """Populate AmneziaWG fields from the YAML section.
 
@@ -220,6 +228,7 @@ def parse_protocols_yaml(text: str) -> ProtocolCredentials:
         ("vless_reality", _parse_vless_reality),
         ("hysteria2", _parse_hysteria2),
         ("mtproto_proxy", _parse_mtproto_proxy),
+        ("mtproto_proxy_alt", _parse_mtproto_proxy_alt),
     ]
     for key, fn in parsers:
         if key in raw:

@@ -112,20 +112,43 @@ verb 1
         logger.info("OpenVPN responder started on UDP/%d (iface: %s)", self.port, _OVPN_SRV_IFACE)
 
     def _read_status(self) -> tuple[int, int]:
-        """Parse status file → (handshake_count_approx, bytes_received)."""
+        """Parse status file → (handshake_count_approx, bytes_received).
+
+        OpenVPN's status file in static-key (P2P) mode has a stable
+        documented format, but version skew and exotic builds occasionally
+        relabel or reorder counters (e.g. "UDP/IP read bytes" instead of
+        "TCP/UDP read bytes" on some FreeBSD-derived ports). We look at
+        the *set* of byte counters and take the maximum non-zero value as
+        the proof-of-traffic — using a single hard-coded label silently
+        zeroed us out when the label drifted.
+        """
         if not self._status_path or not self._status_path.exists():
             return 0, 0
+        # Counter labels that prove "the link saw traffic". TCP/UDP read
+        # is the canonical one; the others corroborate when the format
+        # drifts (UDP/IP variant) or when status was flushed mid-write
+        # and only one of the lines was readable. TUN/TAP read bytes
+        # additionally confirms our own kernel actually decapped a packet.
+        wanted_labels = (
+            "TCP/UDP read bytes",
+            "UDP/IP read bytes",
+            "TUN/TAP read bytes",
+        )
         try:
             content = self._status_path.read_text(errors="replace")
             bytes_read = 0
             for line in content.splitlines():
-                if "TCP/UDP read bytes" in line:
-                    parts = line.split(",")
-                    if len(parts) >= 2:
-                        try:
-                            bytes_read = int(parts[1].strip())
-                        except ValueError:
-                            pass
+                for label in wanted_labels:
+                    if label in line:
+                        parts = line.split(",")
+                        if len(parts) >= 2:
+                            try:
+                                value = int(parts[1].strip())
+                            except ValueError:
+                                continue
+                            if value > bytes_read:
+                                bytes_read = value
+                        break
             handshake = 1 if bytes_read > 0 else 0
             return handshake, bytes_read
         except Exception:

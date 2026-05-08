@@ -25,9 +25,6 @@
       "verdict": "OK",
       "handshake_count": 1,
       "data_transfer_ok": true,
-      "first_handshake_at": "2026-05-04T13:00:05Z",
-      "avg_rtt_ms": 25.4,
-      "avg_data_echo_ms": 28.1,
       "avg_throughput_mbps": null,
       "throughput_throttled": false,
       "note": null
@@ -36,9 +33,6 @@
       "verdict": "BLOCKED",
       "handshake_count": 0,
       "data_transfer_ok": false,
-      "first_handshake_at": null,
-      "avg_rtt_ms": null,
-      "avg_data_echo_ms": null,
       "avg_throughput_mbps": null,
       "throughput_throttled": false,
       "note": null

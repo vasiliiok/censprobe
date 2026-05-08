@@ -1,6 +1,6 @@
 # Censprobe
 
-**Censprobe** — инструмент измерения цензуры и оценки устойчивости серверов к сетевым блокировкам в России и других странах с глубокой инспекцией трафика. Автоматически проверяет видимость публичных ресурсов с аплинка сервера, тестирует семь протоколов обхода цензуры через DPI и атрибутирует троттлинг и SNI-блокировки.
+**Censprobe** — инструмент измерения цензуры и оценки устойчивости серверов к сетевым блокировкам в России и других странах с глубокой инспекцией трафика. Автоматически проверяет видимость публичных ресурсов с аплинка сервера, тестирует восемь VPN/обход-протоколов через DPI и атрибутирует троттлинг и SNI-блокировки.
 
 Все компоненты работают автономно через Docker Compose, результаты сохраняются в `reports/<TEST_ID>/` локально и публикуются вручную (`git push`). Grafana собирает дашборды из импортированных отчётов.
 
@@ -21,7 +21,7 @@
 - [CLI-параметры](#cli-параметры)
 - [Конфигурация: `censprobe.yaml`](#конфигурация-censprobeyaml)
 - [Цели тестирования: `targets/`](#цели-тестирования-targets)
-- [Семь VPN-протоколов](#семь-vpn-протоколов)
+- [Восемь VPN-протоколов](#восемь-vpn-протоколов)
 - [Восемь модулей измерения](#восемь-модулей-измерения)
 - [Скоринг](#скоринг)
 - [Дашборд (Grafana)](#дашборд-grafana)
@@ -43,8 +43,8 @@
 | Профиль | Где запускается | Назначение |
 |---------|-----------------|------------|
 | `solo` | RU-сервер | Прогон всех восьми модулей измерения с перспективы аплинка тестируемого сервера |
-| `listener` | RU-сервер | Поднимает dummy-respondery 7 VPN-протоколов + одноразовый HTTPS-эндпоинт credentials |
-| `client` | Клиентское устройство | Подключается к listener'у по 7 протоколам, проверяет handshake + throughput |
+| `listener` | RU-сервер | Поднимает dummy-respondery всех включённых VPN-протоколов + одноразовый HTTPS-эндпоинт credentials |
+| `client` | Клиентское устройство | Подключается к listener'у по всем включённым протоколам, проверяет handshake + throughput |
 | `dashboard` | Любая машина | Локальная аналитика: PostgreSQL + sync-api + Grafana |
 
 Все 4 компонента — отдельные Docker-образы (`censprobe-solo`, `censprobe-listener`, `censprobe-client`, `censprobe-sync-api`), публикуются на Docker Hub под namespace `${DOCKERHUB_USERNAME}` (по умолчанию `outtakes`).
@@ -124,7 +124,7 @@ docker compose --profile listener run --rm listener \
   --session-id client-home-rt-spb
 ```
 
-Listener генерирует одноразовые credentials в памяти, поднимает все respondery (OpenVPN UDP, WireGuard UDP, AmneziaWG UDP, Shadowsocks 2022 TCP, VLESS+Reality TCP, Hysteria 2 UDP, MTProto-proxy TCP), запускает HTTPS endpoint для credentials на `CREDS_PORT` (по умолчанию 8443/tcp) и **печатает готовую команду для запуска client'а**. Скопируйте её — она содержит TEST_ID, SESSION_ID, SERVER_HOST, CREDS_TOKEN и CREDS_CERT_SHA256.
+Listener генерирует одноразовые credentials в памяти, поднимает все respondery (OpenVPN UDP, WireGuard UDP, AmneziaWG UDP, Shadowsocks 2022 TCP, VLESS+Reality TCP, Hysteria 2 UDP, MTProto-proxy TCP на 443, MTProto-proxy TCP на alt-порте 8888 для A/B port-vs-L7 DPI), запускает HTTPS endpoint для credentials на `CREDS_PORT` (по умолчанию 8443/tcp) и **печатает готовую команду для запуска client'а**. Скопируйте её — она содержит TEST_ID, SESSION_ID, SERVER_HOST, CREDS_TOKEN и CREDS_CERT_SHA256.
 
 > Открытый порт **8443/tcp** должен быть доступен с клиентской сети. Credentials живут только в памяти процесса, на диск не пишутся.
 
@@ -147,7 +147,7 @@ docker compose --profile client run --rm client \
   --creds-cert-sha256 <sha256-fingerprint>
 ```
 
-Client тянет credentials с listener'а через TLS-pinning (cert проверяется по SHA-256), bearer-token проверяется через `hmac.compare_digest`, потом пробует все 7 протоколов с opsec-jitter (0.5–3 с между пробами). Probe для каждого протокола различает `OK`, `HANDSHAKE_ONLY` (handshake прошёл, но throughput не подтверждён), `BLOCKED`, `ERROR`.
+Client тянет credentials с listener'а через TLS-pinning (cert проверяется по SHA-256), bearer-token проверяется через `hmac.compare_digest`, потом пробует все включённые протоколы с opsec-jitter (0.5–3 с между пробами). Probe для каждого протокола различает `OK`, `HANDSHAKE_ONLY` (handshake прошёл, но throughput не подтверждён), `BLOCKED`, `ERROR`.
 
 После завершения клиента — вернитесь в терминал сервера и нажмите `Ctrl+C` в процессе Listener. Listener сохранит отчёт в `reports/<TEST_ID>/server-listener-<SESSION_ID>-<timestamp>.json`.
 
@@ -298,21 +298,32 @@ Sustained-data probe через SOCKS-routed протоколы (Shadowsocks, VL
 
 ---
 
-## Семь VPN-протоколов
+## Восемь VPN-протоколов
 
-`packages/probe-core/src/censprobe_core/protocol_registry.py` — single source of truth.
+`packages/probe-core/src/censprobe_core/protocol_registry.py` — single source of truth по именам и метаданным; реальные bind-порты — в `protocols.ports` в `censprobe.yaml` (overрайдят registry default, validator `_check_ports_cover_enabled` гарантирует полное покрытие enabled-протоколов).
 
-| Имя | Label | Transport | Default port | uses_socks_echo |
-|-----|-------|-----------|---------------|-----------------|
-| `openvpn` | OpenVPN | UDP | 1194 | False |
-| `wireguard` | WireGuard | UDP | 51820 | False |
-| `amneziawg` | AmneziaWG | UDP | 51821 | False |
-| `shadowsocks` | Shadowsocks 2022 | TCP | 8388 | True |
-| `vless_reality` | VLESS+Reality | TCP | 443 | True |
-| `hysteria2` | Hysteria 2 | UDP | 443 | True |
-| `mtproto_proxy` | MTProto Proxy | TCP | 9443 | False |
+| Имя | Label | Transport | Registry default | Текущий yaml-port | uses_socks_echo |
+|-----|-------|-----------|------------------:|------------------:|-----------------|
+| `openvpn` | OpenVPN | UDP | 1194 | 1194 | False |
+| `wireguard` | WireGuard | UDP | 51820 | 51820 | False |
+| `amneziawg` | AmneziaWG | UDP | 51821 | 51821 | False |
+| `shadowsocks` | Shadowsocks 2022 | TCP | 8388 | 8388 | True |
+| `vless_reality` | VLESS+Reality | TCP | 443 | 8444 | True |
+| `hysteria2` | Hysteria 2 | UDP | 443 | 443 | True |
+| `mtproto_proxy` | MTProto Proxy | TCP | 9443 | 443 | False |
+| `mtproto_proxy_alt` | MTProto Proxy (alt port) | TCP | 8888 | 8888 | False |
 
-Поле `uses_socks_echo` отмечает протоколы с SOCKS-routed data-phase через listener echo server (для throughput-проб). Остальные — handshake-only.
+Поле `uses_socks_echo` отмечает протоколы с SOCKS-routed data-phase через listener echo server (для throughput-проб). Остальные — handshake-only (OpenVPN/WireGuard/AmneziaWG поднимают tun-интерфейс и пинг-эхо для верификации data plane; mtproto-proxy инстансы подтверждают handshake через mtg `Stream has been started` лог-токен).
+
+**Зачем два MTProto-proxy.** `mtproto_proxy` (TCP/443) и `mtproto_proxy_alt` (TCP/8888) — это один протокол на двух портах с независимыми ee-секретами. A/B-сигнал по разнице вердиктов:
+
+- 443 BLOCKED + 8888 OK → port-keyed DPI (TSPU инспектирует только порт 443 как HTTPS).
+- оба BLOCKED → L7/fakeTLS-keyed DPI (настоящая блокировка протокола, независимо от порта).
+- оба OK → mtproto не блокируется на этой клиентской сети.
+
+Это раздельные строки в `protocol_results` (`protocol='mtproto_proxy'` и `protocol='mtproto_proxy_alt'`), без правок схемы или Grafana — дашборд `04 — Protocol Reachability` уже группирует по `protocol`.
+
+VLESS+Reality в дефолтном профиле снят с 443 на 8444, чтобы освободить TCP/443 для mtproto-proxy fakeTLS-realism (DPI инспектирует 443 как HTTPS — на нестандартном порту may be применены другие правила и сигнал размывается). Hysteria 2 остаётся на UDP/443 — другой transport, не конфликтует.
 
 Параметры VPN-протоколов (порты, ключи, AmneziaWG-обфускация — H1..H4 magic headers, S1/S2 junk-payload sizes, jc/jmin/jmax counters) генерируются `listener` в памяти при каждом старте через реальные бинари (`wg genkey`/`wg pubkey`/`wg genpsk`, `xray x25519`, `openvpn --genkey secret`). Передаются клиенту через одноразовый TLS-pinned эндпоинт; на диск ничего не пишется и в git ничего не коммитится.
 
@@ -500,7 +511,7 @@ Listener report (`server-listener-<SESSION_ID>-*.json`):
 - `protocol_results: list[ProtocolResult]` — handshake/throughput per protocol
 - `connection_count`, `handshake_count` — operator status counters
 
-JSON Schema снимки (regen-able через `CENSPROBE_REGENERATE_SCHEMAS=1 pytest tests/snapshots/`) — `tests/snapshots/schemas/solo_report.schema.json`, `listener_report.schema.json`. Pinned против фикстур (`solo_minimal.json`, `solo_full.json`, `listener_full.json`).
+JSON Schema снимки (regen-able через `CENSPROBE_REGENERATE_SCHEMAS=1 pytest tests/snapshots/`) — `tests/snapshots/schemas/test_result.schema.json`, `listener_report.schema.json`. Pinned против фикстур (`tests/snapshots/fixtures/test_result_minimal.json`, `listener_report_minimal.json`).
 
 ---
 

@@ -40,7 +40,6 @@ class TestParseListenerReport:
                         "verdict": "OK",
                         "handshake_count": 1,
                         "data_transfer_ok": True,
-                        "avg_rtt_ms": 25.0,
                     },
                     "openvpn": {
                         "verdict": "BLOCKED",
@@ -60,7 +59,6 @@ class TestParseListenerReport:
         assert wg["verdict"] == "OK"
         assert wg["handshake_count"] == 1
         assert wg["data_transfer_ok"] is True
-        assert wg["avg_rtt_ms"] == pytest.approx(25.0)
 
     def test_throughput_fields_optional(self, tmp_path: Path) -> None:
         # Older listener reports predate avg_throughput_mbps and

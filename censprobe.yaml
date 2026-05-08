@@ -124,6 +124,7 @@ protocols:
     - vless_reality
     - hysteria2
     - mtproto_proxy
+    - mtproto_proxy_alt
   # First-match-wins recommendation order in the scoring summary. The
   # priority list may include protocols not in `enabled` (they will
   # simply be ignored at runtime).
@@ -133,6 +134,7 @@ protocols:
     - amneziawg
     - shadowsocks
     - mtproto_proxy
+    - mtproto_proxy_alt
     - wireguard
     - openvpn
   # Per-protocol listener bind ports. Every protocol in `enabled` MUST
@@ -157,14 +159,24 @@ protocols:
   #   confound the censorship signal. To preserve the realistic 443
   #   path, vless_reality is moved to 8444 in this default profile —
   #   swap them back if your priority is the VLESS+Reality realism.
+  #
+  # Why a SECOND mtproto on a non-443 port (mtproto_proxy_alt = 8888):
+  #   Real public Telegram MTProto proxies are commonly hosted on
+  #   8888 alongside 443. Running a second mtg instance on 8888 with an
+  #   independent ee-secret turns the test into a clean A/B that
+  #   discriminates port-keyed DPI from L7-keyed DPI:
+  #     * 443 BLOCKED + 8888 OK    → port-keyed (TSPU only inspects 443)
+  #     * both BLOCKED             → L7/fakeTLS-keyed (real proto block)
+  #     * both OK                  → no mtproto blocking on this network
   ports:
-    openvpn: 1194         # UDP
-    wireguard: 51820      # UDP
-    amneziawg: 51821      # UDP
-    shadowsocks: 8388     # TCP
-    vless_reality: 8444   # TCP — moved off 443 to free it for mtproto_proxy
-    hysteria2: 443        # UDP — different transport, does not clash with TCP/443
-    mtproto_proxy: 443    # TCP — fakeTLS realism: DPI inspects 443 as HTTPS
+    openvpn: 1194           # UDP
+    wireguard: 51820        # UDP
+    amneziawg: 51821        # UDP
+    shadowsocks: 8388       # TCP
+    vless_reality: 8444     # TCP — moved off 443 to free it for mtproto_proxy
+    hysteria2: 443          # UDP — different transport, does not clash with TCP/443
+    mtproto_proxy: 443      # TCP — fakeTLS realism: DPI inspects 443 as HTTPS
+    mtproto_proxy_alt: 8888 # TCP — sibling on a non-443 port for port-vs-L7 A/B
 
 
 # ── Throughput probe ─────────────────────────────────────────────────────────

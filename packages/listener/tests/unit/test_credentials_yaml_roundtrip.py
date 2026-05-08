@@ -63,6 +63,8 @@ def _populated_creds() -> ProtocolCredentials:
         # entropy so gitleaks doesn't flag the literal.
         mtproxy_secret="ee" + "00" * 16 + "676f6f676c652e636f6d",  # gitleaks:allow
         mtproxy_port=444,
+        mtproxy_alt_secret="ee" + "11" * 16 + "676f6f676c652e636f6d",  # gitleaks:allow
+        mtproxy_alt_port=8888,
     )
     return c
 
@@ -75,11 +77,12 @@ ALL_PROTOS = (
     "vless_reality",
     "hysteria2",
     "mtproto_proxy",
+    "mtproto_proxy_alt",
 )
 
 
 class TestCredsToYamlRoundTrip:
-    def test_emits_all_seven_protocols(self) -> None:
+    def test_emits_every_protocol_section(self) -> None:
         out = creds_to_yaml(_populated_creds(), enabled_protocols=list(ALL_PROTOS))
         loaded = yaml.safe_load(out)
         assert isinstance(loaded, dict)
@@ -166,6 +169,18 @@ class TestCredsToYamlRoundTrip:
         # 'ee' + 32 hex chars (16 random bytes) + hex-encoded SNI.
         assert len(sec["secret"]) > len("ee") + 32
 
+    def test_section_shapes_mtproto_proxy_alt(self) -> None:
+        out = creds_to_yaml(_populated_creds(), enabled_protocols=list(ALL_PROTOS))
+        loaded = yaml.safe_load(out)
+        sec = loaded["mtproto_proxy_alt"]
+        assert sec["port"] == 8888
+        assert sec["secret"].startswith("ee")
+        assert len(sec["secret"]) > len("ee") + 32
+        # The alt instance must have an independent random part — not a
+        # copy of the primary secret. This protects against a future
+        # refactor that accidentally aliases the two fields.
+        assert sec["secret"] != loaded["mtproto_proxy"]["secret"]
+
 
 class TestEnabledProtocolsFilter:
     def test_filters_to_subset(self) -> None:
@@ -179,6 +194,7 @@ class TestEnabledProtocolsFilter:
             "vless_reality",
             "hysteria2",
             "mtproto_proxy",
+            "mtproto_proxy_alt",
         ):
             assert other not in loaded
         # _protocols_enabled is a metadata mirror — client reads it to

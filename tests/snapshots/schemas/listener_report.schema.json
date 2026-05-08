@@ -149,7 +149,7 @@
       "type": "object"
     },
     "EndpointMeta": {
-      "description": "IP-free network identity for one endpoint (server or client).\n\n`is_datacenter` is the primary QA signal for client endpoints: a\nclient whose source IP belongs to a hosting provider is almost\ncertainly behind a self-hosted VPN, which taints VPN-protocol\nverdicts in this run. This is more reliable than ipapi.is's\n`is_vpn`/`is_proxy` flags, which only catch services that mark\nthemselves.\n\n`is_mobile` distinguishes mobile-carrier networks; mobile uplinks\nin RU are subject to heavier filtering than residential, so it\nmatters as a comparison axis.",
+      "description": "IP-free network identity for one endpoint (server or client).\n\n`is_datacenter` flags whether the source IP belongs to a hosting\nprovider per ipapi.is. It used to be treated as \"almost certainly\nbehind a self-hosted VPN\", but that turned out to over-trigger:\npublic-WiFi gateways, mobile-carrier NAT pools and reseller blocks\nare routinely mis-classified as datacenter. We still record the\nflag for visibility but do NOT infer VPN/test-validity from it.\n\n`is_mobile` distinguishes mobile-carrier networks; mobile uplinks\nin RU are subject to heavier filtering than residential, so it\nmatters as a comparison axis.",
       "properties": {
         "asn": {
           "anyOf": [
@@ -243,30 +243,6 @@
     "ProtocolResult": {
       "description": "Aggregated result for one protocol in a listener session.\n\n``avg_throughput_mbps`` and ``throughput_throttled`` are populated only\nfor the SOCKS-routed protocols (Shadowsocks, VLESS+Reality, Hysteria 2)\nvia the listener's loopback echo-server's ``/throughput`` handler.\nOpenVPN / WireGuard / AmneziaWG keep both fields ``None``/``False``\nbecause their data-phase verification is a single ICMP ping, not a\nbulk download. The numeric value is *informational only* \u2014 never\nconsumed by scoring, so a narrow server uplink isn't mis-attributed\nas censorship. ``throughput_throttled=True`` flags the case where the\ndownload didn't complete inside the timeout, i.e. sustained data\nplane is heavily throttled (or absent).",
       "properties": {
-        "avg_data_echo_ms": {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Avg Data Echo Ms"
-        },
-        "avg_rtt_ms": {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Avg Rtt Ms"
-        },
         "avg_throughput_mbps": {
           "anyOf": [
             {
@@ -283,19 +259,6 @@
           "default": false,
           "title": "Data Transfer Ok",
           "type": "boolean"
-        },
-        "first_handshake_at": {
-          "anyOf": [
-            {
-              "format": "date-time",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "First Handshake At"
         },
         "handshake_count": {
           "default": 0,

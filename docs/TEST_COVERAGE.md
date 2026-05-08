@@ -4,9 +4,9 @@
 
 Цифры:
 
-- **42 тест-файла** в 6 деревьях.
-- **551 collected test** (после расширения `parametrize`); из них 537 default + 14 в новом `test_credentials_reader.py`.
-- **Coverage on new code: 38.9%** (общая coverage растёт по плану — см. раздел «Roadmap»).
+- **46 тест-файлов** в 6 деревьях.
+- **606 collected test** (после расширения `parametrize`); из них 604 default + 2 deselected (e2e, `e2e-dashboard` job).
+- **Coverage on new code: ~39%** (общая coverage растёт по плану — см. раздел «Roadmap»; точное число — в SonarCloud отчёте последнего PR).
 - **8 required CI gates** (`lint`, `validate-config`, `test × 5-package matrix`, `cross-package-tests`, `network-tests`, `e2e-dashboard`, `security-fast`, `sonar`) + image gates в `build.yml` (size + non-root) + 1 informational (weekly CodeQL).
 
 ---
@@ -15,7 +15,7 @@
 
 ### `packages/probe-core/`
 
-#### Pure-unit (`tests/unit/`, 13 файлов, 199 тестов)
+#### Pure-unit (`tests/unit/`, 13 файлов, 206 тестов)
 
 | Src-модуль | Тест-файл(ы) | Тестов | Что покрыто |
 |------------|--------------|-------:|-------------|
@@ -29,7 +29,7 @@
 | `censprobe_core.modules.telegram._test_dc_port` | `test_telegram_frame.py` | 1 | байт-точная сверка MTProto abridged-transport frame |
 | `censprobe_core.utils.validate_id` | `test_utils_validate_id.py` | 7 | path-traversal (`..`, `/`, `\`), `\x00`, U+200B, empty, max length, valid IDs |
 
-#### Mocked-unit modules (`tests/modules/`, 10 файлов, 79 тестов)
+#### Mocked-unit modules (`tests/modules/`, 10 файлов, 100 тестов)
 
 | Src-модуль | Тест-файл | Тестов | Что покрыто |
 |------------|-----------|-------:|-------------|
@@ -54,7 +54,7 @@
 | `censprobe_core.subcategories.derive` | `test_subcategories_property.py` | 4 | для любого test_name результат непуст и принадлежит замкнутому множеству |
 | `censprobe_core.utils.validate_id` | `test_validate_id_property.py` | 4 | accept-set / reject-set дискриминируются |
 
-**Probe-core total: 28 файлов, 311 тестов.**
+**Probe-core total: 26 файлов, 318 тестов.**
 
 ---
 
@@ -74,10 +74,10 @@
 |------------|-----------|-------:|-------------|
 | `censprobe_listener` (whole pkg) | `unit/test_smoke_imports.py` | 1 | submodule import |
 | `censprobe_listener.credentials._awg_magic_headers`, `_apply_ports` | `unit/test_credentials_constraints.py` | 6 | H1..H4 pairwise distinct + не в `{1,2,3,4}`, S1+56 ≠ S2, `_apply_ports` complete-map требование |
-| `censprobe_listener.credentials.creds_to_yaml`, `ProtocolCredentials` | `unit/test_credentials_yaml_roundtrip.py` | 12 | round-trip всех 7 секций без `wg`/`xray`/`openvpn` (synthetic creds), `enabled_protocols` filter, server-private fields НЕ leak в YAML, `_protocols_enabled` echo |
+| `censprobe_listener.credentials.creds_to_yaml`, `ProtocolCredentials` | `unit/test_credentials_yaml_roundtrip.py` | 13 | round-trip всех секций (включая `mtproto_proxy_alt`) без `wg`/`xray`/`openvpn` (synthetic creds), `enabled_protocols` filter, server-private fields НЕ leak в YAML, `_protocols_enabled` echo, alt-секрет независим от primary |
 | `censprobe_listener.credentials._awg_magic_headers` | `property/test_credentials_property.py` | 4 | Hypothesis @settings(derandomize=True, max_examples=500) на AWG header invariants + S-сравнение |
 
-**Listener total: 4 файла, 23 теста.** Subprocess-respondery (ss/vless/hysteria/openvpn/wg/mtproxy) и `cred_server.CredServer` не покрыты pytest'ом — verification через `e2e-dashboard` (на каждый push/PR) или ручной запуск.
+**Listener total: 4 файла, 171 collected test.** Большая часть — `parametrize`-расширения в `test_credentials_constraints.py` (50 итераций × 3 проверки AWG-инвариантов). Subprocess-respondery (ss/vless/hysteria/openvpn/wg/mtproxy) и `cred_server.CredServer` не покрыты pytest'ом — verification через `e2e-dashboard` (на каждый push/PR) или ручной запуск.
 
 ---
 
@@ -93,7 +93,7 @@
 
 ### `packages/dashboard/sync-api/`
 
-#### Unit (`tests/unit/`, 5 файлов, 41 тест)
+#### Unit (`tests/unit/`, 5 файлов, 70 тестов)
 
 | Src-модуль | Тест-файл | Тестов | Что покрыто |
 |------------|-----------|-------:|-------------|
@@ -111,7 +111,7 @@
 | `sync_api.main._import_once`, `parser`, `db` | `test_import_pipeline.py` | 8 | disk reports → DB rows + UPSERT-by-session, path-traversal/symlink guards |
 | `sync_api.db` (engine, ORM models) | `test_schema_round_trip.py` | 7 | `init_db()` создаёт все 4 таблицы, unique constraints (`uq_test_results_run_file_test_target`, `uq_listener_sessions_run_file`), индексы (`ix_test_results_run_file`), cascade delete `TestRun` → `TestResult`/`ListenerSession`/`ProtocolResult` |
 
-**Sync-api total: 8 файлов, 70 тестов.** Самое плотное покрытие после probe-core.
+**Sync-api total: 8 файлов, 99 тестов.** Самое плотное покрытие после probe-core.
 
 ---
 
@@ -129,7 +129,7 @@
 
 | Что | Тест-файл | Тестов | Что покрыто |
 |-----|-----------|-------:|-------------|
-| JSON-Schema solo + listener reports | `test_report_schemas.py` | 3 | `model_json_schema()` от `TestResult` / `ListenerReport` против фикстур (`solo_minimal.json`, `solo_full.json`, `listener_full.json`) |
+| JSON-Schema solo + listener reports | `test_report_schemas.py` | 3 | `model_json_schema()` от `TestResult` / `ListenerReport` против фикстур `tests/snapshots/fixtures/test_result_minimal.json` и `listener_report_minimal.json` |
 | Wire-format byte snapshots | `test_wire_format_byte_snapshots.py` | 3 | `_build_quic_vn_trigger`, `_build_wg_handshake_init`, `_build_masque_probe_packet` — pytest-regressions baseline побайтово |
 
 #### E2E (`tests/e2e/`, 1 файл, 2 теста; CI job `e2e-dashboard` на push/PR)
@@ -144,15 +144,15 @@
 
 ### Итого
 
-| Tree | Файлы | Тестов | Покрытие |
+| Tree | Файлы | Тестов (collected) | Покрытие |
 |------|-------:|-------:|----------|
-| `packages/probe-core/tests` | 22 | 185 | плотное (config, scoring, subcategories, runner, все 8 модулей измерений) |
+| `packages/probe-core/tests` | 26 | 318 | плотное (config, scoring, subcategories, runner, все 8 модулей измерений, credentials_reader) |
 | `packages/solo/tests` | 1 | 1 | smoke-only |
-| `packages/listener/tests` | 4 | 23 | credentials + AWG invariants; respondery без покрытия |
+| `packages/listener/tests` | 4 | 171 | credentials + AWG invariants (parametrize-heavy); respondery без покрытия |
 | `packages/client/tests` | 1 | 1 | smoke-only |
-| `packages/dashboard/sync-api/tests` | 8 | 70 | parser + endpoints + DB schema |
-| `tests/` (workspace) | 6 | 15 | contracts + snapshots + e2e (`e2e-dashboard` job) |
-| **Total** | **42** | **295** (`grep -c def test_`) / **551** (после parametrize) | — |
+| `packages/dashboard/sync-api/tests` | 8 | 99 | parser + endpoints + DB schema |
+| `tests/` (workspace) | 6 | 16 | contracts + snapshots + e2e (`e2e-dashboard` job, 2 deselected по дефолту) |
+| **Total** | **46** | **335** (`grep -c def test_`) / **606** (после parametrize, из них 604 default + 2 deselected e2e) | — |
 
 ---
 

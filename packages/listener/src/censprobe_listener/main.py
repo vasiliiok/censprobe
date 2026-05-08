@@ -9,7 +9,7 @@ Lifecycle:
      endpoint also captures the IP of the first authenticated client
      for later enrichment. Print a ready-to-paste ``docker compose run
      --rm`` command for the operator to send to the client machine.
-  4. Start all 6 VPN protocol responders.
+  4. Start every protocol responder enabled in censprobe.yaml.
   5. Wait for SIGINT (Ctrl+C) or SIGTERM.
   6. Stop all responders, snapshot client IP, then stop the cred endpoint.
   7. Enrich the captured client IP via ipapi.is into a structured
@@ -421,8 +421,9 @@ async def _stop_responders(responders: dict[str, Responder], timeout: float) -> 
 
     Stopping in parallel matters because each individual responder can
     spend up to ~1 s waiting for its child process to exit; running them
-    sequentially turned a 6-protocol shutdown into a 6-second wall-clock
-    delay that ate into our docker-compose `stop_grace_period` budget.
+    sequentially scales the wall-clock shutdown linearly with the number
+    of enabled protocols and ate into our docker-compose
+    `stop_grace_period` budget.
 
     A single overall `timeout` covers the entire fan-out so a misbehaving
     responder cannot block the report from being written.
@@ -614,6 +615,7 @@ def _print_responder_status(
         "vless_reality": ("vless_port", "TCP"),
         "hysteria2": ("hy2_port", "UDP"),
         "mtproto_proxy": ("mtproxy_port", "TCP"),
+        "mtproto_proxy_alt": ("mtproxy_alt_port", "TCP"),
     }
 
     for spec in enabled_protocols(cfg.protocols.enabled):
@@ -678,7 +680,13 @@ def _print_client_summary(connected: bool, meta: EndpointMeta | None) -> None:
     if meta.is_mobile:
         flags.append("[bold]MOBILE[/bold]")
     if meta.is_datacenter:
-        flags.append("[red]DATACENTER (likely behind self-hosted VPN)[/red]")
+        # Bare DATACENTER label — no "likely behind self-hosted VPN"
+        # qualifier. ipapi.is misclassifies a meaningful fraction of
+        # residential / mobile-carrier prefixes (free-WiFi gateways,
+        # carrier NAT pools that share /24s with hosting) as datacenter,
+        # so the flag is not a reliable VPN indicator. We still surface
+        # it for visibility but no longer infer intent from it.
+        flags.append("[yellow]DATACENTER[/yellow]")
     flag_line = " · ".join(flags) if flags else "[dim]residential[/dim]"
 
     console.print(

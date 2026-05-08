@@ -162,12 +162,12 @@ class LocationInfo(BaseModel):
 class EndpointMeta(BaseModel):
     """IP-free network identity for one endpoint (server or client).
 
-    `is_datacenter` is the primary QA signal for client endpoints: a
-    client whose source IP belongs to a hosting provider is almost
-    certainly behind a self-hosted VPN, which taints VPN-protocol
-    verdicts in this run. This is more reliable than ipapi.is's
-    `is_vpn`/`is_proxy` flags, which only catch services that mark
-    themselves.
+    `is_datacenter` flags whether the source IP belongs to a hosting
+    provider per ipapi.is. It used to be treated as "almost certainly
+    behind a self-hosted VPN", but that turned out to over-trigger:
+    public-WiFi gateways, mobile-carrier NAT pools and reseller blocks
+    are routinely mis-classified as datacenter. We still record the
+    flag for visibility but do NOT infer VPN/test-validity from it.
 
     `is_mobile` distinguishes mobile-carrier networks; mobile uplinks
     in RU are subject to heavier filtering than residential, so it
@@ -234,9 +234,6 @@ class ProtocolResult(BaseModel):
     verdict: Verdict = Verdict.BLOCKED
     handshake_count: int = 0
     data_transfer_ok: bool = False
-    first_handshake_at: datetime | None = None
-    avg_rtt_ms: float | None = None
-    avg_data_echo_ms: float | None = None
     avg_throughput_mbps: float | None = None
     throughput_throttled: bool = False
     note: str | None = None

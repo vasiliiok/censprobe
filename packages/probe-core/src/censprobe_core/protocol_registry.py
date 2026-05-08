@@ -1,12 +1,15 @@
 """
 protocol_registry.py — Single source of truth for the VPN protocols.
 
-Six protocols are tested today (OpenVPN, WireGuard, AmneziaWG,
-Shadowsocks, VLESS+Reality, Hysteria 2). Before this module they were
-hard-coded in five places (listener factory list, client probe list,
-echo-port table, scoring priority, recommendation order). This file
-collapses the metadata into a single list — listener and client
-register their own factory dispatch maps that key off the names here.
+Today's lineup is OpenVPN, WireGuard, AmneziaWG, Shadowsocks 2022,
+VLESS+Reality, Hysteria 2, MTProto-proxy on its primary port and an
+``mtproto_proxy_alt`` sibling on a non-443 port (port-keyed-vs-L7-keyed
+DPI A/B; see ``censprobe.yaml`` for the rationale). Before this module
+the same names were hard-coded in five places (listener factory list,
+client probe list, echo-port table, scoring priority, recommendation
+order). The registry collapses that metadata into one list — listener
+and client register their own factory dispatch maps that key off the
+names here.
 
 Adding a new protocol (e.g. MTProto-proxy, TUIC):
     1. Add a :class:`ProtocolSpec` entry below.
@@ -110,6 +113,18 @@ PROTOCOLS: tuple[ProtocolSpec, ...] = (
         # ``ProtocolCredentials.mtproxy_port`` so the responder-status
         # table prints what the responder actually binds.
         default_port=9443,
+        uses_socks_echo=False,
+    ),
+    # Sibling of mtproto_proxy on a non-443 port. Same protocol/responder,
+    # different bind. Lets a single test distinguish port-keyed DPI ("TSPU
+    # only inspects fakeTLS on TCP/443") from L7-keyed DPI ("TSPU drops
+    # fakeTLS on any TCP"). 8888 is a common port for public Telegram
+    # MTProto proxies — chosen for realism, not arbitrarily.
+    ProtocolSpec(
+        name="mtproto_proxy_alt",
+        label="MTProto Proxy (alt port)",
+        transport="tcp",
+        default_port=8888,
         uses_socks_echo=False,
     ),
 )
