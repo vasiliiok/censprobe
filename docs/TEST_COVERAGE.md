@@ -15,7 +15,7 @@
 
 ### `packages/probe-core/`
 
-#### Pure-unit (`tests/unit/`, 9 файлов, 94 теста)
+#### Pure-unit (`tests/unit/`, 13 файлов, 199 тестов)
 
 | Src-модуль | Тест-файл(ы) | Тестов | Что покрыто |
 |------------|--------------|-------:|-------------|
@@ -23,7 +23,7 @@
 | `censprobe_core.config.ProtocolsConfig` | `test_config_validation.py` | 10 | `_check_ports_cover_enabled` (missing port, orphan port, invalid range), `extra="forbid"` на typo-полях, fatal startup error на missing field |
 | `censprobe_core.credentials_reader` | `test_credentials_reader.py` | 14 | fail-loud контракт: `_protocols_enabled` обязателен (missing/null/non-list/non-string-entries), все операционные поля каждой секции обязательны (port, method, server_name, AWG h1..h4 и s1/s2/jc/jmin/jmax), invalid port range, top-level non-mapping, section non-mapping, absent section keeps zero defaults |
 | `censprobe_core.runner.ProbeRunner` | `test_runner_orchestration.py` | 9 | `asyncio.gather(return_exceptions=True)` изолирует упавшие модули, `module_failures` появляется в `_summarize`, enabled/disabled-фильтрация, parallel + serial phase, registry-driven lookup |
-| `censprobe_core.scoring` | `test_scoring.py` | 22 | `_ok_pct` / `_latency_to_score` / `_protocol_reachability` / `_recommend_protocols` (priority order, signature-blocked filter), `compute_scores` (empty results / all-OK / all-blocked / mixed / listener-fallback / weights ≠ 1.0) |
+| `censprobe_core.scoring` | `test_scoring.py` | 35 | `_ok_pct` / `_latency_to_score` / `_protocol_reachability` / `_recommend_protocols` (priority order, signature-blocked filter), `compute_scores` (empty results / all-OK / all-blocked / mixed / listener-fallback / weights ≠ 1.0), log-line `entry=N/A` rendering when `listener_session_count == 0` |
 | `censprobe_core.subcategories.derive` | `test_subcategories.py` | 10 | все 4 уровня (prefix → suffix → substring → name override), unknown name → fallback |
 | `censprobe_core.targets` | `test_targets_load.py` | 20 | `Target`, `CfHttpTarget` host/domain coercion, `TelegramDC.ports` required + min_length=1, `load_targets()` (auto-discovery, explicit files, module_owned exclusion, malformed YAML warn-skip, non-mapping, symlink rejection), `TargetSet` views (`domains` dedup+sort, `tcp_targets`, `tls_targets`, `http_targets`) |
 | `censprobe_core.modules.telegram._test_dc_port` | `test_telegram_frame.py` | 1 | байт-точная сверка MTProto abridged-transport frame |
@@ -35,6 +35,7 @@
 |------------|-----------|-------:|-------------|
 | `censprobe_core.modules.cloudflare` (builders) | `test_cloudflare_packets.py` | 12 | `_build_quic_vn_trigger` (long-header version=0x00000001, dst_cid_len, packet number 0), `_build_masque_probe_packet` (UDP encap, length, CID), `_build_wg_handshake_init` (148-byte payload, message_type=1, ephemeral key shape) |
 | `censprobe_core.modules.dns` | `test_dns_helpers.py` | 10 | `_parse_first_nameserver` (resolv.conf parsing), `_get_isp_resolver` (systemd-resolved fallback chain) |
+| `censprobe_core.modules.dns._cert_san_covers_domain_family` | `test_dns_cert_san.py` | 11 | wildcard-apex relaxation (`*.dw.com` ⊃ `dw.com`), single-label wildcard match, two-label rejection per RFC 6125, unrelated-wildcard MITM still rejected, IP-SAN ignored for DNS targets, case-insensitivity, trailing-dot normalisation |
 | `censprobe_core.modules.http._verdict_from_response` | `test_http_verdict.py` | 10 | 200/expected_status, 403/451 + valid_tls → `GEOBLOCK_NOT_CENSORSHIP` (порядок проверок load-bearing), body length / cap |
 | `censprobe_core.modules.middlebox._test_header_manipulation` | `test_middlebox_parsing.py` | 3 | OONI-style header field manipulation parsing |
 | `censprobe_core.modules.tcp` | `test_tcp.py` | 11 | `_single_tcp_attempt` (OK / IP_DROPPED / REFUSED / fast-RST → SUSPECTED RST_INJECTED только в RU vantage), `_majority` aggregator (tie-breaker, all-error, single result) |
@@ -43,6 +44,7 @@
 | `censprobe_core.modules.throttling.run_throttling_tests` | `test_throttling_vantage.py` | 3 | off-vantage → INCONCLUSIVE marker (not real probe); on-vantage → real probe invoked with cfg.modules.throttling; `require_censoring_vantage=False` bypasses gate |
 | `censprobe_core.modules.throttling._decide_method_b_verdict` | `test_throttling_verdict.py` | 7 | trigger < 0.25 × min(correct, typo) → `YOUTUBE_SNI_THROTTLED`, INCONCLUSIVE при bw=0, OK иначе, division-by-zero |
 | `censprobe_core.modules.tls._attribute_tls_failure` | `test_tls_attribution.py` | 4 | SNI-blocked vs cert-mismatch vs network-error attribution |
+| `censprobe_core.modules.tls._pick_neutral_sni` | `test_tls_neutral_sni.py` | 17 | per-IP-family neutral SNI selection: Cloudflare/default → `cloudflare.com`, Akamai (2.16/13, 23/12, 104.64/10) → `www.akamai.com`, AWS CloudFront (17 prefixes incl. 13.249/16) → `aws.amazon.com`, malformed IP → safe fallback |
 
 #### Property-based (`tests/property/`, 3 файла, 12 тестов)
 
@@ -52,7 +54,7 @@
 | `censprobe_core.subcategories.derive` | `test_subcategories_property.py` | 4 | для любого test_name результат непуст и принадлежит замкнутому множеству |
 | `censprobe_core.utils.validate_id` | `test_validate_id_property.py` | 4 | accept-set / reject-set дискриминируются |
 
-**Probe-core total: 22 файла, 185 тестов.**
+**Probe-core total: 28 файлов, 311 тестов.**
 
 ---
 

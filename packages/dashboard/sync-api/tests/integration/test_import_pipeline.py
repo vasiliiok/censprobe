@@ -168,6 +168,10 @@ class TestImportOnce:
         # output it must be non-zero (1 OK, 1 BLOCKED → 0.5 reach).
         assert run.entry_score is not None
         assert run.entry_score > 0
+        # listener_session_count must reflect the one listener report
+        # we wrote — lets dashboard panels distinguish full from partial
+        # runs without re-deriving the signal at query time.
+        assert run.listener_session_count == 1
         # detected_techniques surfaces TLS_HANDSHAKE_FAILURE-style entries
         # only when method is set on the result; this fixture has no
         # method, so the field stays empty.

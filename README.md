@@ -339,13 +339,13 @@ Sustained-data probe через SOCKS-routed протоколы (Shadowsocks, VL
 Упавший модуль отображается в `module_failures` summary, не сабатирует остальное.
 
 ### `dns.py`
-Per-domain ladder: системный resolver → ISP upstream (parsed from `/etc/resolv.conf` или systemd-resolved) → public 8.8.8.8 / 1.1.1.1 / 77.88.8.8 (Yandex) / 9.9.9.9 (Quad9) → DoH (`cloudflare-dns.com`, `dns.google`, `mozilla.cloudflare-dns.com`) → DoT (`1.1.1.1:853`, `8.8.8.8:853`). Для каждого IP — TLS-cert validation (CERTainty-style). Обогащение через `ipapi.is` (опционально через `IPAPI_IS_KEY`).
+Per-domain ladder: системный resolver → ISP upstream (parsed from `/etc/resolv.conf` или systemd-resolved) → public 8.8.8.8 / 1.1.1.1 / 77.88.8.8 (Yandex) / 9.9.9.9 (Quad9) → DoH (`cloudflare-dns.com`, `dns.google`, `mozilla.cloudflare-dns.com`) → DoT (`1.1.1.1:853`, `8.8.8.8:853`). Для каждого IP — TLS-cert validation (CERTainty-style): chain проверяется строго через системный trust store, hostname сверяется вручную по SAN-листу с **apex-relaxation** (`*.example.com` считается покрывающим bare apex `example.com` — отражает реальную cert-архитектуру, например `*.dw.com`, без ложных DNS_POISONING на каждом запуске). Обогащение через `ipapi.is` (опционально через `IPAPI_IS_KEY`).
 
 ### `tcp.py`
 Direct (ip, port) reachability с repeats. Verdicts: `OK` / `IP_DROPPED` (SYN timeout) / `REFUSED` (legitimate RST). В censoring vantage RTT ниже `fast_rst_threshold_ms` атрибутируется как `SUSPECTED RST_INJECTED`. `_majority` aggregator для устранения шума.
 
 ### `tls.py`
-Paired handshake per (IP, domain): `tls_<domain>_sni_blocked` (SNI=domain, system trust store), `tls_<domain>_sni_neutral` (SNI=cloudflare.com, контроль того же IP в том же запуске), плюс ECH-проба. `_attribute_tls_failure` различает SNI-блокировку, cert-mismatch и network error.
+Paired handshake per (IP, domain): `tls_<domain>_sni_blocked` (SNI=domain, system trust store), `tls_<domain>_sni_neutral` (нейтральный SNI выбирается per-IP-family через `_pick_neutral_sni`: Cloudflare → `cloudflare.com`, Akamai → `www.akamai.com`, AWS CloudFront → `aws.amazon.com`, default → `cloudflare.com`), плюс ECH-проба. Раньше hardcoded `cloudflare.com` давал спурьезные `INCONCLUSIVE/ssl_error` на каждом не-CF edge'е (Akamai/AWS отвечают `TLSV1_ALERT_INTERNAL_ERROR` на чужой SNI). `_attribute_tls_failure` различает SNI-блокировку, cert-mismatch и network error.
 
 ### `http.py`
 GET/HEAD с `expected_status` из targets. `_verdict_from_response`:
@@ -392,7 +392,7 @@ OONI-style detection. HTTP Header Field Manipulation: меняет регист�
 - **`relay_score`** — TCP-метрики + latency без учёта протоколов (для серверов в роли transit relay, не endpoint).
 - **`overall`** — среднее арифметическое (`scoring.py:190`):
   - **Есть listener-данные**: `mean(entry, exit, relay)`.
-  - **Нет listener-данных**: `mean(exit, relay)` — `entry_score` исключён, потому что `_protocol_reachability()` возвращает нейтральное `0.5` без listener_reports и иначе несправедливо тянул бы среднее вниз. CLI и поле `listener_session_count` (0 ⇒ partial) помечают такой `overall` как partial.
+  - **Нет listener-данных**: `mean(exit, relay)` — `entry_score` исключён, потому что `_protocol_reachability()` возвращает нейтральное `0.5` без listener_reports и иначе несправедливо тянул бы среднее вниз. В JSON `entry_score` сохраняется как число (для backward-совместимости с sync-api/Grafana), но в CLI/логах рендерится как `entry=N/A` чтобы арифметика `entry exit relay overall` визуально сходилась. Поле `listener_session_count` (0 ⇒ partial) помечает такой `overall` как partial.
 
 Также:
 - **`techniques_detected`** — отсортированный список `BlockingMethod` (см. `models.py:55`), собранный по результатам с `verdict ∈ BLOCKING_VERDICTS`. Полный набор значений: `dns_poisoning`, `dns_blocked_nxdomain`, `doh_blocked`, `ip_dropped`, `tcp_rst_injection`, `tcp_rst_after_tls_ch`, `tls_handshake_failure`, `ech_blocked`, `sni_throttling`, `quic_dropped`, `openvpn_signature_blocked`, `wireguard_signature_blocked`, `shadowsocks_active_probed`, `vpn_data_phase_blocked`, `middlebox_http_manipulation`, `unknown`.
@@ -451,6 +451,8 @@ FastAPI на `127.0.0.1:8080`:
 - `GET /protocols/{id}` — все `ProtocolResult` для сессии (listener report).
 
 Schema создаётся при первом старте через SQLAlchemy `create_all` (без alembic — single-developer project). Таблицы: `test_runs`, `test_results`, `listener_sessions`, `protocol_results`. Cascade delete при удалении `TestRun`.
+
+> **Миграции при изменении модели** — `create_all()` no-op для существующих таблиц. После добавления/удаления колонок (например `test_runs.listener_session_count`) prod-DB не подхватит изменение само. Pattern проекта: `docker compose --profile dashboard down -v` → `up -d` → пайплайн импорта восстанавливает данные из `reports/` (single source of truth). Альтернатива — ручной `ALTER TABLE` под конкретную правку.
 
 ---
 

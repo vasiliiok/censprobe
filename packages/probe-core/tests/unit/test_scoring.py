@@ -266,6 +266,42 @@ class TestComputeScores:
         assert scores_full.entry_score == pytest.approx(100.0)
         assert scores_full.overall == pytest.approx(100.0)
 
+    def test_log_line_renders_entry_as_na_without_listener(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # entry_score is computed on a neutral fallback when listener data
+        # is absent and is then EXCLUDED from overall. Showing it as a
+        # number alongside an overall that doesn't average it produced
+        # misleading-arithmetic complaints from operators (entry=63.6
+        # exit=78.8 relay=100 overall=89.4 doesn't add up by mean/3).
+        # When listener_session_count == 0, the score logger must render
+        # entry as ``N/A``.
+        results = [
+            _make_result(Verdict.OK, category="http", rtt_ms=20.0),
+            _make_result(Verdict.OK, category="tcp", rtt_ms=20.0),
+        ]
+        with caplog.at_level("INFO", logger="censprobe_core.scoring"):
+            compute_scores(results, None)
+        line = next(r.message for r in caplog.records if r.message.startswith("Scores —"))
+        assert "entry=N/A" in line
+        assert "(no listener data)" in line
+
+    def test_log_line_renders_entry_numeric_with_listener(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # When listener data IS present, entry contributes to overall and
+        # should be displayed as a number.
+        results = [
+            _make_result(Verdict.OK, category="http", rtt_ms=20.0),
+            _make_result(Verdict.OK, category="tcp", rtt_ms=20.0),
+        ]
+        listener = _make_listener_report({"wireguard": Verdict.OK})
+        with caplog.at_level("INFO", logger="censprobe_core.scoring"):
+            compute_scores(results, [listener])
+        line = next(r.message for r in caplog.records if r.message.startswith("Scores —"))
+        assert "entry=N/A" not in line
+        assert "(no listener data)" not in line
+
     def test_throttling_detected_lowers_exit(self) -> None:
         # Method-B SNI throttling should trigger detection AND knock 0.2
         # off the censorship axis of the exit score.

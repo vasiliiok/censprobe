@@ -7,9 +7,11 @@ For every target (IP, domain) we try three handshakes:
     chain via the system trust store. ТСПУ SNI-blocking surfaces here as
     connection_reset / timeout while a clean network completes.
 
-  ``tls_<domain>_sni_neutral`` — handshake with SNI="cloudflare.com" against
-    the same IP, no cert verification. Used to prove the IP itself is
-    reachable and isolate SNI-level filtering from IP-level dropping.
+  ``tls_<domain>_sni_neutral`` — handshake with a neutral SNI selected per
+    IP family (cloudflare.com / www.akamai.com / aws.amazon.com — see
+    ``_pick_neutral_sni``) against the same IP, no cert verification. Used
+    to prove the IP itself is reachable and isolate SNI-level filtering
+    from IP-level dropping.
 
   ``tls_<domain>_ech`` — emitted only when ``ech_advertised: true`` is set
     on the target's YAML entry. Uses the ECH-capable curl-ech binary plus
@@ -24,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import ipaddress
 import logging
 import socket
 import ssl
@@ -55,6 +58,94 @@ logger = logging.getLogger(__name__)
 # probe) that aren't on the run_tls_tests entry path. The main entry
 # reads from CensprobeConfig.modules.tls — see run_tls_tests below.
 _TLS_TIMEOUT = 10.0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Neutral-SNI selection per IP family
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# The pair test needs a "control" SNI that, on the same IP, proves the IP is
+# reachable. Hard-coding "cloudflare.com" worked for Cloudflare edges but
+# produced INCONCLUSIVE/ssl_error on every non-Cloudflare CDN: Akamai and
+# AWS edges return TLSV1_ALERT_INTERNAL_ERROR / handshake_failure when the
+# requested SNI is not on their provisioned customer list. The downstream
+# attribution logic already counts that ssl_error as "TCP up" for blocking
+# inference, but every report shipped with 4–6 spurious INCONCLUSIVE tls
+# rows on Akamai-hosted RFE/RT/TikTok and AWS-hosted ExpressVPN.
+#
+# Per-family selection picks an SNI that the family is statistically much
+# more likely to terminate cleanly:
+#   * Akamai → ``www.akamai.com`` (Akamai's own corp site is delivered on
+#     the same edge fleet, so its cert is generally provisioned alongside
+#     customer certs)
+#   * AWS CloudFront → ``aws.amazon.com`` (also CloudFront-hosted)
+#   * Cloudflare → ``cloudflare.com`` (Cloudflare's own front)
+#   * Anything else → ``cloudflare.com`` as the default control
+#
+# The CIDR list is intentionally conservative — false-classifying an IP
+# into the wrong family just degrades to the default ``cloudflare.com``
+# behaviour, which is what we already had.
+_AKAMAI_CIDRS = tuple(
+    ipaddress.ip_network(c)
+    for c in (
+        "2.16.0.0/13",  # Akamai EU
+        "23.0.0.0/12",  # Akamai US
+        "104.64.0.0/10",  # Akamai NA (large block)
+        "184.24.0.0/13",  # Akamai
+    )
+)
+
+_CLOUDFRONT_CIDRS = tuple(
+    ipaddress.ip_network(c)
+    for c in (
+        # AWS CloudFront published ranges (subset). Adding more from
+        # https://ip-ranges.amazonaws.com/ip-ranges.json (service =
+        # CLOUDFRONT) is the maintenance path; here we cover the prefixes
+        # observed across our own solo-run JSONs.
+        "13.32.0.0/15",
+        "13.35.0.0/16",
+        "13.224.0.0/14",
+        "13.249.0.0/16",  # ExpressVPN-hosting prefix seen in ya-zone-a
+        "18.64.0.0/14",
+        "18.160.0.0/13",
+        "52.84.0.0/15",
+        "54.182.0.0/16",
+        "54.192.0.0/16",
+        "54.230.0.0/16",
+        "54.239.128.0/18",
+        "99.84.0.0/16",
+        "99.86.0.0/16",
+        "108.138.0.0/15",
+        "108.156.0.0/14",
+        "143.204.0.0/16",
+        "204.246.164.0/22",
+        "205.251.192.0/19",
+    )
+)
+
+_DEFAULT_NEUTRAL_SNI = "cloudflare.com"
+_AKAMAI_NEUTRAL_SNI = "www.akamai.com"
+_CLOUDFRONT_NEUTRAL_SNI = "aws.amazon.com"
+
+
+def _pick_neutral_sni(ip: str) -> str:
+    """Return the most likely-to-handshake neutral SNI for ``ip``.
+
+    Falls back to ``cloudflare.com`` whenever the IP can't be classified
+    or doesn't fall inside a known CDN range — the historical default
+    behaviour, preserved as the safe baseline.
+    """
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return _DEFAULT_NEUTRAL_SNI
+    for net in _AKAMAI_CIDRS:
+        if addr in net:
+            return _AKAMAI_NEUTRAL_SNI
+    for net in _CLOUDFRONT_CIDRS:
+        if addr in net:
+            return _CLOUDFRONT_NEUTRAL_SNI
+    return _DEFAULT_NEUTRAL_SNI
 
 
 async def run_tls_tests(
@@ -146,16 +237,19 @@ def _attribute_sni_blocking(
     """If neutral SNI proves TCP reachability but blocked SNI fails → SNI-level blocking.
 
     Two cases where neutral confirms TCP is up:
-      1. v_neutral == OK (Cloudflare-hosted: cert irrelevant, handshake passed)
+      1. v_neutral == OK (the chosen neutral SNI is provisioned on this
+         edge: handshake passed, cert irrelevant)
       2. v_neutral == INCONCLUSIVE with error="ssl_error" (server-side
-         rejection like Google rejecting "cloudflare.com" SNI with
-         unrecognized_name TLS alert). The alert proves TCP connected and
+         rejection — e.g. Google rejecting the neutral SNI with
+         unrecognized_name TLS alert when the IP belongs to a CDN family
+         we have no neutral SNI for). The alert proves TCP connected and
          TLS began; the rejection is the remote server's policy, not the
          censor. So IP is reachable.
 
     Without this second branch, SNI-blocking of Google/Meta/VK would never
-    be attributed as TCP_RST_AFTER_TLS_CH because "cloudflare.com" SNI
-    always gets an ssl_error from non-Cloudflare servers.
+    be attributed as TCP_RST_AFTER_TLS_CH on edges that don't terminate
+    our control SNI cleanly. ``_pick_neutral_sni`` reduces (but does not
+    eliminate) such mismatches.
     """
     neutral_tcp_ok = v_neutral == Verdict.OK or (
         v_neutral == Verdict.INCONCLUSIVE and ev_neutral.get("error") == "ssl_error"
@@ -233,26 +327,32 @@ async def _test_sni_scenarios(
         )
     )
 
-    # Scenario 2: neutral SNI (cloudflare.com) on the same IP. We do NOT
-    # verify the cert here — Cloudflare's edge will not present a cert
-    # valid for a non-cloudflare IP, so verify=True would always fail.
+    # Scenario 2: neutral SNI on the same IP. Per-IP-family lookup —
+    # Cloudflare gets cloudflare.com, Akamai gets www.akamai.com, AWS
+    # CloudFront gets aws.amazon.com. Hardcoding cloudflare.com produced
+    # spurious INCONCLUSIVE/ssl_error on every Akamai- and CloudFront-
+    # hosted target because those edges reject SNIs they aren't
+    # provisioned for. We do NOT verify the cert here: even on the
+    # right family the IP-vs-host pairing won't satisfy verify=True.
+    neutral_sni = _pick_neutral_sni(ip)
     v_neutral, ev_neutral, attempts_neutral = await _tls_connect_with_repeats(
         ip,
-        "cloudflare.com",
+        neutral_sni,
         verify=False,
         repeats=repeats,
     )
     # ssl_error on the neutral SNI means the server sent an INTERNAL_ERROR
-    # alert — this happens when a Cloudflare IP doesn't serve cloudflare.com
-    # (the target domain is hosted on Cloudflare but on a different IP range
-    # than cloudflare.com's frontend). Server rejection ≠ network censorship.
+    # alert — happens when the chosen neutral SNI still isn't provisioned
+    # on this exact edge member (CDNs partition customer certs across
+    # subsets of their fleet). Server rejection ≠ network censorship; the
+    # downstream attribution treats INCONCLUSIVE+ssl_error as "TCP up".
     if v_neutral == Verdict.ANOMALY and ev_neutral.get("error") == "ssl_error":
         v_neutral = Verdict.INCONCLUSIVE
     results.append(
         TestResult(
             test=f"tls_{_slug(domain)}_sni_neutral",
             category="tls",
-            target=f"{ip}:cloudflare.com",
+            target=f"{ip}:{neutral_sni}",
             verdict=v_neutral,
             evidence=ev_neutral,
             attempts=attempts_neutral,

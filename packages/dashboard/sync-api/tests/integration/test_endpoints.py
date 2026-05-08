@@ -89,6 +89,9 @@ class TestGetTestRun:
         assert body["test_id"] == "vu-fra"
         assert body["description"] == "Vultr FRA"
         assert body["scores"]["entry"] == pytest.approx(80.0)
+        # Default listener_session_count from _seed_run is the column's
+        # server default (0) — confirms it round-trips through the API.
+        assert body["scores"]["listener_session_count"] == 0
         assert body["recommended_protocols"] == ["wireguard"]
         assert body["detected_techniques"] == ["dns_poisoning"]
 

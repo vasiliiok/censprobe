@@ -573,33 +573,133 @@ async def _resolve_dot(domain: str, host: str, port: int = 853) -> list[str]:
         return []
 
 
+def _name_matches_with_apex(name: str, target: str) -> bool:
+    """Hostname match with apex relaxation.
+
+    Both arguments must already be lowercased and trailing-dot-stripped.
+
+    Behaviours:
+      * exact match (``foo.com`` == ``foo.com``)
+      * standard one-label wildcard (``*.foo.com`` covers ``a.foo.com``)
+      * apex relaxation (``*.foo.com`` is treated as also covering
+        ``foo.com`` even though RFC 6125 says wildcards only match a
+        subdomain label — see :func:`_cert_san_covers_domain_family`).
+    """
+    if name == target:
+        return True
+    if not name.startswith("*."):
+        return False
+    wild_base = name[2:]
+    # Standard one-label wildcard.
+    if target.endswith("." + wild_base) and target.count(".") == wild_base.count(".") + 1:
+        return True
+    # Apex relaxation.
+    return wild_base == target
+
+
+def _subject_common_name(cert: dict[str, Any]) -> str | None:
+    """Return the cert's Subject CommonName, or ``None`` if absent.
+
+    ``getpeercert()`` shapes the subject as a tuple of RDN tuples:
+    ``((("commonName", "foo.com"),), (("organizationName", "..."),))``.
+    Walk the structure defensively — non-conforming certs may omit
+    fields entirely, in which case CN is simply absent.
+    """
+    for rdn in cert.get("subject") or ():
+        for key, value in rdn:
+            if key == "commonName":
+                return value if isinstance(value, str) else None
+    return None
+
+
+def _cert_san_covers_domain_family(cert: dict[str, Any], domain: str) -> bool:
+    """Whether ``cert``'s SAN/CN legitimately belongs to ``domain``'s family.
+
+    Standard wildcard semantics PLUS an apex relaxation: a SAN entry of
+    ``*.example.com`` is treated as covering the bare apex ``example.com``,
+    even though RFC 6125 says wildcards only match a single subdomain
+    label. Operators routinely deploy a single ``*.foo.com`` cert and
+    serve the apex from the same fleet — DW (``*.dw.com``) is the
+    canonical example. The strict RFC reading flagged that as
+    DNS_POISONING with confidence 0.6 every run; the relaxation says
+    "this cert was issued to the domain owner, no censor in path".
+
+    Subject CommonName is a fallback used only when the cert has no DNS
+    SAN entries — it mirrors what Python's default ``check_hostname=True``
+    does, and only matters for legacy CAs. Public CAs have been
+    SAN-mandatory since the CAB Forum baseline of 2017, so production
+    targets effectively never hit this branch.
+
+    A real MITM with a CA-signed cert for an unrelated domain (e.g.
+    ``*.attacker.example``) still fails this check because no SAN entry
+    or CN covers the target's domain family. That residual edge case is
+    further pruned by the ASN/ip_overlap signals in
+    ``_decide_dns_verdict``.
+    """
+    target = domain.lower().rstrip(".")
+    sans = cert.get("subjectAltName") or ()
+    has_dns_san = False
+    for kind, value in sans:
+        if kind != "DNS":
+            continue
+        has_dns_san = True
+        if _name_matches_with_apex(value.lower().rstrip("."), target):
+            return True
+    if has_dns_san:
+        # SAN list present but no entry matched — strictly per RFC 6125,
+        # CN is NOT consulted as a fallback in that case. Avoids granting
+        # legitimacy to a cert whose CN happens to match the target while
+        # its SAN list points at unrelated names.
+        return False
+    cn = _subject_common_name(cert)
+    if cn is None:
+        return False
+    return _name_matches_with_apex(cn.lower().rstrip("."), target)
+
+
 async def _validate_cert(domain: str, ip: str) -> bool | None:
     """
     Connect to IP:443 with SNI=domain and check if cert is valid for domain.
     Returns True/False/None (None = connection failed, inconclusive).
 
-    Two failure modes both count as "cert invalid for `domain`":
+    Validation strategy: validate the **chain** strictly, then check the
+    **hostname** against the cert's SAN list manually with apex-relaxed
+    wildcard semantics (see :func:`_cert_san_covers_domain_family`).
+    Standard ``check_hostname=True`` rejects ``*.dw.com`` for SNI=``dw.com``
+    per RFC 6125 even though the cert is the legitimate one DW provisions
+    on its fleet — strict-mode flagged that as DNS_POISONING every run.
 
-      * ssl.SSLCertVerificationError — chain failed verification or
-        hostname mismatch against a trusted CA.
-      * ssl.SSLError without the verification subclass — typical of a
-        homegrown TSPU MITM serving a self-signed cert: the handshake
-        completes far enough for OpenSSL to reject the cert with
-        "unable to get local issuer certificate" / "alert unknown CA",
-        which surfaces as plain SSLError.
+    Three failure modes still count as "cert invalid for `domain`":
 
-    Both → False so DNS_POISONING attribution doesn't silently downgrade
-    to ANOMALY when a censor uses a self-signed cert.
+      * ssl.SSLCertVerificationError — chain failed verification (real
+        MITM with a self-signed or untrusted cert).
+      * ssl.SSLError without the verification subclass — TSPU MITM
+        serving a cert that fails OpenSSL chain checks at handshake
+        time ("unable to get local issuer certificate").
+      * Chain valid but SAN list belongs to an unrelated domain
+        family — possible CA-cert MITM (rare; a censor would need to
+        actually obtain a CA-issued cert for some other name).
     """
-    ctx = ssl.create_default_context()
 
     def _check() -> bool | None:
+        # Build a context that validates the chain but defers hostname
+        # check to our SAN-with-apex-relaxation logic below.
+        ctx = ssl.create_default_context()
+        # Disable Python's hostname check so we can apply SAN validation
+        # with apex relaxation manually below. Chain verification stays on.
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_REQUIRED
         try:
             with socket.create_connection((ip, 443), timeout=5) as raw:
                 with ctx.wrap_socket(raw, server_hostname=domain) as s:
-                    s.getpeercert()  # raises if cert invalid
-                    return True
+                    cert = s.getpeercert()
+                    if not cert:
+                        return None
+                    return _cert_san_covers_domain_family(cert, domain)
         except ssl.SSLCertVerificationError:
+            # Chain itself failed: untrusted root, expired, self-signed,
+            # signature mismatch. Either real MITM or a misconfigured
+            # endpoint — call it invalid for `domain`.
             return False
         except ssl.SSLError:
             # MITM with a self-signed cert raises bare SSLError, not

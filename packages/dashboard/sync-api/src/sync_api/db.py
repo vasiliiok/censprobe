@@ -99,6 +99,11 @@ class TestRun(Base):
     exit_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     relay_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     overall_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Number of listener-session reports that fed compute_scores. Lets
+    # Grafana panels distinguish full runs (≥1 session) from partial /
+    # solo-only runs where overall is the mean of (exit, relay) only and
+    # entry_score is built on a neutral 0.5 protocol_reach fallback.
+    listener_session_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     throttling_detected: Mapped[bool] = mapped_column(Boolean, default=False)
     dns_integrity: Mapped[float | None] = mapped_column(Float, nullable=True)
     tls_integrity: Mapped[float | None] = mapped_column(Float, nullable=True)

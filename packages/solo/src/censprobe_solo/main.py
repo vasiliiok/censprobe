@@ -248,9 +248,15 @@ def _print_summary(results: list[TestResult], scores: ServerScores) -> None:
         )
 
     console.print(table)
-    overall_note = "" if scores.listener_session_count > 0 else " [dim](no listener data)[/dim]"
+    has_listener = scores.listener_session_count > 0
+    overall_note = "" if has_listener else " [dim](no listener data)[/dim]"
+    # entry_score is built on a neutral 0.5 fallback for protocol_reachability
+    # when no listener session reports exist, and overall already excludes
+    # entry in that case (mean of exit+relay only). Render entry as N/A so
+    # the printed numbers match overall instead of looking like broken math.
+    entry_display = f"[yellow]{scores.entry_score}[/yellow]" if has_listener else "[dim]N/A[/dim]"
     console.print(
-        f"\n[bold]Scores:[/bold] entry=[yellow]{scores.entry_score}[/yellow] "
+        f"\n[bold]Scores:[/bold] entry={entry_display} "
         f"exit=[yellow]{scores.exit_score}[/yellow] "
         f"relay=[yellow]{scores.relay_score}[/yellow] "
         f"overall=[bold yellow]{scores.overall}[/bold yellow]/100{overall_note}"

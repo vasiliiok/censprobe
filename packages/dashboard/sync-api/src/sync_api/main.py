@@ -324,6 +324,7 @@ def _apply_scores(
     run.exit_score = scores.exit_score
     run.relay_score = scores.relay_score
     run.overall_score = scores.overall
+    run.listener_session_count = scores.listener_session_count
     run.throttling_detected = scores.throttling_detected
     run.dns_integrity = scores.dns_integrity
     run.tls_integrity = scores.tls_integrity
@@ -621,6 +622,10 @@ def _run_to_dict(run: TestRun) -> dict[str, Any]:
             "exit": run.exit_score,
             "relay": run.relay_score,
             "overall": run.overall_score,
+            # 0 ⇒ partial run (overall = mean(exit, relay) only, entry
+            # axis is built on a neutral 0.5 fallback). Lets dashboards
+            # render a "partial" badge without re-deriving the signal.
+            "listener_session_count": run.listener_session_count,
         },
         "throttling_detected": run.throttling_detected,
         "dns_integrity": run.dns_integrity,

@@ -211,9 +211,17 @@ def compute_scores(
     # ── Recommended protocols ─────────────────────────────────────────────────
     scores.recommended_protocols = _recommend_protocols(solo_results, listener_reports)
 
+    # When no listener data fed the run, entry_score is built on a
+    # neutral 0.5 fallback for protocol_reachability and is NOT counted
+    # in the printed overall (mean of exit+relay only). Showing the
+    # numeric value alongside the "honest" overall produced misleading
+    # arithmetic — operators saw entry=63.6 exit=78.8 relay=100 overall=89.4
+    # and reasonably concluded the math was wrong. Replace it with N/A
+    # in display contexts when listener data is missing.
+    entry_display = f"{scores.entry_score:.0f}" if scores.listener_session_count > 0 else "N/A"
     logger.info(
-        "Scores — entry=%.0f exit=%.0f relay=%.0f overall=%.0f%s | techniques=%s",
-        scores.entry_score,
+        "Scores — entry=%s exit=%.0f relay=%.0f overall=%.0f%s | techniques=%s",
+        entry_display,
         scores.exit_score,
         scores.relay_score,
         scores.overall,
