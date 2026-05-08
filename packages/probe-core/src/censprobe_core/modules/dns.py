@@ -685,9 +685,18 @@ async def _validate_cert(domain: str, ip: str) -> bool | None:
         # Build a context that validates the chain but defers hostname
         # check to our SAN-with-apex-relaxation logic below.
         ctx = ssl.create_default_context()
-        # Disable Python's hostname check so we can apply SAN validation
-        # with apex relaxation manually below. Chain verification stays on.
-        ctx.check_hostname = False
+        # Hostname verification is performed manually below by
+        # _cert_san_covers_domain_family with apex relaxation — Python's
+        # strict RFC 6125 check_hostname rejects legitimate `*.dw.com`
+        # certs presented for SNI=`dw.com` (the canonical example), and
+        # we need that case to validate. Chain verification stays on
+        # (verify_mode=CERT_REQUIRED), so a self-signed / untrusted-CA
+        # MITM still surfaces as SSLCertVerificationError and is mapped
+        # to cert_valid=False. NOSONAR S5527: hostname verification is
+        # not skipped — it is moved into the SAN-with-apex helper, which
+        # also rejects CA-cert MITMs whose SAN list does not cover the
+        # target domain family.
+        ctx.check_hostname = False  # NOSONAR S5527
         ctx.verify_mode = ssl.CERT_REQUIRED
         try:
             with socket.create_connection((ip, 443), timeout=5) as raw:

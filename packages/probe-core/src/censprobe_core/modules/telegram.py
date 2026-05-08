@@ -140,6 +140,51 @@ async def run_telegram_tests(cfg: dict[str, Any] | None = None) -> list[TestResu
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def _normalise_ip_list(raw: object) -> list[str]:
+    """Coerce a YAML/JSON ``ipv4``/``ipv6`` field into ``list[str]``.
+
+    The pydantic schema declares ``list[str]`` and ``_coerce_ip_list``
+    enforces it on input, but ``model_dump`` can re-emit older serialised
+    forms verbatim when this function is called on raw dicts (tests, hand
+    -built fixtures, legacy YAML). Three shapes accepted:
+
+      * ``["1.2.3.4", "5.6.7.8"]`` — passed through, empty strings dropped
+      * ``"1.2.3.4"`` — wrapped into a single-element list
+      * anything else (``None``, missing key, malformed) — empty list
+
+    Empties are dropped here so the caller doesn't need a ``if not ip``
+    guard nested inside three for-loops.
+    """
+    if isinstance(raw, str):
+        return [raw] if raw else []
+    if isinstance(raw, list):
+        return [ip for ip in raw if isinstance(ip, str) and ip]
+    return []
+
+
+# (display name, dict key) pairs for the two IP-version axes a DC may
+# expose. Ordering is stable so the test_id sort in the saved report
+# stays deterministic.
+_DC_IP_VERSIONS: tuple[tuple[str, str], ...] = (("v4", "ipv4"), ("v6", "ipv6"))
+
+
+def _dc_endpoints(
+    dc: dict[str, Any],
+    skip_ipv6: bool,
+) -> list[tuple[int, str, str, int]]:
+    """All ``(dc_id, ip_ver, ip, port)`` tuples for a single DC entry."""
+    dc_id = dc["id"]
+    ports = dc.get("ports", [443])
+    out: list[tuple[int, str, str, int]] = []
+    for ip_ver, ip_key in _DC_IP_VERSIONS:
+        if ip_ver == "v6" and skip_ipv6:
+            continue
+        for ip in _normalise_ip_list(dc.get(ip_key)):
+            for port in ports:
+                out.append((dc_id, ip_ver, ip, port))
+    return out
+
+
 def _enumerate_dc_endpoints(
     dcs: list[dict[str, Any]],
     skip_ipv6: bool,
@@ -156,25 +201,12 @@ def _enumerate_dc_endpoints(
     ``_test_dc_reachability``'s ``gather(..., return_exceptions=True)`` and
     was silently dropped (debug log only). Net effect: zero ``telegram_dc_*``
     results in every report and a ~55-point underestimate of Telegram
-    health.
+    health. Per-DC fan-out lives in ``_dc_endpoints``; IP-list normalisation
+    in ``_normalise_ip_list``.
     """
     out: list[tuple[int, str, str, int]] = []
     for dc in dcs:
-        dc_id = dc["id"]
-        for ip_ver, ip_key in (("v4", "ipv4"), ("v6", "ipv6")):
-            if ip_ver == "v6" and skip_ipv6:
-                continue
-            ips = dc.get(ip_key) or []
-            # Defensive: handle scalar carry-overs from older serialised
-            # forms — the schema is list[str] but model_dump on legacy
-            # data could leak a bare string. Normalise to a list either way.
-            if isinstance(ips, str):
-                ips = [ips]
-            for ip in ips:
-                if not ip:
-                    continue
-                for port in dc.get("ports", [443]):
-                    out.append((dc_id, ip_ver, ip, port))
+        out.extend(_dc_endpoints(dc, skip_ipv6))
     return out
 
 
