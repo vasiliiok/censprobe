@@ -67,10 +67,16 @@ class TestClassifyProxyOutcomeBlocked:
     def test_blocked_with_no_tokens_stays_blocked(self) -> None:
         # Truly blocked: tunnel never came up, no markers either way.
         assert _classify_proxy_outcome("blocked", "") == (False, False)
-        assert _classify_proxy_outcome(
-            "blocked",
-            "config loaded\nstarted listen :8080\n",  # 'started listen' is a success token
-        ) == (True, True)
+
+    def test_blocked_with_only_listener_startup_log_stays_blocked(self) -> None:
+        # Local SOCKS listener startup ("started listen", "listening on…")
+        # is NOT evidence of an upstream handshake — the local proxy
+        # binary spinning up its own port doesn't say anything about
+        # whether the remote peer ever replied. Promoting BLOCKED here
+        # would violate the project invariant "BLOCKED == confirmed
+        # block": fixed 2026-05.
+        log = "config loaded\nstarted listen :8080\n"
+        assert _classify_proxy_outcome("blocked", log) == (False, False)
 
     def test_blocked_with_success_AND_failure_tokens_stays_blocked(self) -> None:
         # If both a success and a failure marker show up, fail closed —
@@ -88,7 +94,7 @@ class TestClassifyProxyOutcomeInconclusive:
     """Same log-inspection rules apply to status='inconclusive'."""
 
     def test_inconclusive_with_success_only_is_handshake_only(self) -> None:
-        log = "reality: client connected\n"
+        log = "accepted tcp:127.0.0.1:443 -> upstream\n"
         assert _classify_proxy_outcome("inconclusive", log) == (True, True)
 
     def test_inconclusive_with_no_tokens_blocked(self) -> None:
@@ -99,6 +105,82 @@ class TestClassifyProxyOutcomeInconclusive:
         # the same log-inspection branch as inconclusive.
         log = "client connected"
         assert _classify_proxy_outcome("handshake_only", log) == (True, True)
+
+
+class TestHandshakeTokenSetSnapshot:
+    """Pin the exact token sets so accidental token additions/removals
+    fail loudly in review.
+
+    These tokens decide whether BLOCKED gets promoted to HANDSHAKE_ONLY.
+    A typo or overly-broad addition (e.g. "started listen", which we
+    removed in 2026-05) silently changes the verdict for every probe
+    that uses _classify_proxy_outcome. A snapshot test forces any
+    future change to be a *deliberate* one — touch this list, the
+    review reads exactly what shifted.
+    """
+
+    def test_success_tokens_pinned(self) -> None:
+        # Each entry MUST be evidence of upstream-peer activity, not
+        # local listener bring-up. If you add a token that fires on
+        # binary startup alone (e.g. "listening on", "started listen",
+        # "ready"), you violate the BLOCKED invariant — see
+        # _HS_SUCCESS_TOKENS docstring.
+        expected = (
+            "inbound connection",
+            "connection established",
+            "handshake complete",
+            "tunnel established",
+            "authenticated",
+            "accepted tcp:",
+            "client connected",
+            "server connected",
+            "new connection:",
+        )
+        assert protocol_probes._HS_SUCCESS_TOKENS == expected
+
+    def test_failure_tokens_pinned(self) -> None:
+        # Failure markers gate the success-token promotion: if any of
+        # these appear, BLOCKED stays BLOCKED even with a success
+        # marker present. See test_blocked_with_success_AND_failure_…
+        expected = (
+            "handshake failed",
+            "connection refused",
+            "no route to host",
+            "i/o timeout",
+            "context deadline exceeded",
+            "tls: ",
+            "reality verify failed",
+            "auth failed",
+            "authentication failed",
+            "dial tcp",
+            "dial udp",
+        )
+        assert protocol_probes._HS_FAILURE_TOKENS == expected
+
+    def test_no_token_overlap(self) -> None:
+        # Sanity: a string can't be both a success and failure marker
+        # — that would make _classify_proxy_outcome ambiguous.
+        success = set(protocol_probes._HS_SUCCESS_TOKENS)
+        failure = set(protocol_probes._HS_FAILURE_TOKENS)
+        assert success.isdisjoint(failure), (
+            f"tokens in both sets: {success & failure}"
+        )
+
+    def test_no_token_is_substring_of_another(self) -> None:
+        # Defensive: if "tcp" were in success and "dial tcp" in
+        # failure, every "dial tcp" line would match BOTH and the
+        # outcome would depend on iteration order. Substring checks
+        # short-circuit cleanly only when no token shadows another.
+        all_tokens = list(protocol_probes._HS_SUCCESS_TOKENS) + list(
+            protocol_probes._HS_FAILURE_TOKENS
+        )
+        for i, a in enumerate(all_tokens):
+            for j, b in enumerate(all_tokens):
+                if i != j:
+                    assert a not in b or a == b, (
+                        f"token {a!r} is a substring of {b!r} — "
+                        f"will produce ambiguous matches"
+                    )
 
 
 class TestWgPeerRxBytesParsing:

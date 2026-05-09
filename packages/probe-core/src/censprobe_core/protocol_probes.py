@@ -136,21 +136,24 @@ async def run_cmd(cmd: list[str], timeout: float = PROBE_TIMEOUT) -> tuple[int, 
 
 
 _HS_SUCCESS_TOKENS = (
-    # sing-box / xray / hysteria2 success markers when a remote tunnel
-    # session has actually been established. If none of these show up
-    # in the tunnel's stdout by the time proxy_echo completed, a curl
-    # timeout means the upstream handshake never finished — not a
-    # "handshake_only" (reachable) state.
+    # sing-box / xray / hysteria2 markers proving an UPSTREAM tunnel
+    # handshake actually completed (not just a local SOCKS listener
+    # spinning up). These promote BLOCKED→HANDSHAKE_ONLY when the
+    # data-plane curl failed but the upstream proved reachable, so it
+    # is critical they be evidence of remote-peer activity, not local
+    # bookkeeping. Anything that fires from listener bring-up alone
+    # ("started listen", "listening on …") is excluded — the local
+    # SOCKS proxy logging that line is a startup event, not handshake
+    # evidence, and including it caused BLOCKED to be falsely promoted
+    # to HANDSHAKE_ONLY.
     "inbound connection",
     "connection established",
     "handshake complete",
     "tunnel established",
     "authenticated",
     "accepted tcp:",
-    "started listen",
     "client connected",
     "server connected",
-    "reality: ",
     "new connection:",
 )
 
@@ -1732,15 +1735,30 @@ async def probe_mtproto_orig(host: str, port: int, secret_hex: str) -> ProbeResu
         try:
             await asyncio.wait_for(writer.drain(), timeout=5.0)
         except (TimeoutError, ConnectionResetError, BrokenPipeError) as e:
+            # Write failed = TCP-level slam during send. That's a real
+            # network-side block (RST mid-stream / FIN), not a server-side
+            # ambiguity, so BLOCKED stands.
             return _mtg_error_result(f"orig_write_failed:{type(e).__name__}", Verdict.BLOCKED)
 
         # Length prefix (4 bytes encrypted).
         try:
             length_ct = await asyncio.wait_for(reader.readexactly(4), timeout=PROBE_TIMEOUT)
         except asyncio.IncompleteReadError:
+            # FIN/RST after write = peer accepted our bytes then severed.
+            # Could be DPI cutting after L7 inspection or the proxy
+            # rejecting init silently — both look like blocking.
             return _mtg_error_result("orig_resPQ_truncated_len", Verdict.BLOCKED)
         except TimeoutError:
-            return _mtg_error_result("orig_resPQ_len_timeout", Verdict.BLOCKED)
+            # mtproto-proxy is silent-by-design until upstream Telegram
+            # DC replies with resPQ — verified 2026-05 via tcpdump+strace
+            # (zero accept4 syscalls during the probe window, zero reply
+            # bytes for valid AND deliberately invalid inits). So
+            # "no bytes in PROBE_TIMEOUT" can mean DPI blackholed us OR
+            # Telegram DC won't talk to the listener vantage (datacenter
+            # anti-abuse, e.g. GCP egress to 149.154.175.50:8888 silently
+            # ignored). Collapsing both into BLOCKED would violate the
+            # "BLOCKED == confirmed block" invariant — surface as ERROR.
+            return _mtg_error_result("orig_resPQ_len_timeout", Verdict.ERROR)
 
         length_pt = recv_cipher.update(length_ct)
         length = int.from_bytes(length_pt, "little")
@@ -1753,11 +1771,19 @@ async def probe_mtproto_orig(host: str, port: int, secret_hex: str) -> ProbeResu
         try:
             body_ct = await asyncio.wait_for(reader.readexactly(length), timeout=PROBE_TIMEOUT)
         except asyncio.IncompleteReadError:
+            # Body truncation after we already received a valid 4-byte
+            # length prefix means the server WAS responding then severed.
+            # That's a real block.
             return _mtg_error_result(
                 f"orig_resPQ_truncated_body_expected={length}", Verdict.BLOCKED
             )
         except TimeoutError:
-            return _mtg_error_result("orig_resPQ_body_timeout", Verdict.BLOCKED)
+            # Same ambiguity reasoning as the length-read timeout above —
+            # we already saw a length prefix, but if the body never
+            # arrives the silence could be DPI mid-stream OR a stalled
+            # upstream DC. ERROR rather than BLOCKED preserves the
+            # "BLOCKED implies confirmed block" invariant.
+            return _mtg_error_result("orig_resPQ_body_timeout", Verdict.ERROR)
 
         body_pt = recv_cipher.update(body_ct)
 
