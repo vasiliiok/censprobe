@@ -52,6 +52,7 @@ __all__ = [
     "probe_vless_reality",
     "probe_wireguard",
     "probe_mtproto_proxy",
+    "probe_mtproto_orig",
     "ping_echo",
     "proxy_echo",
 ]
@@ -229,26 +230,31 @@ def _classify_proxy_outcome(
     """Return (handshake_ok, is_real_handshake_only).
 
     Given proxy_echo's status and tunnel log, decide whether the outcome
-    actually reflects a completed upstream handshake. If no success marker
-    appeared in the logs, downgrade to BLOCKED.
+    actually reflects a completed upstream handshake.
+
+    "blocked" used to short-circuit straight to (False, False), but that
+    conflated two distinct cases: curl-through-SOCKS could fail because
+    the upstream handshake never completed (true BLOCKED) or because the
+    handshake succeeded but the tunneled HTTP request itself died (data
+    plane failure — semantically HANDSHAKE_ONLY, matching the listener's
+    own ``handshake_count > 0 and not data_transfer_ok`` aggregation).
+    Both "blocked" and "inconclusive" therefore consult tunnel logs for
+    a success marker; if one is present and no failure marker appears,
+    we elevate to HANDSHAKE_ONLY so client- and listener-side verdicts
+    line up on the dashboard's per-protocol-per-session row.
 
     Accepts statuses: "ok", "blocked", "inconclusive" (legacy alias
     "handshake_only" from older callers also tolerated).
     """
     if status == "ok":
         return True, False
-    if status == "blocked":
-        return False, False
 
-    # status == "inconclusive" (or legacy "handshake_only") — inspect logs.
+    # Both "blocked" and "inconclusive" inspect logs — see docstring.
     low = log_text.lower()
     saw_success = any(tok in low for tok in _HS_SUCCESS_TOKENS)
     saw_failure = any(tok in low for tok in _HS_FAILURE_TOKENS)
     if saw_success and not saw_failure:
         return True, True
-    # No positive signal → treat as BLOCKED. This corrects the previous
-    # bias of calling any curl timeout "handshake_only" even when the
-    # outer tunnel never came up.
     return False, False
 
 
@@ -290,6 +296,42 @@ async def ping_echo(ip: str, timeout: float = 3.0, count: int = 3, min_received:
                     received = int(tokens[0])
                     break
     return received >= min_received
+
+
+async def _wg_peer_rx_bytes(tool: str, iface: str) -> int:
+    """Return the cumulative rx_bytes the local WG/AWG iface received from
+    its peer, parsed from ``<tool> show <iface> transfer``.
+
+    Output format (one line per peer, tab-separated):
+        <peer_pubkey>\\t<rx_bytes>\\t<tx_bytes>
+
+    Why this matters: ``ping_echo`` can spuriously succeed on Windows
+    Docker Desktop with ``network_mode: host`` even when the tunnel
+    never came up — the host's networking layer fakes ICMP echo replies
+    for routes that fall through to the WG/AWG interface. The transfer
+    counters are updated by the WG userspace daemon only when actual
+    encrypted bytes from the peer have been decrypted, so a ``rx_bytes
+    > 0`` reading is unforgeable from the OS network stack: it proves
+    the listener-side responder really sent crypto traffic to us.
+
+    Returns the highest rx counter across all peer rows (we only
+    configure one peer, but the parser tolerates any count). Any parse
+    failure returns 0 so callers treat it as "no proof of return
+    traffic" and downgrade to HANDSHAKE_ONLY rather than OK.
+    """
+    code, out, _ = await run_cmd([tool, "show", iface, "transfer"], timeout=2.0)
+    if code != 0:
+        return 0
+    best = 0
+    for line in out.splitlines():
+        parts = line.split()
+        # parts = [peer_pubkey, rx_bytes, tx_bytes] — accept whitespace
+        # too in case some build emits spaces instead of tabs.
+        if len(parts) >= 2 and parts[1].isdigit():
+            rx = int(parts[1])
+            if rx > best:
+                best = rx
+    return best
 
 
 async def _wait_port_listening(
@@ -656,9 +698,16 @@ PersistentKeepalive = 25
             result.handshake_ok = hs_ok
             if hs_ok:
                 result.verdict = Verdict.HANDSHAKE_ONLY
+                # Two independent signals required for OK: ping_echo
+                # (≥2/3 ICMP echoes return) AND ``wg show transfer``
+                # (rx_bytes > 0). The second guards against Windows
+                # Docker Desktop ``network_mode: host`` spoofing ICMP
+                # replies — see _wg_peer_rx_bytes docstring.
                 if await ping_echo("10.202.0.1"):
-                    result.data_ok = True
-                    result.verdict = Verdict.OK
+                    rx = await _wg_peer_rx_bytes("wg", _WG_CLI_IFACE)
+                    if rx > 0:
+                        result.data_ok = True
+                        result.verdict = Verdict.OK
         finally:
             # Try `wg-quick down` first (also drops routes/rules); fall
             # back to a hard `ip link del` so a leftover interface never
@@ -757,9 +806,18 @@ PersistentKeepalive = 25
             result.handshake_ok = hs_ok
             if hs_ok:
                 result.verdict = Verdict.HANDSHAKE_ONLY
+                # Same two-signal gate as the WireGuard probe: ping
+                # alone is not enough on Windows Docker Desktop with
+                # ``network_mode: host``. ``awg show transfer``
+                # rx_bytes can only be raised by the userspace
+                # daemon when real encrypted bytes from the peer
+                # have been decrypted, so a non-zero reading proves
+                # the listener-side responder actually answered.
                 if await ping_echo("10.201.0.1"):
-                    result.data_ok = True
-                    result.verdict = Verdict.OK
+                    rx = await _wg_peer_rx_bytes("awg", _AWG_CLI_IFACE)
+                    if rx > 0:
+                        result.data_ok = True
+                        result.verdict = Verdict.OK
         finally:
             # awg-quick down handles routing/socket cleanup when the conf
             # is still readable; the hard fallbacks ensure no leftovers.
@@ -1379,6 +1437,341 @@ async def probe_mtproto_proxy(host: str, port: int, secret_hex: str) -> ProbeRes
     finally:
         # Best-effort connection close — peer may have torn down already
         # on the error path.
+        with contextlib.suppress(Exception):
+            writer.close()
+            await writer.wait_closed()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Original Telegram MTProxy (obfuscated2 / padded-intermediate) probe
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Unlike mtg, the original ``mtproto-proxy`` (TelegramMessenger/MTProxy, C)
+# does NOT speak fakeTLS. Wire format is "obfuscated2" — a 64-byte init
+# frame the client sends in plaintext; the proxy derives AES-CTR keys
+# from bytes [8:56] of the frame plus the operator secret, and decrypts
+# bytes [56:60] to verify the chosen MTProto transport tag (we use
+# ``0xdddddddd`` four times = padded-intermediate, the mode public
+# Telegram proxies typically deploy because random-padding defeats
+# packet-size fingerprinting).
+#
+# After the init frame, the proxy is a TRANSPARENT proxy to a real
+# Telegram DC: it re-frames the obfuscated2 payload onto a plain MTProto
+# connection to the appropriate DC (chosen via the ``proxy-multi.conf``
+# topology baked into the listener image). Therefore "is the proxy
+# alive" cannot be checked locally — the probe must send a real MTProto
+# request (``req_pq_multi``) and verify the resulting ``resPQ`` echoes
+# the nonce we picked. This gives two independent failure surfaces:
+#
+#   1. The 64-byte init / first padded-intermediate frame survives the
+#      path without RST → censor doesn't blacklist obfuscated2 init
+#      bytes per se.
+#   2. The proxy returned a structurally valid MTProto resPQ with our
+#      nonce → proxy holds the same secret AND has reachable upstream
+#      to a Telegram DC.
+#
+# Verdict on success: ``HANDSHAKE_ONLY`` (matches the mtg fakeTLS probe
+# semantics — no sustained data plane test).
+#
+# CAVEAT: this probe depends on the listener having outbound reachability
+# to the Telegram DC IPs in proxy-multi.conf. If outbound is blocked at
+# the listener (rather than the client), verdicts collapse to BLOCKED
+# without that being a client-side DPI signal. In practice, listeners
+# that successfully run mtg (which also dials Telegram DCs upstream)
+# will satisfy this — but worth keeping in mind when interpreting RU
+# vs IR vs CN-vantage results.
+#
+# References:
+#   - core.telegram.org/mtproto/mtproto-transports#transport-obfuscation
+#   - core.telegram.org/mtproto/mtproto-transports#intermediate
+#   - alexbers/mtprotoproxy (Python server-side reference)
+
+
+# Set of 4-byte LE prefixes the obfuscated2 init MUST NOT match (would be
+# misinterpreted as HTTP/SOCKS or the protocol-tag values used elsewhere).
+_OBF2_FORBIDDEN_FIRST_INTS: frozenset[int] = frozenset(
+    {
+        0x44414548,  # "HEAD"
+        0x54534F50,  # "POST"
+        0x20544547,  # "GET "
+        0x4954504F,  # "OPTI" (HTTP OPTIONS prefix)
+        0xEEEEEEEE,  # intermediate-transport tag (would self-confuse)
+        0xDDDDDDDD,  # padded-intermediate tag
+        0x02010316,  # MTProto-proxy obfuscation HTTP-disambiguator
+    }
+)
+
+# Padded-intermediate transport tag: 4 bytes of 0xdd, repeated.
+_OBF2_TRANSPORT_TAG_DD: bytes = b"\xdd\xdd\xdd\xdd"
+
+# MTProto TL ids.
+_TL_ID_REQ_PQ_MULTI: int = 0xBE7E8EF1
+_TL_ID_RES_PQ: int = 0x05162463
+
+
+def _parse_mtproxy_orig_secret(secret_hex: str) -> bytes | ProbeResult:
+    """Parse the 'dd<32-hex>' or bare 32-hex secret into 16 raw bytes.
+
+    Both formats are accepted because the C ``mtproto-proxy`` itself
+    treats them interchangeably for key-derivation purposes (the ``dd``
+    prefix only signals the chosen MTProto transport, which we encode
+    separately into the init frame). Censprobe currently always
+    generates the ``dd`` form; bare hex is tolerated for hand-edited
+    operator overrides.
+    """
+    s = secret_hex.lower()
+    if s.startswith("dd"):
+        s = s[2:]
+    try:
+        secret_bytes = bytes.fromhex(s)
+    except ValueError:
+        return _mtg_error_result("orig_secret_not_hex")
+    if len(secret_bytes) != 16:
+        return _mtg_error_result(f"orig_secret_bad_len={len(secret_bytes)}")
+    return secret_bytes
+
+
+def _build_obfuscated2_init(
+    secret_key: bytes,
+) -> tuple[bytes, Any, Any]:
+    """Build the 64-byte obfuscated2 init frame and AES-CTR cipher pair.
+
+    Returns ``(init_64_bytes, send_cipher, recv_cipher)`` where the
+    ciphers are :class:`cryptography.CipherContext` instances already
+    advanced past the init keystream — i.e. ``send_cipher.update(payload)``
+    yields the ciphertext for the FIRST encrypted byte after init, and
+    ``recv_cipher.update(server_bytes)`` yields the corresponding
+    plaintext.
+
+    Asymmetric advance: the send cipher is consumed 64 bytes (matching
+    the proxy's recv-side keystream that decodes the init's transport
+    tag), but the recv cipher is NOT advanced — the proxy's send stream
+    starts fresh at counter 0 because there is no server-side init
+    handshake to skip past.
+    """
+    import hashlib
+    import secrets as _secrets
+
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+
+    # Generate init[0:56] satisfying wire-level constraints. Bytes [56:64]
+    # are filled in below with the encrypted transport tag and dc_id.
+    while True:
+        init_buf = bytearray(_secrets.token_bytes(56))
+        if init_buf[0] == 0xEF:
+            # 0xef as the very first byte == abridged-transport tag,
+            # which would short-circuit some proxy parsers.
+            continue
+        first4 = int.from_bytes(init_buf[0:4], "little")
+        if first4 in _OBF2_FORBIDDEN_FIRST_INTS:
+            continue
+        if int.from_bytes(init_buf[4:8], "little") == 0:
+            # Spec mandates non-zero second int32 — picking a fresh
+            # 56-byte random satisfies this with overwhelming probability,
+            # but the loop guards the rare zero-draw.
+            continue
+        break
+
+    # Key derivation: bytes [8:56] feed both directions, with one half
+    # reversed for the recv side.
+    key_part = bytes(init_buf[8:56])  # 48 bytes
+    rev_key_part = key_part[::-1]
+    send_key_raw, send_iv = key_part[:32], key_part[32:48]
+    recv_key_raw, recv_iv = rev_key_part[:32], rev_key_part[32:48]
+
+    send_key = hashlib.sha256(send_key_raw + secret_key).digest()
+    recv_key = hashlib.sha256(recv_key_raw + secret_key).digest()
+
+    send_cipher = Cipher(algorithms.AES(send_key), modes.CTR(send_iv)).encryptor()
+    recv_cipher = Cipher(algorithms.AES(recv_key), modes.CTR(recv_iv)).encryptor()
+
+    # Compute the server's recv-direction keystream over the first 64
+    # bytes — this is what the proxy will XOR against init bytes to
+    # recover the transport tag. We use a one-shot cipher so the real
+    # send_cipher above stays available for later .update() calls.
+    ks_cipher = Cipher(algorithms.AES(send_key), modes.CTR(send_iv)).encryptor()
+    keystream_64 = ks_cipher.update(b"\x00" * 64)
+
+    # Extend init_buf to 64 bytes, then patch positions [56:64]:
+    #   [56:60] = transport_tag (0xdddddddd) XOR keystream
+    #   [60:62] = dc_id LE int16 (1 = main DC) XOR keystream
+    #   [62:64] = filler — random; proxy doesn't validate these.
+    init_buf.extend(b"\x00" * 8)
+    for i in range(4):
+        init_buf[56 + i] = _OBF2_TRANSPORT_TAG_DD[i] ^ keystream_64[56 + i]
+    dc_id_bytes = (1).to_bytes(2, "little", signed=True)
+    for i in range(2):
+        init_buf[60 + i] = dc_id_bytes[i] ^ keystream_64[60 + i]
+    filler = _secrets.token_bytes(2)
+    init_buf[62] = filler[0]
+    init_buf[63] = filler[1]
+
+    # Advance the live send_cipher 64 bytes so subsequent .update() lines
+    # up with the proxy's recv counter at byte position 64+. The recv
+    # cipher stays at counter=0 because the proxy starts its outbound
+    # encrypted stream from there.
+    send_cipher.update(b"\x00" * 64)
+
+    return bytes(init_buf), send_cipher, recv_cipher
+
+
+def _generate_mtproto_msg_id() -> bytes:
+    """8-byte little-endian MTProto msg_id (mod-4 == 0 for client→server)."""
+    msg_id = int(time.time() * 2**32) & ~0x3
+    return msg_id.to_bytes(8, "little")
+
+
+def _build_req_pq_frame(nonce: bytes, send_cipher: Any) -> bytes:
+    """Build & encrypt the padded-intermediate frame carrying req_pq_multi.
+
+    Inner (unencrypted-MTProto) layout:
+        auth_key_id (8 bytes, all zeros) ||
+        msg_id      (8 bytes) ||
+        msg_len     (4 bytes LE = 20) ||
+        method_id   (4 bytes LE = 0xbe7e8ef1 req_pq_multi) ||
+        nonce       (16 bytes)
+    = 40 bytes.
+
+    Padded-intermediate wrapper:
+        length     (4 bytes LE = 40 + pad_len) ||
+        inner      (40 bytes) ||
+        padding    (pad_len bytes random, 0..15)
+
+    Entire wrapper goes through ``send_cipher`` (AES-CTR continuing from
+    byte position 64 — see :func:`_build_obfuscated2_init`).
+    """
+    import secrets as _secrets
+
+    auth_key_id = b"\x00" * 8
+    msg_id = _generate_mtproto_msg_id()
+    method_id = _TL_ID_REQ_PQ_MULTI.to_bytes(4, "little")
+    msg_body = method_id + nonce  # 4 + 16 = 20 bytes
+    msg_len_bytes = len(msg_body).to_bytes(4, "little")
+    inner = auth_key_id + msg_id + msg_len_bytes + msg_body  # 40 bytes
+
+    pad_len = _secrets.randbelow(16)  # 0..15
+    pad = _secrets.token_bytes(pad_len)
+    length_bytes = (len(inner) + pad_len).to_bytes(4, "little")
+    frame = length_bytes + inner + pad
+
+    return bytes(send_cipher.update(frame))
+
+
+def _validate_resPQ(body_pt: bytes, expected_nonce: bytes) -> ProbeResult | None:
+    """Validate a decrypted padded-intermediate body holds resPQ with our nonce.
+
+    Body layout (after AES-CTR decryption + outer length stripped):
+        auth_key_id (8 bytes, must be zero — unencrypted MTProto) ||
+        msg_id      (8 bytes, server-chosen, not validated) ||
+        msg_len     (4 bytes LE) ||
+        msg_body    (msg_len bytes; first 4 are TL ID, next 16 are nonce) ||
+        padding     (rest, ignored)
+
+    Returns ``None`` on success, or a populated :class:`ProbeResult`
+    with verdict=BLOCKED on any structural / nonce mismatch.
+    """
+    if len(body_pt) < 24:
+        return _mtg_error_result(f"orig_resPQ_truncated={len(body_pt)}", Verdict.BLOCKED)
+    auth_key_id = body_pt[0:8]
+    if auth_key_id != b"\x00" * 8:
+        return _mtg_error_result("orig_resPQ_bad_auth_key_id", Verdict.BLOCKED)
+    msg_len = int.from_bytes(body_pt[16:20], "little")
+    if msg_len < 20 or 20 + msg_len > len(body_pt):
+        return _mtg_error_result(f"orig_resPQ_bad_msg_len={msg_len}", Verdict.BLOCKED)
+    msg_body = body_pt[20 : 20 + msg_len]
+    tl_id = int.from_bytes(msg_body[0:4], "little")
+    if tl_id != _TL_ID_RES_PQ:
+        return _mtg_error_result(f"orig_resPQ_bad_tl_id={tl_id:#x}", Verdict.BLOCKED)
+    received_nonce = msg_body[4:20]
+    if received_nonce != expected_nonce:
+        return _mtg_error_result("orig_resPQ_nonce_mismatch", Verdict.BLOCKED)
+    return None
+
+
+async def probe_mtproto_orig(host: str, port: int, secret_hex: str) -> ProbeResult:
+    """Two-signal probe of the original Telegram MTProxy (C, obfuscated2).
+
+    Sequence:
+        1. Open TCP.
+        2. Build obfuscated2 init + AES-CTR pair from the secret.
+        3. Build encrypted req_pq_multi padded-intermediate frame.
+        4. Send (init || encrypted_req_pq) in one drain.
+        5. Read 4-byte LE encrypted length, decrypt, sanity-check.
+        6. Read ``length`` encrypted body bytes, decrypt.
+        7. Validate decrypted body matches resPQ with our nonce.
+
+    Verdicts:
+        OK signal:        not produced — censprobe never exercises the
+                          full MTProto auth-key flow.
+        HANDSHAKE_ONLY:   resPQ validated end-to-end. Proves both
+                          "obfuscated2 survives the path" AND "proxy +
+                          its upstream Telegram DC are reachable".
+        BLOCKED:          any TCP RST / timeout / decrypted-frame
+                          mismatch. The error string distinguishes
+                          init-side failures (TCP layer) from
+                          resPQ-side failures (TL parsing) for triage.
+    """
+    import secrets as _secrets
+
+    parsed = _parse_mtproxy_orig_secret(secret_hex)
+    if isinstance(parsed, ProbeResult):
+        return parsed
+    secret_key = parsed
+
+    init_bytes, send_cipher, recv_cipher = _build_obfuscated2_init(secret_key)
+    nonce = _secrets.token_bytes(16)
+    req_pq_encrypted = _build_req_pq_frame(nonce, send_cipher)
+
+    opened = await _open_mtproto_tcp(host, port)
+    if isinstance(opened, ProbeResult):
+        return opened
+    reader, writer, rtt_ms = opened
+
+    try:
+        writer.write(init_bytes + req_pq_encrypted)
+        try:
+            await asyncio.wait_for(writer.drain(), timeout=5.0)
+        except (TimeoutError, ConnectionResetError, BrokenPipeError) as e:
+            return _mtg_error_result(f"orig_write_failed:{type(e).__name__}", Verdict.BLOCKED)
+
+        # Length prefix (4 bytes encrypted).
+        try:
+            length_ct = await asyncio.wait_for(reader.readexactly(4), timeout=PROBE_TIMEOUT)
+        except asyncio.IncompleteReadError:
+            return _mtg_error_result("orig_resPQ_truncated_len", Verdict.BLOCKED)
+        except TimeoutError:
+            return _mtg_error_result("orig_resPQ_len_timeout", Verdict.BLOCKED)
+
+        length_pt = recv_cipher.update(length_ct)
+        length = int.from_bytes(length_pt, "little")
+        # Sanity bounds: a real resPQ frame is ~92-160 bytes plus 0..15
+        # padding; pad upper bound generously to ~4 KiB so a slightly
+        # bigger Telegram-side variant doesn't trip false-blocked.
+        if length < 24 or length > 4096:
+            return _mtg_error_result(f"orig_resPQ_bad_outer_len={length}", Verdict.BLOCKED)
+
+        try:
+            body_ct = await asyncio.wait_for(reader.readexactly(length), timeout=PROBE_TIMEOUT)
+        except asyncio.IncompleteReadError:
+            return _mtg_error_result(
+                f"orig_resPQ_truncated_body_expected={length}", Verdict.BLOCKED
+            )
+        except TimeoutError:
+            return _mtg_error_result("orig_resPQ_body_timeout", Verdict.BLOCKED)
+
+        body_pt = recv_cipher.update(body_ct)
+
+        validation_err = _validate_resPQ(body_pt, nonce)
+        if validation_err is not None:
+            return validation_err
+
+        result = ProbeResult()
+        result.handshake_ok = True
+        result.data_ok = False
+        result.rtt_ms = rtt_ms
+        result.verdict = Verdict.HANDSHAKE_ONLY
+        return result
+    finally:
         with contextlib.suppress(Exception):
             writer.close()
             await writer.wait_closed()

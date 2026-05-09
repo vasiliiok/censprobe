@@ -127,6 +127,20 @@ PROTOCOLS: tuple[ProtocolSpec, ...] = (
         default_port=8888,
         uses_socks_echo=False,
     ),
+    # Original Telegram MTProxy (TelegramMessenger/MTProxy, written in C).
+    # Speaks legacy obfuscated2 — no fakeTLS camouflage. Co-runs with the
+    # mtg fakeTLS siblings above to give a fakeTLS-vs-obfuscated2 A/B in
+    # one session: if mtg variants get BLOCKED while this one passes,
+    # the censor's DPI is fakeTLS-fingerprint-keyed (mtg-specific) rather
+    # than keyed on the underlying MTProto pattern. Default port 2080 —
+    # commonly used by public Telegram proxies, free in this profile.
+    ProtocolSpec(
+        name="mtproto_orig",
+        label="MTProto Proxy (original C)",
+        transport="tcp",
+        default_port=2080,
+        uses_socks_echo=False,
+    ),
 )
 
 

@@ -27,6 +27,7 @@ from typing import Protocol
 from censprobe_listener.credentials import ProtocolCredentials
 from censprobe_listener.echo_server import EchoServer
 from censprobe_listener.hysteria_wrapper import HysteriaResponder
+from censprobe_listener.mtproto_orig_responder import MTProxyOrigResponder
 from censprobe_listener.mtproxy_responder import MTProxyResponder
 from censprobe_listener.openvpn_responder import OpenVPNResponder
 from censprobe_listener.ss_responder import ShadowsocksResponder
@@ -42,15 +43,20 @@ class Responder(Protocol):
     """Duck-typed surface every responder exposes to the listener loop.
 
     The concrete responder classes (one per foreign tool — OpenVPN,
-    WireGuard, AmneziaWG, MTProxy, sing-box, xray, hysteria) don't share
-    a base class because each wraps a very different binary, and
-    ``SubprocessResponder`` only fits the sing-box / xray / hysteria
-    family. ``MTProxyResponder`` is reused for both ``mtproto_proxy``
-    and ``mtproto_proxy_alt`` (same wire protocol, different bind port),
-    so the count of *responder classes* lags the count of *protocols*
-    in the registry by one. This Protocol captures the read-side
-    contract ``listener/main.py`` relies on so the helpers there can be
-    typed without leaking ``Any``.
+    WireGuard, AmneziaWG, MTProxy mtg, MTProxy original C, sing-box,
+    xray, hysteria) don't share a base class because each wraps a very
+    different binary, and ``SubprocessResponder`` only fits the
+    sing-box / xray / hysteria family. ``MTProxyResponder`` (mtg, Go,
+    fakeTLS) is reused for both ``mtproto_proxy`` and
+    ``mtproto_proxy_alt`` (same wire protocol, different bind port);
+    ``MTProxyOrigResponder`` (TelegramMessenger/MTProxy, C,
+    obfuscated2) backs ``mtproto_orig`` separately because the binary,
+    argv shape, and stdout schema all differ from mtg. Net result:
+    9 protocols across 8 responder classes (the count of *responder
+    classes* lags by one because of the mtg primary/alt sharing).
+    This Protocol captures the read-side contract
+    ``listener/main.py`` relies on so the helpers there can be typed
+    without leaking ``Any``.
     """
 
     # @property here (instead of `connection_count: int`) so the Protocol
@@ -141,6 +147,12 @@ def _factory_mtproto_proxy_alt(creds: ProtocolCredentials, _echo: EchoServer | N
     return MTProxyResponder(creds.mtproxy_alt_port, creds.mtproxy_alt_secret)
 
 
+def _factory_mtproto_orig(creds: ProtocolCredentials, _echo: EchoServer | None) -> Responder:
+    # The original Telegram MTProxy (C). Different binary, different argv,
+    # different on-the-wire format from mtg — see mtproto_orig_responder.py.
+    return MTProxyOrigResponder(creds.mtproxy_orig_port, creds.mtproxy_orig_secret)
+
+
 # Mapping is keyed by the same canonical name as
 # :data:`censprobe_core.protocol_registry.PROTOCOLS`. Missing entries
 # (a name in the protocol registry without a factory here) raise a
@@ -154,4 +166,5 @@ LISTENER_RESPONDERS: dict[str, ResponderFactory] = {
     "hysteria2": _factory_hysteria2,
     "mtproto_proxy": _factory_mtproto_proxy,
     "mtproto_proxy_alt": _factory_mtproto_proxy_alt,
+    "mtproto_orig": _factory_mtproto_orig,
 }

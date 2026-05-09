@@ -65,6 +65,42 @@ RUN git clone https://github.com/9seconds/mtg.git /tmp/mtg && \
     install -m 0755 mtg /usr/local/bin/mtg && \
     rm -rf /tmp/mtg /root/.cache/go-build /root/go
 
+# ── Stage: build TelegramMessenger/MTProxy (original C MTProxy) ──────────────
+# Built in its own stage because it needs a C toolchain + libssl-dev + zlib1g-dev,
+# which we don't want lingering in the final runtime image. The resulting
+# /usr/local/bin/mtproto-proxy is statically friendly enough that copying it
+# into the runtime image with libssl3 + zlib1g installed at apt-time is enough.
+FROM debian:bookworm-slim AS mtproxy-orig-builder
+
+# hadolint ignore=DL3008
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    ca-certificates \
+    curl \
+    git \
+    libssl-dev \
+    zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Pin upstream MTProxy commit. ``cafc3380…`` is the master HEAD as of
+# this image build; bump explicitly when re-syncing.
+ARG MTPROXY_ORIG_COMMIT=cafc3380a81671579ce366d0594b9a8e450827e9
+# hadolint ignore=DL3003
+RUN git clone https://github.com/TelegramMessenger/MTProxy.git /tmp/mtproxy && \
+    git -C /tmp/mtproxy checkout "${MTPROXY_ORIG_COMMIT}" && \
+    cd /tmp/mtproxy && make && \
+    install -m 0755 objs/bin/mtproto-proxy /usr/local/bin/mtproto-proxy && \
+    rm -rf /tmp/mtproxy
+
+# Telegram cloud topology files — required runtime artifacts. Per upstream
+# README they "may change occasionally; update once per day". Baked at
+# image-build time; refresh via a rebuild on the cadence the operator chooses.
+RUN mkdir -p /usr/local/share/mtproxy-orig && \
+    curl -fsSL https://core.telegram.org/getProxySecret \
+        -o /usr/local/share/mtproxy-orig/proxy-secret && \
+    curl -fsSL https://core.telegram.org/getProxyConfig \
+        -o /usr/local/share/mtproxy-orig/proxy-multi.conf
+
 # ── Stage 2: runtime image ───────────────────────────────────────────────────
 FROM python@sha256:46cb7cc2877e60fbd5e21a9ae6115c30ace7a077b9f8772da879e4590c18c2e3
 
@@ -73,18 +109,23 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # Runtime tools only — no Go, no build-essential, no git/openssh-client:
 # the listener never pushes or pulls anything from a remote — operators
 # run `git push` from the host when ready to publish reports.
+#
+# libssl3 + zlib1g are required at runtime by the original C
+# mtproto-proxy binary (compiled in mtproxy-orig-builder stage above).
 # hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     iproute2 \
     iptables \
+    libssl3 \
     net-tools \
     openssl \
     openvpn \
     unzip \
     wget \
     wireguard-tools \
+    zlib1g \
     && rm -rf /var/lib/apt/lists/*
 
 # ── sing-box (Shadowsocks 2022 inbound) ──────────────────────────────────────
@@ -144,6 +185,16 @@ COPY --from=awg-builder \
     /usr/local/bin/amneziawg-go \
     /usr/local/bin/mtg \
     /usr/local/bin/
+
+# ── Original Telegram MTProxy (C) — binary + cloud topology files ────────────
+# proxy-secret + proxy-multi.conf are required positional/argv inputs to the
+# C binary; they're baked at image build time and refreshed on rebuild.
+COPY --from=mtproxy-orig-builder \
+    /usr/local/bin/mtproto-proxy \
+    /usr/local/bin/
+COPY --from=mtproxy-orig-builder \
+    /usr/local/share/mtproxy-orig \
+    /usr/local/share/mtproxy-orig
 
 ENV WG_QUICK_USERSPACE_IMPLEMENTATION=amneziawg-go
 

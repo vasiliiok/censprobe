@@ -23,6 +23,7 @@ from censprobe_core.protocol_probes import (
     ProbeResult,
     probe_amneziawg,
     probe_hysteria2,
+    probe_mtproto_orig,
     probe_mtproto_proxy,
     probe_openvpn,
     probe_shadowsocks,
@@ -103,6 +104,10 @@ def _probe_mtproto_proxy_alt(host: str, creds: ProtocolCredentials) -> Awaitable
     return probe_mtproto_proxy(host, creds.mtproxy_alt_port, creds.mtproxy_alt_secret)
 
 
+def _probe_mtproto_orig(host: str, creds: ProtocolCredentials) -> Awaitable[ProbeResult]:
+    return probe_mtproto_orig(host, creds.mtproxy_orig_port, creds.mtproxy_orig_secret)
+
+
 CLIENT_PROBES: dict[str, ProbeFactory] = {
     "openvpn": _probe_openvpn,
     "wireguard": _probe_wireguard,
@@ -112,4 +117,5 @@ CLIENT_PROBES: dict[str, ProbeFactory] = {
     "hysteria2": _probe_hysteria2,
     "mtproto_proxy": _probe_mtproto_proxy,
     "mtproto_proxy_alt": _probe_mtproto_proxy_alt,
+    "mtproto_orig": _probe_mtproto_orig,
 }

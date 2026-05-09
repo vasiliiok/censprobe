@@ -117,6 +117,11 @@ _DEFAULT_CFG: dict[str, Any] = {
         "enabled": ["openvpn", "wireguard", "shadowsocks"],
         "priority": ["shadowsocks", "wireguard", "openvpn"],
         "ports": {"openvpn": 1194, "wireguard": 51820, "shadowsocks": 8388},
+        # No SNI-using protocol in this default enabled set, so empty
+        # map is the expected shape. Tests that override `enabled` to
+        # include vless_reality / mtproto_proxy* must also override
+        # this map (validator rejects missing entries).
+        "sni": {},
     },
     "throughput": {"enabled": True, "target_bytes": 1048576, "timeout_sec": 30.0},
     "scoring": {

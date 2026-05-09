@@ -82,7 +82,11 @@ class ProtocolCredentials:
     vless_pbk: str = ""  # Reality public key
     vless_pvk: str = ""  # Reality private key (server only)
     vless_short_id: str = ""  # Reality short ID
-    vless_server_name: str = "apimaps.yandex.ru"  # Reality SNI
+    # Reality SNI — operator-configured via cfg.protocols.sni.vless_reality.
+    # No hard-coded default: a missing config entry is a fatal startup
+    # error in :class:`ProtocolsConfig`, so the empty string here only
+    # ever surfaces during direct construction in tests.
+    vless_server_name: str = ""
 
     # Hysteria 2
     hy2_port: int = 0
@@ -99,6 +103,15 @@ class ProtocolCredentials:
     mtproxy_alt_secret: str = ""
     mtproxy_alt_port: int = 0
 
+    # Original Telegram MTProxy (TelegramMessenger/MTProxy, C). Legacy
+    # obfuscated2 wire format — NO fakeTLS, NO SNI hex suffix in the
+    # secret. Format: 'dd' || 16 random bytes (32 hex chars) → 34-char
+    # string. The 'dd' prefix activates padded-intermediate transport
+    # (random padding 0..15 bytes between MTProto messages), which is
+    # the mode public Telegram proxies typically deploy.
+    mtproxy_orig_secret: str = ""
+    mtproxy_orig_port: int = 0
+
 
 # Map from canonical protocol name → credential-port attribute. Used when
 # applying ``cfg.protocols.ports`` onto a fresh ProtocolCredentials.
@@ -114,6 +127,7 @@ _PROTOCOL_PORT_ATTR: dict[str, str] = {
     "hysteria2": "hy2_port",
     "mtproto_proxy": "mtproxy_port",
     "mtproto_proxy_alt": "mtproxy_alt_port",
+    "mtproto_orig": "mtproxy_orig_port",
 }
 
 
@@ -136,12 +150,22 @@ def _apply_ports(creds: ProtocolCredentials, ports: dict[str, int]) -> None:
         setattr(creds, attr, port)
 
 
-def generate_credentials(ports: dict[str, int]) -> ProtocolCredentials:
+def generate_credentials(
+    ports: dict[str, int],
+    sni: dict[str, str],
+) -> ProtocolCredentials:
     """Generate fresh one-time credentials for all protocols.
 
     ``ports`` MUST be a complete map of protocol-name → bind-port,
     typically ``cfg.protocols.ports`` (validated in
     :class:`ProtocolsConfig` so every enabled protocol is covered).
+
+    ``sni`` MUST cover every enabled SNI-using protocol (
+    ``vless_reality``, ``mtproto_proxy``, ``mtproto_proxy_alt`` —
+    whichever subset is enabled). Validated upstream in
+    :class:`ProtocolsConfig`; ``KeyError`` here is a programmer error
+    (config validator and this function disagreed on coverage) and is
+    intentionally left to bubble up.
     """
     creds = ProtocolCredentials()
     _apply_ports(creds, ports)
@@ -192,6 +216,10 @@ def generate_credentials(ports: dict[str, int]) -> ProtocolCredentials:
     creds.vless_uuid = _generate_uuid()
     creds.vless_pvk, creds.vless_pbk = _reality_keypair()
     creds.vless_short_id = secrets.token_hex(4)  # 4 bytes = 8 hex chars
+    # Reality SNI: server pretends to be this hostname during the TLS
+    # handshake; client passes the same name in its ClientHello.
+    if "vless_reality" in sni:
+        creds.vless_server_name = sni["vless_reality"]
 
     # Hysteria 2: random auth + obfs password
     creds.hy2_auth = secrets.token_urlsafe(24)
@@ -199,13 +227,27 @@ def generate_credentials(ports: dict[str, int]) -> ProtocolCredentials:
 
     # MTProto Proxy (mtg): Fake-TLS ('ee') secret
     # Format: 'ee' + 16 random bytes (32 hex chars) + hex-encoded SNI domain.
-    # We use google.com as a safe default for domain fronting / SNI mimicry.
-    sni = b"google.com".hex()
-    creds.mtproxy_secret = f"ee{secrets.token_hex(16)}{sni}"
-    # Alt-port mtg uses an independent random part so any SNI-keyed DPI
-    # artifact applies symmetrically to both — a verdict difference between
-    # the two attributes cleanly to the destination port.
-    creds.mtproxy_alt_secret = f"ee{secrets.token_hex(16)}{sni}"
+    # The SNI is the hostname mtg's fakeTLS pretends to be; for an
+    # A/B port-vs-SNI experiment, the two siblings can carry distinct
+    # SNIs (set in cfg.protocols.sni). Each instance gets an
+    # independent random part so any SNI-keyed DPI artefact applies
+    # symmetrically to both and verdict differences attribute cleanly
+    # to (port, SNI).
+    if "mtproto_proxy" in sni:
+        primary_sni_hex = sni["mtproto_proxy"].encode("ascii").hex()
+        creds.mtproxy_secret = f"ee{secrets.token_hex(16)}{primary_sni_hex}"
+    if "mtproto_proxy_alt" in sni:
+        alt_sni_hex = sni["mtproto_proxy_alt"].encode("ascii").hex()
+        creds.mtproxy_alt_secret = f"ee{secrets.token_hex(16)}{alt_sni_hex}"
+
+    # Original Telegram MTProxy (C). 'dd'-prefixed random-padding secret —
+    # 'dd' || 16 random bytes (32 hex chars). Generated whenever the
+    # protocol has a port allocated; keyed off ports rather than sni
+    # because obfuscated2 does NOT carry a hostname (the validator
+    # rejects an sni entry for this protocol — see
+    # ProtocolsConfig._SNI_USING_PROTOCOLS).
+    if "mtproto_orig" in ports:
+        creds.mtproxy_orig_secret = f"dd{secrets.token_hex(16)}"
 
     return creds
 
@@ -263,6 +305,10 @@ _SECTION_BUILDERS: dict[str, Any] = {
     "mtproto_proxy_alt": lambda c: {
         "port": c.mtproxy_alt_port,
         "secret": c.mtproxy_alt_secret,
+    },
+    "mtproto_orig": lambda c: {
+        "port": c.mtproxy_orig_port,
+        "secret": c.mtproxy_orig_secret,
     },
 }
 

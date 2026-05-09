@@ -65,6 +65,11 @@ def _populated_creds() -> ProtocolCredentials:
         mtproxy_port=444,
         mtproxy_alt_secret="ee" + "11" * 16 + "676f6f676c652e636f6d",  # gitleaks:allow
         mtproxy_alt_port=8888,
+        # Original Telegram MTProxy (C, obfuscated2 — no SNI hex suffix).
+        # Synthetic dd-prefixed sentinel: format-valid for the C
+        # mtproto-proxy parser, low entropy so gitleaks ignores it.
+        mtproxy_orig_secret="dd" + "22" * 16,  # gitleaks:allow
+        mtproxy_orig_port=2080,
     )
     return c
 
@@ -78,6 +83,7 @@ ALL_PROTOS = (
     "hysteria2",
     "mtproto_proxy",
     "mtproto_proxy_alt",
+    "mtproto_orig",
 )
 
 
@@ -181,6 +187,25 @@ class TestCredsToYamlRoundTrip:
         # refactor that accidentally aliases the two fields.
         assert sec["secret"] != loaded["mtproto_proxy"]["secret"]
 
+    def test_section_shapes_mtproto_orig(self) -> None:
+        # Original Telegram MTProxy (C) — no fakeTLS, no SNI hex suffix.
+        # Secret format is 'dd<32-hex>' = 34 chars. The 'dd' prefix
+        # signals padded-intermediate transport; mtproto-proxy accepts
+        # it verbatim via -S.
+        out = creds_to_yaml(_populated_creds(), enabled_protocols=list(ALL_PROTOS))
+        loaded = yaml.safe_load(out)
+        sec = loaded["mtproto_orig"]
+        assert sec["port"] == 2080
+        assert sec["secret"].startswith("dd")
+        # 'dd' (2 chars) + 32 hex chars = 34 chars exactly. Stricter than
+        # mtg secrets (which are length-variable due to embedded SNI hex).
+        assert len(sec["secret"]) == 34
+        # mtproto_orig has its own random material — must NOT collide
+        # with mtg primary/alt secrets if a future refactor accidentally
+        # aliases them.
+        assert sec["secret"] != loaded["mtproto_proxy"]["secret"]
+        assert sec["secret"] != loaded["mtproto_proxy_alt"]["secret"]
+
 
 class TestEnabledProtocolsFilter:
     def test_filters_to_subset(self) -> None:
@@ -195,6 +220,7 @@ class TestEnabledProtocolsFilter:
             "hysteria2",
             "mtproto_proxy",
             "mtproto_proxy_alt",
+            "mtproto_orig",
         ):
             assert other not in loaded
         # _protocols_enabled is a metadata mirror — client reads it to

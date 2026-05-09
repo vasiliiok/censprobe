@@ -74,10 +74,10 @@
 |------------|-----------|-------:|-------------|
 | `censprobe_listener` (whole pkg) | `unit/test_smoke_imports.py` | 1 | submodule import |
 | `censprobe_listener.credentials._awg_magic_headers`, `_apply_ports` | `unit/test_credentials_constraints.py` | 6 | H1..H4 pairwise distinct + не в `{1,2,3,4}`, S1+56 ≠ S2, `_apply_ports` complete-map требование |
-| `censprobe_listener.credentials.creds_to_yaml`, `ProtocolCredentials` | `unit/test_credentials_yaml_roundtrip.py` | 13 | round-trip всех секций (включая `mtproto_proxy_alt`) без `wg`/`xray`/`openvpn` (synthetic creds), `enabled_protocols` filter, server-private fields НЕ leak в YAML, `_protocols_enabled` echo, alt-секрет независим от primary |
+| `censprobe_listener.credentials.creds_to_yaml`, `ProtocolCredentials` | `unit/test_credentials_yaml_roundtrip.py` | 14 | round-trip всех секций (включая `mtproto_proxy_alt` и `mtproto_orig` с `dd<32-hex>` секретом без SNI hex-suffix) без `wg`/`xray`/`openvpn` (synthetic creds), `enabled_protocols` filter, server-private fields НЕ leak в YAML, `_protocols_enabled` echo, alt-секрет независим от primary, mtproto_orig секрет независим от обоих mtg |
 | `censprobe_listener.credentials._awg_magic_headers` | `property/test_credentials_property.py` | 4 | Hypothesis @settings(derandomize=True, max_examples=500) на AWG header invariants + S-сравнение |
 
-**Listener total: 4 файла, 171 collected test.** Большая часть — `parametrize`-расширения в `test_credentials_constraints.py` (50 итераций × 3 проверки AWG-инвариантов). Subprocess-respondery (ss/vless/hysteria/openvpn/wg/mtproxy) и `cred_server.CredServer` не покрыты pytest'ом — verification через `e2e-dashboard` (на каждый push/PR) или ручной запуск.
+**Listener total: 4 файла, 172 collected test.** Большая часть — `parametrize`-расширения в `test_credentials_constraints.py` (50 итераций × 3 проверки AWG-инвариантов). Subprocess-respondery (ss/vless/hysteria/openvpn/wg/mtproxy/mtproto-proxy-orig) и `cred_server.CredServer` не покрыты pytest'ом — verification через `e2e-dashboard` (на каждый push/PR) или ручной запуск.
 
 ---
 

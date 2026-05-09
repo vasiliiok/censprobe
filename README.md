@@ -298,7 +298,7 @@ Sustained-data probe через SOCKS-routed протоколы (Shadowsocks, VL
 
 ---
 
-## Восемь VPN-протоколов
+## Девять VPN-протоколов
 
 `packages/probe-core/src/censprobe_core/protocol_registry.py` — single source of truth по именам и метаданным; реальные bind-порты — в `protocols.ports` в `censprobe.yaml` (overрайдят registry default, validator `_check_ports_cover_enabled` гарантирует полное покрытие enabled-протоколов).
 
@@ -312,18 +312,30 @@ Sustained-data probe через SOCKS-routed протоколы (Shadowsocks, VL
 | `hysteria2` | Hysteria 2 | UDP | 443 | 443 | True |
 | `mtproto_proxy` | MTProto Proxy | TCP | 9443 | 443 | False |
 | `mtproto_proxy_alt` | MTProto Proxy (alt port) | TCP | 8888 | 8888 | False |
+| `mtproto_orig` | MTProto Proxy (original C) | TCP | 2080 | 2080 | False |
 
-Поле `uses_socks_echo` отмечает протоколы с SOCKS-routed data-phase через listener echo server (для throughput-проб). Остальные — handshake-only (OpenVPN/WireGuard/AmneziaWG поднимают tun-интерфейс и пинг-эхо для верификации data plane; mtproto-proxy инстансы подтверждают handshake через mtg `Stream has been started` лог-токен).
+Поле `uses_socks_echo` отмечает протоколы с SOCKS-routed data-phase через listener echo server (для throughput-проб). Остальные — handshake-only: OpenVPN/WireGuard/AmneziaWG поднимают tun-интерфейс и пинг-эхо для верификации data plane; mtg-варианты `mtproto_proxy`/`mtproto_proxy_alt` подтверждают handshake через mtg `Stream has been started` лог-токен и через faketls-HMAC на стороне клиента; `mtproto_orig` (оригинальный C-MTProxy) — через obfuscated2 init + MTProto `req_pq_multi` round-trip с проверкой echoed nonce в `resPQ`.
 
-**Зачем два MTProto-proxy.** `mtproto_proxy` (TCP/443) и `mtproto_proxy_alt` (TCP/8888) — это один протокол на двух портах с независимыми ee-секретами. A/B-сигнал по разнице вердиктов:
+**Зачем три MTProto-варианта.** Три протокола одного семейства, разделённые по двум осям — `port × wire-format`:
 
-- 443 BLOCKED + 8888 OK → port-keyed DPI (TSPU инспектирует только порт 443 как HTTPS).
-- оба BLOCKED → L7/fakeTLS-keyed DPI (настоящая блокировка протокола, независимо от порта).
-- оба OK → mtproto не блокируется на этой клиентской сети.
+| Протокол | Бинарь | Wire format | Порт |
+|----------|--------|-------------|------|
+| `mtproto_proxy` | mtg (Go) | fakeTLS over TCP | 443 |
+| `mtproto_proxy_alt` | mtg (Go) | fakeTLS over TCP | 8888 |
+| `mtproto_orig` | mtproto-proxy (C, TelegramMessenger/MTProxy) | obfuscated2 + padded-intermediate | 2080 |
 
-Это раздельные строки в `protocol_results` (`protocol='mtproto_proxy'` и `protocol='mtproto_proxy_alt'`), без правок схемы или Grafana — дашборд `04 — Protocol Reachability` уже группирует по `protocol`.
+A/B-сигнал по разнице вердиктов в одном run-е:
 
-VLESS+Reality в дефолтном профиле снят с 443 на 8444, чтобы освободить TCP/443 для mtproto-proxy fakeTLS-realism (DPI инспектирует 443 как HTTPS — на нестандартном порту may be применены другие правила и сигнал размывается). Hysteria 2 остаётся на UDP/443 — другой transport, не конфликтует.
+- mtproto_proxy BLOCKED + mtproto_proxy_alt OK + mtproto_orig OK → **port-keyed DPI** (TSPU инспектирует только TCP/443).
+- оба mtg BLOCKED + mtproto_orig OK → **fakeTLS-fingerprint-keyed DPI** (mtg-specific сигнатура; оригинальный obfuscated2 проходит). Это рабочая гипотеза, под которой `mtproto_orig` и был добавлен.
+- все три BLOCKED → **generic-mtproto-keyed DPI** (или outbound к Telegram DC заблокирован у listener'а — проверять отдельно).
+- все три OK → mtproto не блокируется на этой клиентской сети.
+
+Раздельные строки в `protocol_results` (`protocol='mtproto_proxy'`, `'mtproto_proxy_alt'`, `'mtproto_orig'`), без правок схемы или Grafana — дашборд `04 — Protocol Reachability` уже группирует по `protocol`.
+
+VLESS+Reality в дефолтном профиле снят с 443 на 8444, чтобы освободить TCP/443 для mtproto-proxy fakeTLS-realism (DPI инспектирует 443 как HTTPS — на нестандартном порту may be применены другие правила и сигнал размывается). Hysteria 2 остаётся на UDP/443 — другой transport, не конфликтует. `mtproto_orig` живёт на 2080 — типичный порт для публичных Telegram-mtproxy без fakeTLS-маскировки.
+
+**Caveat для `mtproto_orig`.** Оригинальный mtproto-proxy не отвечает на handshake локально — он прокидывает MTProto-frame в реальный Telegram DC (адреса в baked-in `proxy-multi.conf`). Probe ждёт `resPQ` именно от DC, поэтому если у listener'а заблокирован outbound к Telegram DC IPs (а у самого клиента — нет), вердикт будет BLOCKED не из-за client-side DPI. На практике если `mtg` уже работает (тоже dial'ит DC upstream) — условие выполнено.
 
 Параметры VPN-протоколов (порты, ключи, AmneziaWG-обфускация — H1..H4 magic headers, S1/S2 junk-payload sizes, jc/jmin/jmax counters) генерируются `listener` в памяти при каждом старте через реальные бинари (`wg genkey`/`wg pubkey`/`wg genpsk`, `xray x25519`, `openvpn --genkey secret`). Передаются клиенту через одноразовый TLS-pinned эндпоинт; на диск ничего не пишется и в git ничего не коммитится.
 

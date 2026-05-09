@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import ClassVar
 
 import yaml
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -153,12 +154,32 @@ class ProtocolsConfig(BaseModel):
     key is a fatal validation error, not a fallback. Unknown protocol
     names in ``ports`` are also rejected so a typo can't silently route
     a port to nowhere.
+
+    ``sni`` is the per-protocol SNI / server-name string for protocols
+    that mimic an HTTPS handshake (VLESS+Reality, the two MTProto-proxy
+    siblings). Same coverage rule as ``ports`` — every enabled
+    SNI-using protocol needs an entry; entries for protocols that
+    don't use SNI (OpenVPN/WG/AWG/Shadowsocks/Hysteria 2) are
+    rejected. Lets the operator A/B different SNIs per port without
+    code changes — the obvious use case is checking whether a TSPU
+    block is keyed on the SNI string vs the underlying fakeTLS
+    fingerprint.
     """
+
+    # Protocols whose responder + probe accept an operator-supplied
+    # SNI / server-name. Kept here (not in the registry) because the
+    # registry is meant to be a pure-data module without config-shape
+    # imports; this list is the authoritative source for the SNI
+    # validator below.
+    _SNI_USING_PROTOCOLS: ClassVar[frozenset[str]] = frozenset(
+        {"vless_reality", "mtproto_proxy", "mtproto_proxy_alt"}
+    )
 
     model_config = ConfigDict(extra="forbid")
     enabled: list[str]
     priority: list[str]
     ports: dict[str, int]
+    sni: dict[str, str]
 
     @model_validator(mode="after")
     def _check_ports_cover_enabled(self) -> ProtocolsConfig:
@@ -197,6 +218,35 @@ class ProtocolsConfig(BaseModel):
             raise ValueError(
                 f"protocols.ports contains invalid port numbers (must be 1..65535): {bad_ports}"
             )
+
+        # SNI map: only the protocols that mimic an HTTPS handshake
+        # (vless_reality, mtproto_proxy*) accept an operator-supplied
+        # SNI. Every such protocol that is also in ``enabled`` MUST
+        # have an entry. An entry for a protocol that *doesn't* use
+        # SNI (openvpn, wg, awg, shadowsocks, hysteria2) is rejected
+        # as a config typo — letting it slide would silently accept
+        # ``sni: { openvpn: ... }`` without affecting anything, which
+        # is exactly the kind of "appears to work, doesn't" config
+        # this validator exists to prevent.
+        sni_required = self._SNI_USING_PROTOCOLS & set(self.enabled)
+        sni_missing = [name for name in sorted(sni_required) if name not in self.sni]
+        if sni_missing:
+            raise ValueError(
+                f"protocols.sni missing entries for enabled SNI-using "
+                f"protocols: {sni_missing}. Every enabled protocol in "
+                f"{sorted(self._SNI_USING_PROTOCOLS)} must have a string "
+                f"in protocols.sni — no fallback defaults exist."
+            )
+        sni_orphan = [name for name in self.sni if name not in self._SNI_USING_PROTOCOLS]
+        if sni_orphan:
+            raise ValueError(
+                f"protocols.sni contains entries for non-SNI-using "
+                f"protocols: {sni_orphan}. SNI applies only to "
+                f"{sorted(self._SNI_USING_PROTOCOLS)} — remove the entry."
+            )
+        bad_sni = [(name, v) for name, v in self.sni.items() if not v or not isinstance(v, str)]
+        if bad_sni:
+            raise ValueError(f"protocols.sni contains empty or non-string values: {bad_sni}")
         return self
 
 

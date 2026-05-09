@@ -245,7 +245,7 @@ async def _async_main(test_id: str, session_id: str, creds_port: int) -> None:
     # TLS-pinned channel and is shut down on Ctrl+C.
     console.print("[dim]Generating one-time credentials...[/dim]")
     cfg = get_config()
-    creds = generate_credentials(cfg.protocols.ports)
+    creds = generate_credentials(cfg.protocols.ports, cfg.protocols.sni)
 
     # ── Step 2: Start the credentials HTTPS endpoint ──────────────────────────
     cred_server = _start_cred_server_or_exit(
@@ -616,6 +616,7 @@ def _print_responder_status(
         "hysteria2": ("hy2_port", "UDP"),
         "mtproto_proxy": ("mtproxy_port", "TCP"),
         "mtproto_proxy_alt": ("mtproxy_alt_port", "TCP"),
+        "mtproto_orig": ("mtproxy_orig_port", "TCP"),
     }
 
     for spec in enabled_protocols(cfg.protocols.enabled):

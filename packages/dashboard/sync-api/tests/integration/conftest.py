@@ -225,6 +225,7 @@ def _default_censprobe_cfg() -> Any:
                 "enabled": ["openvpn", "wireguard", "shadowsocks"],
                 "priority": ["shadowsocks", "wireguard", "openvpn"],
                 "ports": {"openvpn": 1194, "wireguard": 51820, "shadowsocks": 8388},
+                "sni": {},
             },
             "throughput": {"enabled": True, "target_bytes": 1048576, "timeout_sec": 30.0},
             "scoring": {

@@ -125,6 +125,7 @@ protocols:
     - hysteria2
     - mtproto_proxy
     - mtproto_proxy_alt
+    - mtproto_orig
   # First-match-wins recommendation order in the scoring summary. The
   # priority list may include protocols not in `enabled` (they will
   # simply be ignored at runtime).
@@ -133,6 +134,7 @@ protocols:
     - hysteria2
     - amneziawg
     - shadowsocks
+    - mtproto_orig
     - mtproto_proxy
     - mtproto_proxy_alt
     - wireguard
@@ -168,6 +170,19 @@ protocols:
   #     * 443 BLOCKED + 8888 OK    → port-keyed (TSPU only inspects 443)
   #     * both BLOCKED             → L7/fakeTLS-keyed (real proto block)
   #     * both OK                  → no mtproto blocking on this network
+  #
+  # Why a THIRD mtproto = mtproto_orig (TCP/2080):
+  #   The original Telegram MTProxy (TelegramMessenger/MTProxy, C) does
+  #   NOT speak fakeTLS — it uses the legacy obfuscated2 + padded-
+  #   intermediate transport that pre-dates fakeTLS. Running it
+  #   alongside the two mtg siblings turns the matrix into a
+  #   fakeTLS-vs-obfuscated2 A/B in one session:
+  #     * mtg variants BLOCKED + mtproto_orig OK    → DPI keys on
+  #         fakeTLS fingerprint (mtg-specific) — original passes
+  #     * all BLOCKED                                → DPI keys on
+  #         generic mtproto pattern (or DC outbound blocked at listener)
+  #     * mtproto_proxy BLOCKED + mtproto_proxy_alt OK + mtproto_orig OK
+  #                                                  → port-keyed
   ports:
     openvpn: 1194           # UDP
     wireguard: 51820        # UDP
@@ -177,6 +192,33 @@ protocols:
     hysteria2: 443          # UDP — different transport, does not clash with TCP/443
     mtproto_proxy: 443      # TCP — fakeTLS realism: DPI inspects 443 as HTTPS
     mtproto_proxy_alt: 8888 # TCP — sibling on a non-443 port for port-vs-L7 A/B
+    mtproto_orig: 2080      # TCP — original C MTProxy, obfuscated2 (no fakeTLS)
+
+  # Per-protocol SNI / server-name for protocols that mimic an HTTPS
+  # handshake. A different value on the two MTProto siblings turns the
+  # port A/B above into a 2x2 (port × SNI) experiment in one run —
+  # same data, different attribution if the verdicts diverge.
+  #
+  # Keys allowed: vless_reality, mtproto_proxy, mtproto_proxy_alt.
+  # Putting a non-SNI-using protocol here (openvpn / wg / awg / ss /
+  # hysteria2 / mtproto_orig) is a fatal startup error — those protocols
+  # do not have a place in the handshake to put a hostname. mtproto_orig
+  # in particular speaks legacy obfuscated2 with no SNI carrier.
+  #
+  # Suggested A/B values for the MTProto siblings:
+  #   * google.com    — neutral, widely used by public mtg deployments,
+  #                     historically the reference SNI in mtg docs.
+  #   * cloudflare.com / microsoft.com — sometimes pass when google.com
+  #                     is RST-injected (suggests SNI-keyed DPI rule
+  #                     rather than fakeTLS-keyed L7 detection).
+  #   * yandex.ru / mail.ru — RU-allowlist negative control: should
+  #                     never be blocked just for the SNI string;
+  #                     if blocked anyway, points at fakeTLS pattern
+  #                     detection rather than SNI matching.
+  sni:
+    vless_reality: apimaps.yandex.ru     # Reality default — pre-shipped in xray docs
+    mtproto_proxy: google.com            # primary on TCP/443
+    mtproto_proxy_alt: microsoft.com     # alt on TCP/8888 — SNI A/B vs primary
 
 
 # ── Throughput probe ─────────────────────────────────────────────────────────
