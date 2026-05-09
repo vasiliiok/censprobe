@@ -114,33 +114,32 @@ verb 1
     def _read_status(self) -> tuple[int, int]:
         """Parse status file → (handshake_observed, tunnel_bytes).
 
-        OpenVPN's P2P status file emits several distinct byte counters
-        and *only some of them are HMAC-gated*. Picking the wrong one
-        makes a public-internet listener look like every random UDP
-        scan (Shodan/Censys/DPI probes/port-knockers) is a successful
-        client handshake — which is exactly the false positive we hit
-        before this rewrite.
+        OpenVPN's P2P status file emits four byte counters; only ONE of
+        them is a reliable handshake signal on a public-internet
+        listener:
 
-        Semantic table (verbatim from src/openvpn/sig.c::print_status):
-            * ``TCP/UDP read bytes``  — every byte received on the
-              listening UDP socket, *including HMAC-failed garbage*.
-              Useless as a handshake signal on a public IP.
-            * ``Auth read bytes``     — bytes that survived HMAC
-              verification → proves a peer with the SAME PSK
-              sent traffic. This is the canonical handshake signal.
-            * ``TUN/TAP read bytes``  — bytes successfully decapped
-              into the tun device → proves real tunneled data flowed
-              after the handshake.
-            * ``UDP/IP read bytes``   — alternate label for TCP/UDP
-              read bytes on some FreeBSD-derived ports. Same caveat,
-              kept only as a fallback so we don't return zero on those
-              ports — but it never overrides the auth-gated counters.
+        * ``TCP/UDP read bytes``  — every UDP byte hit the listening
+          socket, *including HMAC-failed garbage*. Increments on
+          Shodan/Censys/DPI probes. Useless for handshake detection.
+        * ``TUN/TAP read bytes``  — bytes the OpenVPN process read
+          *from the tun device* (kernel → openvpn). On a host with
+          ``network_mode: host`` and the tun's ptp peer-route up, the
+          host kernel routinely shoves multicast/NDP/ICMP into the
+          tun even with no peer connected. Observed in the wild as
+          192 bytes of pure host noise after a 25-second idle session.
+          This counter does NOT prove a remote client did anything.
+        * ``TCP/UDP write bytes`` — bytes openvpn sent BACK to a peer.
+          Only ticks after a peer is established, but counts our own
+          retransmits/keepalives. Auth-gated transitively.
+        * ``Auth read bytes``     — bytes that passed HMAC validation
+          against the static-key PSK. THE ONLY counter a remote
+          attacker without our PSK cannot move. This is the canonical
+          and *exclusive* handshake signal.
 
-        Returns ``(handshake_observed, tunnel_bytes)`` where
-        ``handshake_observed`` = max(Auth, TUN/TAP) > 0 — both are
-        HMAC-gated so either being non-zero means a real client.
-        ``tunnel_bytes`` is the larger of TUN/TAP and Auth read bytes,
-        i.e. the auth-gated traffic figure used by ``data_transfer_ok``.
+        Returns ``(handshake_observed, tunnel_bytes)`` where both
+        derive from ``Auth read bytes`` — the only counter immune to
+        scanner noise (``TCP/UDP read``) and host-side tun noise
+        (``TUN/TAP read``).
         """
         if not self._status_path or not self._status_path.exists():
             return 0, 0
@@ -149,31 +148,38 @@ verb 1
         except Exception:
             return 0, 0
 
-        # Pull each counter independently — *don't* fold them with max.
+        # Pull each counter independently. We track the noise-prone
+        # counters too so they appear in the diagnostic logger when
+        # operators investigate, but they NEVER affect the verdict.
         counters: dict[str, int] = {}
         targets = (
             "Auth read bytes",
             "TUN/TAP read bytes",
             "TCP/UDP read bytes",
-            "UDP/IP read bytes",
+            "TCP/UDP write bytes",
         )
         for line in content.splitlines():
             for label in targets:
-                if line.startswith(label + ",") or line.startswith(label + "="):
-                    sep = "," if "," in line else "="
-                    parts = line.split(sep, 1)
+                if line.startswith(label + ","):
+                    parts = line.split(",", 1)
                     if len(parts) == 2:
                         with contextlib.suppress(ValueError):
                             counters[label] = int(parts[1].strip())
                     break
 
         auth_bytes = counters.get("Auth read bytes", 0)
-        tun_bytes = counters.get("TUN/TAP read bytes", 0)
-        # Auth-gated bytes prove HMAC validation, which is the only
-        # signal that survives random internet scanner noise.
-        tunnel_bytes = max(auth_bytes, tun_bytes)
-        handshake = 1 if tunnel_bytes > 0 else 0
-        return handshake, tunnel_bytes
+        # Diagnostic only — surfaces *why* Auth was 0 on a session that
+        # nominally "saw traffic". Logged at debug to keep stop-line
+        # output clean during normal operation.
+        if auth_bytes == 0 and any(
+            counters.get(k, 0) > 0 for k in counters if k != "Auth read bytes"
+        ):
+            logger.debug(
+                "openvpn idle session had non-auth counters: %s — host/scanner noise, not a peer",
+                counters,
+            )
+        handshake = 1 if auth_bytes > 0 else 0
+        return handshake, auth_bytes
 
     async def stop(self) -> None:
         """Capture final state, then terminate openvpn and cleanup."""
