@@ -144,13 +144,15 @@ def _factory_mtproto_proxy_alt(creds: ProtocolCredentials, _echo: EchoServer | N
     # alternate port with an independent ee-secret. Two ProtocolResult
     # rows let the dashboard compare port-443 vs alt-port verdicts and
     # tell port-keyed DPI from L7-keyed DPI apart.
-    return MTProxyResponder(creds.mtproxy_alt_port, creds.mtproxy_alt_secret)
+    r: Responder = MTProxyResponder(creds.mtproxy_alt_port, creds.mtproxy_alt_secret)
+    return r
 
 
 def _factory_mtproto_orig(creds: ProtocolCredentials, _echo: EchoServer | None) -> Responder:
     # The original Telegram MTProxy (C). Different binary, different argv,
     # different on-the-wire format from mtg — see mtproto_orig_responder.py.
-    return MTProxyOrigResponder(creds.mtproxy_orig_port, creds.mtproxy_orig_secret)
+    r: Responder = MTProxyOrigResponder(creds.mtproxy_orig_port, creds.mtproxy_orig_secret)
+    return r
 
 
 # Mapping is keyed by the same canonical name as

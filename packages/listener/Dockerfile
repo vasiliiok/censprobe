@@ -95,11 +95,10 @@ RUN git clone https://github.com/TelegramMessenger/MTProxy.git /tmp/mtproxy && \
 # Telegram cloud topology files — required runtime artifacts. Per upstream
 # README they "may change occasionally; update once per day". Baked at
 # image-build time; refresh via a rebuild on the cadence the operator chooses.
-RUN mkdir -p /usr/local/share/mtproxy-orig && \
-    curl -fsSL https://core.telegram.org/getProxySecret \
-        -o /usr/local/share/mtproxy-orig/proxy-secret && \
-    curl -fsSL https://core.telegram.org/getProxyConfig \
-        -o /usr/local/share/mtproxy-orig/proxy-multi.conf
+# ADD (instead of curl) keeps the build-time TLS guarantee inside Docker's own
+# fetcher and avoids the curl-redirect-to-http hotspot (sonar docker:S6506).
+ADD https://core.telegram.org/getProxySecret /usr/local/share/mtproxy-orig/proxy-secret
+ADD https://core.telegram.org/getProxyConfig /usr/local/share/mtproxy-orig/proxy-multi.conf
 
 # ── Stage 2: runtime image ───────────────────────────────────────────────────
 FROM python@sha256:46cb7cc2877e60fbd5e21a9ae6115c30ace7a077b9f8772da879e4590c18c2e3

@@ -36,7 +36,7 @@ from censprobe_core.protocol_probes import (
     _build_obfuscated2_init,
     _classify_proxy_outcome,
     _parse_mtproxy_orig_secret,
-    _validate_resPQ,
+    _validate_res_pq,
 )
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
@@ -266,7 +266,7 @@ class TestBuildObfuscated2Init:
 
 
 class TestValidateResPQ:
-    """``_validate_resPQ`` accepts a structurally valid resPQ frame with
+    """``_validate_res_pq`` accepts a structurally valid resPQ frame with
     matching nonce; everything else returns BLOCKED + a typed error tag.
     The decrypted body layout we validate is:
 
@@ -292,10 +292,10 @@ class TestValidateResPQ:
     def test_valid_resPQ_accepted(self) -> None:
         nonce = b"n" * 16
         body = self._build_valid_body(nonce)
-        assert _validate_resPQ(body, nonce) is None
+        assert _validate_res_pq(body, nonce) is None
 
     def test_truncated_body_rejected(self) -> None:
-        result = _validate_resPQ(b"\x00" * 10, b"n" * 16)
+        result = _validate_res_pq(b"\x00" * 10, b"n" * 16)
         assert isinstance(result, ProbeResult)
         assert result.verdict == Verdict.BLOCKED
         assert "truncated" in (result.error or "")
@@ -304,7 +304,7 @@ class TestValidateResPQ:
         nonce = b"n" * 16
         body = bytearray(self._build_valid_body(nonce))
         body[0] = 0xFF  # non-zero auth_key_id → not unencrypted MTProto
-        result = _validate_resPQ(bytes(body), nonce)
+        result = _validate_res_pq(bytes(body), nonce)
         assert isinstance(result, ProbeResult)
         assert result.error == "orig_resPQ_bad_auth_key_id"
 
@@ -312,7 +312,7 @@ class TestValidateResPQ:
         # Body says it's some other constructor — not resPQ.
         nonce = b"n" * 16
         body = self._build_valid_body(nonce, tl_id=0xDEADBEEF)
-        result = _validate_resPQ(body, nonce)
+        result = _validate_res_pq(body, nonce)
         assert isinstance(result, ProbeResult)
         assert "orig_resPQ_bad_tl_id" in (result.error or "")
 
@@ -320,6 +320,6 @@ class TestValidateResPQ:
         # resPQ structurally OK but server echoed a different nonce —
         # signals proxy is wrong instance / cross-session collision.
         body = self._build_valid_body(b"n" * 16)
-        result = _validate_resPQ(body, b"X" * 16)
+        result = _validate_res_pq(body, b"X" * 16)
         assert isinstance(result, ProbeResult)
         assert result.error == "orig_resPQ_nonce_mismatch"

@@ -109,7 +109,7 @@ jobs:
           ')
           if [[ -n "$bad" ]]; then
             echo "::error::CI run $RUN_ID has non-sonar failures; refusing to push images:"
-            echo "$bad" | sed 's/^/  - /'
+            echo "  - ${bad//$'\n'/$'\n'  - }"
             exit 1
           fi
           echo "::notice::Only SonarCloud failed on CI run $RUN_ID — proceeding with image push (coverage Quality Gate is paid-tier and not blockable)."

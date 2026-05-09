@@ -55,7 +55,8 @@ def _pick_free_loopback_port() -> int:
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+        port: int = s.getsockname()[1]
+        return port
     finally:
         s.close()
 

@@ -692,10 +692,10 @@ async def _validate_cert(domain: str, ip: str) -> bool | None:
         # we need that case to validate. Chain verification stays on
         # (verify_mode=CERT_REQUIRED), so a self-signed / untrusted-CA
         # MITM still surfaces as SSLCertVerificationError and is mapped
-        # to cert_valid=False. NOSONAR S5527: hostname verification is
-        # not skipped — it is moved into the SAN-with-apex helper, which
-        # also rejects CA-cert MITMs whose SAN list does not cover the
-        # target domain family.
+        # to cert_valid=False. The S5527 suppression on the next assignment
+        # is justified because hostname verification is not skipped — it is
+        # moved into the SAN-with-apex helper, which also rejects CA-cert
+        # MITMs whose SAN list does not cover the target domain family.
         ctx.check_hostname = False  # NOSONAR S5527
         ctx.verify_mode = ssl.CERT_REQUIRED
         try:

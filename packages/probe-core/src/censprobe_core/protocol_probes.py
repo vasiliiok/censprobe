@@ -1657,7 +1657,7 @@ def _build_req_pq_frame(nonce: bytes, send_cipher: Any) -> bytes:
     return bytes(send_cipher.update(frame))
 
 
-def _validate_resPQ(body_pt: bytes, expected_nonce: bytes) -> ProbeResult | None:
+def _validate_res_pq(body_pt: bytes, expected_nonce: bytes) -> ProbeResult | None:
     """Validate a decrypted padded-intermediate body holds resPQ with our nonce.
 
     Body layout (after AES-CTR decryption + outer length stripped):
@@ -1761,7 +1761,7 @@ async def probe_mtproto_orig(host: str, port: int, secret_hex: str) -> ProbeResu
 
         body_pt = recv_cipher.update(body_ct)
 
-        validation_err = _validate_resPQ(body_pt, nonce)
+        validation_err = _validate_res_pq(body_pt, nonce)
         if validation_err is not None:
             return validation_err
 
