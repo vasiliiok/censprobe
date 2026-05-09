@@ -68,10 +68,15 @@ class MTProxyOrigResponder:
 
     def __init__(self, port: int, secret: str) -> None:
         self.port = port
-        # secret is the full operator-visible string: "dd<32-hex>" (34 chars).
-        # mtproto-proxy accepts the prefix verbatim via -S; clients receive
-        # the same string and parse it themselves.
+        # ``secret`` is the operator-visible "dd<32-hex>" (34 chars). The ``dd``
+        # is an obfuscated2 transport-tag for the client only; the C
+        # ``mtproto-proxy`` binary's ``-S`` insists on the bare 16-byte secret
+        # (exactly 32 hex digits) and exits with "'S' option requires exactly
+        # 32 hex digits" otherwise. Stash both forms so the cli-arg path is
+        # explicit and the operator-visible credential stays unchanged.
         self.secret = secret
+        s = secret.lower()
+        self._secret_for_argv = s[2:] if s.startswith("dd") else s
         self._proc: asyncio.subprocess.Process | None = None
         self._log_task: asyncio.Task[None] | None = None
         self.connection_count: int = 0
@@ -87,7 +92,7 @@ class MTProxyOrigResponder:
             "-H",
             str(self.port),
             "-S",
-            self.secret,
+            self._secret_for_argv,
             "--aes-pwd",
             _PROXY_SECRET_PATH,
             _PROXY_MULTI_CONF_PATH,

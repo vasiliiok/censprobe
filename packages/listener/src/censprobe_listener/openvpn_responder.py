@@ -112,47 +112,68 @@ verb 1
         logger.info("OpenVPN responder started on UDP/%d (iface: %s)", self.port, _OVPN_SRV_IFACE)
 
     def _read_status(self) -> tuple[int, int]:
-        """Parse status file → (handshake_count_approx, bytes_received).
+        """Parse status file → (handshake_observed, tunnel_bytes).
 
-        OpenVPN's status file in static-key (P2P) mode has a stable
-        documented format, but version skew and exotic builds occasionally
-        relabel or reorder counters (e.g. "UDP/IP read bytes" instead of
-        "TCP/UDP read bytes" on some FreeBSD-derived ports). We look at
-        the *set* of byte counters and take the maximum non-zero value as
-        the proof-of-traffic — using a single hard-coded label silently
-        zeroed us out when the label drifted.
+        OpenVPN's P2P status file emits several distinct byte counters
+        and *only some of them are HMAC-gated*. Picking the wrong one
+        makes a public-internet listener look like every random UDP
+        scan (Shodan/Censys/DPI probes/port-knockers) is a successful
+        client handshake — which is exactly the false positive we hit
+        before this rewrite.
+
+        Semantic table (verbatim from src/openvpn/sig.c::print_status):
+            * ``TCP/UDP read bytes``  — every byte received on the
+              listening UDP socket, *including HMAC-failed garbage*.
+              Useless as a handshake signal on a public IP.
+            * ``Auth read bytes``     — bytes that survived HMAC
+              verification → proves a peer with the SAME PSK
+              sent traffic. This is the canonical handshake signal.
+            * ``TUN/TAP read bytes``  — bytes successfully decapped
+              into the tun device → proves real tunneled data flowed
+              after the handshake.
+            * ``UDP/IP read bytes``   — alternate label for TCP/UDP
+              read bytes on some FreeBSD-derived ports. Same caveat,
+              kept only as a fallback so we don't return zero on those
+              ports — but it never overrides the auth-gated counters.
+
+        Returns ``(handshake_observed, tunnel_bytes)`` where
+        ``handshake_observed`` = max(Auth, TUN/TAP) > 0 — both are
+        HMAC-gated so either being non-zero means a real client.
+        ``tunnel_bytes`` is the larger of TUN/TAP and Auth read bytes,
+        i.e. the auth-gated traffic figure used by ``data_transfer_ok``.
         """
         if not self._status_path or not self._status_path.exists():
             return 0, 0
-        # Counter labels that prove "the link saw traffic". TCP/UDP read
-        # is the canonical one; the others corroborate when the format
-        # drifts (UDP/IP variant) or when status was flushed mid-write
-        # and only one of the lines was readable. TUN/TAP read bytes
-        # additionally confirms our own kernel actually decapped a packet.
-        wanted_labels = (
-            "TCP/UDP read bytes",
-            "UDP/IP read bytes",
-            "TUN/TAP read bytes",
-        )
         try:
             content = self._status_path.read_text(errors="replace")
-            bytes_read = 0
-            for line in content.splitlines():
-                for label in wanted_labels:
-                    if label in line:
-                        parts = line.split(",")
-                        if len(parts) >= 2:
-                            try:
-                                value = int(parts[1].strip())
-                            except ValueError:
-                                continue
-                            if value > bytes_read:
-                                bytes_read = value
-                        break
-            handshake = 1 if bytes_read > 0 else 0
-            return handshake, bytes_read
         except Exception:
             return 0, 0
+
+        # Pull each counter independently — *don't* fold them with max.
+        counters: dict[str, int] = {}
+        targets = (
+            "Auth read bytes",
+            "TUN/TAP read bytes",
+            "TCP/UDP read bytes",
+            "UDP/IP read bytes",
+        )
+        for line in content.splitlines():
+            for label in targets:
+                if line.startswith(label + ",") or line.startswith(label + "="):
+                    sep = "," if "," in line else "="
+                    parts = line.split(sep, 1)
+                    if len(parts) == 2:
+                        with contextlib.suppress(ValueError):
+                            counters[label] = int(parts[1].strip())
+                    break
+
+        auth_bytes = counters.get("Auth read bytes", 0)
+        tun_bytes = counters.get("TUN/TAP read bytes", 0)
+        # Auth-gated bytes prove HMAC validation, which is the only
+        # signal that survives random internet scanner noise.
+        tunnel_bytes = max(auth_bytes, tun_bytes)
+        handshake = 1 if tunnel_bytes > 0 else 0
+        return handshake, tunnel_bytes
 
     async def stop(self) -> None:
         """Capture final state, then terminate openvpn and cleanup."""
