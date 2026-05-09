@@ -632,6 +632,30 @@ verb 1
     return result
 
 
+async def _poll_wg_handshake(tool: str, iface: str, timeout: float) -> tuple[bool, float | None]:
+    """Poll ``<tool> show <iface> latest-handshakes`` until a non-zero
+    timestamp appears (peer replied) or ``timeout`` elapses.
+
+    Shared by ``probe_wireguard`` (``tool="wg"``) and ``probe_amneziawg``
+    (``tool="awg"``) — extracting the loop keeps each probe under
+    Sonar S3776's cognitive-complexity ceiling and removes the prior
+    near-duplicate code blocks.
+
+    Returns ``(hs_ok, rtt_ms)``. ``rtt_ms`` is ``None`` when the loop
+    times out without a handshake — callers leave ``result.rtt_ms``
+    at its default in that case.
+    """
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < timeout:
+        _, out, _ = await run_cmd([tool, "show", iface, "latest-handshakes"], timeout=1.0)
+        for line in out.splitlines():
+            parts = line.split()
+            if len(parts) >= 2 and parts[1] != "0":
+                return True, (time.monotonic() - t0) * 1000
+        await asyncio.sleep(0.5)
+    return False, None
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # WireGuard probe
 # ─────────────────────────────────────────────────────────────────────────────
@@ -681,22 +705,9 @@ PersistentKeepalive = 25
             return result
 
         try:
-            t0 = time.monotonic()
-            hs_ok = False
-            while time.monotonic() - t0 < PROBE_TIMEOUT:
-                _, wg_out, _ = await run_cmd(
-                    ["wg", "show", _WG_CLI_IFACE, "latest-handshakes"],
-                    timeout=1.0,
-                )
-                for line in wg_out.splitlines():
-                    parts = line.split()
-                    if len(parts) >= 2 and parts[1] != "0":
-                        hs_ok = True
-                        break
-                if hs_ok:
-                    result.rtt_ms = (time.monotonic() - t0) * 1000
-                    break
-                await asyncio.sleep(0.5)
+            hs_ok, rtt_ms = await _poll_wg_handshake("wg", _WG_CLI_IFACE, PROBE_TIMEOUT)
+            if rtt_ms is not None:
+                result.rtt_ms = rtt_ms
 
             result.handshake_ok = hs_ok
             if hs_ok:
@@ -782,29 +793,16 @@ PersistentKeepalive = 25
             return result
 
         try:
-            t0 = time.monotonic()
-            hs_ok = False
-            while time.monotonic() - t0 < PROBE_TIMEOUT:
-                # Must use `awg` (not `wg`) — amneziawg-go is a userspace
-                # implementation whose socket lives in /var/run/amneziawg/,
-                # which vanilla `wg` does not look at and silently fails on.
-                # Without this, hs_ok would always stay False, the data-phase
-                # ping never fires, and the probe wrongly reports BLOCKED
-                # while the listener side reports HANDSHAKE_ONLY (because
-                # awg-quick already pushed an initiation on bring-up).
-                _, wg_out, _ = await run_cmd(
-                    ["awg", "show", _AWG_CLI_IFACE, "latest-handshakes"],
-                    timeout=1.0,
-                )
-                for line in wg_out.splitlines():
-                    parts = line.split()
-                    if len(parts) >= 2 and parts[1] != "0":
-                        hs_ok = True
-                        break
-                if hs_ok:
-                    result.rtt_ms = (time.monotonic() - t0) * 1000
-                    break
-                await asyncio.sleep(0.5)
+            # Must use `awg` (not `wg`) — amneziawg-go is a userspace
+            # implementation whose socket lives in /var/run/amneziawg/,
+            # which vanilla `wg` does not look at and silently fails on.
+            # Without this, hs_ok would always stay False, the data-phase
+            # ping never fires, and the probe wrongly reports BLOCKED
+            # while the listener side reports HANDSHAKE_ONLY (because
+            # awg-quick already pushed an initiation on bring-up).
+            hs_ok, rtt_ms = await _poll_wg_handshake("awg", _AWG_CLI_IFACE, PROBE_TIMEOUT)
+            if rtt_ms is not None:
+                result.rtt_ms = rtt_ms
 
             result.handshake_ok = hs_ok
             if hs_ok:
@@ -1280,6 +1278,45 @@ async def _send_clienthello(writer: asyncio.StreamWriter, hello: bytearray) -> P
     return None
 
 
+async def _read_one_welcome_record(
+    reader: asyncio.StreamReader,
+    idx: int,
+    expected_type: int,
+    current_total: int,
+    max_total: int,
+) -> bytes | ProbeResult:
+    """Read+validate one TLS record from mtg's WelcomePacket.
+
+    Returns the raw header+body bytes on success, or a BLOCKED
+    ProbeResult tagged with the specific failure point. Split out from
+    ``_read_mtproto_welcome_packet`` so the outer 3-record loop and the
+    inner per-record validation each stay below Sonar S3776's
+    cognitive-complexity ceiling.
+    """
+    try:
+        header = await asyncio.wait_for(reader.readexactly(5), timeout=5.0)
+    except asyncio.IncompleteReadError:
+        return _mtg_error_result(f"welcome_truncated_record{idx}", Verdict.BLOCKED)
+    except TimeoutError:
+        return _mtg_error_result(f"welcome_read_timeout_record{idx}", Verdict.BLOCKED)
+    if header[0] != expected_type:
+        return _mtg_error_result(f"welcome_bad_type_record{idx}={header[0]:#x}", Verdict.BLOCKED)
+    if header[1:3] != b"\x03\x03":
+        return _mtg_error_result(f"welcome_bad_version_record{idx}", Verdict.BLOCKED)
+    record_len = int.from_bytes(header[3:5], "big")
+    if record_len == 0:
+        return _mtg_error_result(f"welcome_zero_len_record{idx}", Verdict.BLOCKED)
+    if current_total + 5 + record_len > max_total:
+        return _mtg_error_result(f"welcome_oversize_record{idx}={record_len}", Verdict.BLOCKED)
+    try:
+        body = await asyncio.wait_for(reader.readexactly(record_len), timeout=5.0)
+    except asyncio.IncompleteReadError:
+        return _mtg_error_result(f"welcome_short_body_record{idx}", Verdict.BLOCKED)
+    except TimeoutError:
+        return _mtg_error_result(f"welcome_read_timeout_body_record{idx}", Verdict.BLOCKED)
+    return bytes(header) + body
+
+
 async def _read_mtproto_welcome_packet(reader: asyncio.StreamReader) -> bytes | ProbeResult:
     """Read mtg's full WelcomePacket — three concatenated TLS records.
 
@@ -1302,33 +1339,14 @@ async def _read_mtproto_welcome_packet(reader: asyncio.StreamReader) -> bytes | 
     misbehaving peer can't make us read forever.
     """
     packet = bytearray()
-    expected_types = (0x16, 0x14, 0x17)
     max_total = 16 * 1024
-    for idx, expected_type in enumerate(expected_types):
-        try:
-            header = await asyncio.wait_for(reader.readexactly(5), timeout=5.0)
-        except asyncio.IncompleteReadError:
-            return _mtg_error_result(f"welcome_truncated_record{idx}", Verdict.BLOCKED)
-        except TimeoutError:
-            return _mtg_error_result(f"welcome_read_timeout_record{idx}", Verdict.BLOCKED)
-        if header[0] != expected_type:
-            return _mtg_error_result(
-                f"welcome_bad_type_record{idx}={header[0]:#x}", Verdict.BLOCKED
-            )
-        if header[1:3] != b"\x03\x03":
-            return _mtg_error_result(f"welcome_bad_version_record{idx}", Verdict.BLOCKED)
-        record_len = int.from_bytes(header[3:5], "big")
-        if record_len == 0:
-            return _mtg_error_result(f"welcome_zero_len_record{idx}", Verdict.BLOCKED)
-        if len(packet) + 5 + record_len > max_total:
-            return _mtg_error_result(f"welcome_oversize_record{idx}={record_len}", Verdict.BLOCKED)
-        try:
-            body = await asyncio.wait_for(reader.readexactly(record_len), timeout=5.0)
-        except asyncio.IncompleteReadError:
-            return _mtg_error_result(f"welcome_short_body_record{idx}", Verdict.BLOCKED)
-        except TimeoutError:
-            return _mtg_error_result(f"welcome_read_timeout_body_record{idx}", Verdict.BLOCKED)
-        packet += header + body
+    for idx, expected_type in enumerate((0x16, 0x14, 0x17)):
+        record_or_err = await _read_one_welcome_record(
+            reader, idx, expected_type, len(packet), max_total
+        )
+        if isinstance(record_or_err, ProbeResult):
+            return record_or_err
+        packet += record_or_err
     return bytes(packet)
 
 

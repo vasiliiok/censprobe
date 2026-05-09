@@ -162,9 +162,7 @@ class TestHandshakeTokenSetSnapshot:
         # — that would make _classify_proxy_outcome ambiguous.
         success = set(protocol_probes._HS_SUCCESS_TOKENS)
         failure = set(protocol_probes._HS_FAILURE_TOKENS)
-        assert success.isdisjoint(failure), (
-            f"tokens in both sets: {success & failure}"
-        )
+        assert success.isdisjoint(failure), f"tokens in both sets: {success & failure}"
 
     def test_no_token_is_substring_of_another(self) -> None:
         # Defensive: if "tcp" were in success and "dial tcp" in
@@ -178,8 +176,7 @@ class TestHandshakeTokenSetSnapshot:
             for j, b in enumerate(all_tokens):
                 if i != j:
                     assert a not in b or a == b, (
-                        f"token {a!r} is a substring of {b!r} — "
-                        f"will produce ambiguous matches"
+                        f"token {a!r} is a substring of {b!r} — will produce ambiguous matches"
                     )
 
 

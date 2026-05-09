@@ -33,6 +33,13 @@ _MIN_OVPN_BYTES = 64
 # alive in host netns and silently blackholes the next session.
 _OVPN_SRV_IFACE = "censovpn0"
 
+# The ONLY OpenVPN status counter that proves a remote handshake (HMAC
+# against our static-key PSK passed). Other counters (TCP/UDP read,
+# TUN/TAP read, TCP/UDP write) all tick from scanner traffic or host-tun
+# noise and would produce false-positive handshake verdicts. See
+# ``OpenVPNResponder._read_status`` for the full counter taxonomy.
+_AUTH_BYTES_LABEL = "Auth read bytes"
+
 
 class OpenVPNResponder:
     """
@@ -141,23 +148,51 @@ verb 1
         scanner noise (``TCP/UDP read``) and host-side tun noise
         (``TUN/TAP read``).
         """
-        if not self._status_path or not self._status_path.exists():
+        counters = self._parse_status_counters()
+        if counters is None:
             return 0, 0
+
+        auth_bytes = counters.get(_AUTH_BYTES_LABEL, 0)
+        # Diagnostic only — surfaces *why* Auth was 0 on a session that
+        # nominally "saw traffic". Logged at debug to keep stop-line
+        # output clean during normal operation.
+        if auth_bytes == 0 and any(
+            counters.get(k, 0) > 0 for k in counters if k != _AUTH_BYTES_LABEL
+        ):
+            logger.debug(
+                "openvpn idle session had non-auth counters: %s — host/scanner noise, not a peer",
+                counters,
+            )
+        handshake = 1 if auth_bytes > 0 else 0
+        return handshake, auth_bytes
+
+    def _parse_status_counters(self) -> dict[str, int] | None:
+        """Extract the four byte counters from the OpenVPN status file.
+
+        Returns ``None`` when the file is unreadable (responder not yet
+        started, status not yet written, transient I/O error). Returns
+        a (possibly empty) dict mapping counter label → bytes otherwise.
+
+        Split out from ``_read_status`` so the parsing loop and the
+        verdict logic each stay below the cognitive-complexity ceiling.
+        """
+        if not self._status_path or not self._status_path.exists():
+            return None
         try:
             content = self._status_path.read_text(errors="replace")
-        except Exception:
-            return 0, 0
+        except OSError:
+            return None
 
         # Pull each counter independently. We track the noise-prone
         # counters too so they appear in the diagnostic logger when
         # operators investigate, but they NEVER affect the verdict.
-        counters: dict[str, int] = {}
         targets = (
-            "Auth read bytes",
+            _AUTH_BYTES_LABEL,
             "TUN/TAP read bytes",
             "TCP/UDP read bytes",
             "TCP/UDP write bytes",
         )
+        counters: dict[str, int] = {}
         for line in content.splitlines():
             for label in targets:
                 if line.startswith(label + ","):
@@ -166,20 +201,7 @@ verb 1
                         with contextlib.suppress(ValueError):
                             counters[label] = int(parts[1].strip())
                     break
-
-        auth_bytes = counters.get("Auth read bytes", 0)
-        # Diagnostic only — surfaces *why* Auth was 0 on a session that
-        # nominally "saw traffic". Logged at debug to keep stop-line
-        # output clean during normal operation.
-        if auth_bytes == 0 and any(
-            counters.get(k, 0) > 0 for k in counters if k != "Auth read bytes"
-        ):
-            logger.debug(
-                "openvpn idle session had non-auth counters: %s — host/scanner noise, not a peer",
-                counters,
-            )
-        handshake = 1 if auth_bytes > 0 else 0
-        return handshake, auth_bytes
+        return counters
 
     async def stop(self) -> None:
         """Capture final state, then terminate openvpn and cleanup."""
