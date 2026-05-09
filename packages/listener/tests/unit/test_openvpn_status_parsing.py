@@ -157,3 +157,55 @@ def test_malformed_status_does_not_raise(tmp_path: Path, garbage: str) -> None:
     handshake, tunnel_bytes = r._read_status()
     assert handshake == 0
     assert tunnel_bytes == 0
+
+
+# Reproduction from a real production probe (RU mobile, 2026-05-09):
+# the listener reported data_transfer_ok=true with only 337 Auth-read
+# bytes, even though the client never managed a successful ping. Those
+# 337 bytes were entirely handshake control + a couple of keepalives,
+# NOT data plane. With ``keepalive 10 60`` configured, every 10 s adds
+# ~80 B of HMAC'd control traffic; over a 3-min idle session this can
+# accumulate well past the historical 64-byte threshold.
+_PRODUCTION_HANDSHAKE_PLUS_KEEPALIVE_NO_DATA = """\
+OpenVPN STATISTICS
+Updated,Sat May  9 21:26:28 2026
+TUN/TAP read bytes,0
+TUN/TAP write bytes,0
+TCP/UDP read bytes,400
+TCP/UDP write bytes,400
+Auth read bytes,337
+END
+"""
+
+
+def test_handshake_only_session_does_not_falsely_report_data_transfer(
+    tmp_path: Path,
+) -> None:
+    """Handshake completed + keepalive ticking ≠ data transfer.
+
+    Reproduces the false-OK observed on RU mobile 2026-05: 337 B of
+    Auth-read after a 3-minute session where no client ping ever
+    completed. The threshold has to clear handshake-control + a few
+    keepalive intervals, otherwise an idle session that merely
+    finished its TLS-static-key handshake gets reported as OK.
+    """
+    r = _make_responder(tmp_path, _PRODUCTION_HANDSHAKE_PLUS_KEEPALIVE_NO_DATA)
+    r._final_handshake_count, r._final_bytes_received = r._read_status()
+    r._snapshot_taken = True
+    assert r.connection_count == 1, "handshake itself definitely happened"
+    assert r.data_transfer_ok is False, (
+        "337 B is handshake + keepalive only; it must NOT be classified "
+        "as data transfer or the listener will report OK while the "
+        "client correctly reports HANDSHAKE_ONLY (no ping completed)"
+    )
+
+
+def test_data_transfer_ok_true_when_real_data_flowed(tmp_path: Path) -> None:
+    """Sanity: a session with substantial Auth-read bytes (well past
+    handshake+keepalive accumulation) DOES still report data_ok=True.
+    """
+    r = _make_responder(tmp_path, _REAL_HANDSHAKE_WITH_DATA)  # Auth=8192
+    r._final_handshake_count, r._final_bytes_received = r._read_status()
+    r._snapshot_taken = True
+    assert r.connection_count == 1
+    assert r.data_transfer_ok is True

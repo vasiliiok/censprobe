@@ -20,13 +20,24 @@ from censprobe_core.utils import write_secret
 logger = logging.getLogger(__name__)
 
 
-# Threshold for "real data flowed through the OpenVPN tun" — see the
-# matching constant in wg_responder. With static-key p2p mode the
-# server-side `TCP/UDP read bytes` counter ticks for every packet that
-# reaches the kernel, so any successful ping (a 64-byte ICMP packet
-# encapsulated in OpenVPN's own header gives ~80-100 bytes on the
-# wire) easily clears 64.
-_MIN_OVPN_BYTES = 64
+# Threshold for "real data flowed through the OpenVPN tun" using the
+# Auth-read-bytes counter (the only HMAC-gated counter; see
+# ``OpenVPNResponder._read_status``). Has to be high enough to clear
+# *handshake control packets + keepalive pings*, since both pass HMAC
+# and are indistinguishable from data-plane traffic at the counter
+# level. Values in the wild on a real RU-mobile probe (2026-05) for
+# a session that completed handshake but had NO successful client ping:
+# 337 bytes Auth-read after a 3-minute idle session. With ``keepalive
+# 10 60`` configured, every 10s adds ~80 bytes of HMAC'd control
+# traffic, so over 3 min you can naturally accumulate ~1500 bytes
+# without any client data. A threshold of 1500 stays conservative —
+# a single ICMP echo round-trip through the tunnel is ~160 bytes
+# encapsulated, so genuine data plane that completes a single ping
+# will only just cross this line. The trade-off: errs toward
+# false-HANDSHAKE_ONLY (data was small, listener missed it) rather
+# than false-OK (handshake-only inflated by keepalive). The latter
+# violates the BLOCKED-invariant downstream; the former is safer.
+_MIN_OVPN_BYTES = 1500
 
 # Deterministic tun name so we can scrub a stale interface left behind by
 # a SIGKILL — without this, a leftover tun keeps the 10.200.0.x peer route

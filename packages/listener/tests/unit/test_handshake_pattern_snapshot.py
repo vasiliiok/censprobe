@@ -53,17 +53,48 @@ def test_log_monitored_responder_handshake_patterns(
 
 def test_mtg_responder_handshake_marker() -> None:
     """``MTProxyResponder`` (mtg) doesn't use the base class' attribute —
-    it parses its own stdout in a custom monitor (see
-    ``_monitor_output_mtproto`` in mtproxy_responder.py). The marker is
-    'stream has been started' — pin it so a mtg upgrade is caught.
+    it parses its own stdout in a custom monitor. Pin BOTH the
+    success marker (``stream has been started``, increments) and the
+    handshake-failure markers (decrement, so scanner traffic doesn't
+    inflate the counter — see _monitor_output docstring).
     """
     import inspect
 
     src = inspect.getsource(MTProxyResponder)
+
     assert "stream has been started" in src, (
-        "MTProxyResponder no longer references its handshake marker. mtg "
-        "upgrades have historically renamed this string — verify against "
-        "the new mtg version's stdout and re-pin."
+        "MTProxyResponder lost the handshake-success marker. mtg upgrades "
+        "have historically renamed this string — re-derive against the "
+        "new mtg version's stdout and update."
+    )
+
+    # Failure markers used to subtract scanner / failed-handshake
+    # streams from the connection counter. If mtg renames any of
+    # these, the counter will be inflated and start producing
+    # false-OK at the listener side.
+    expected_failure_markers = (
+        "cannot parse client hello",
+        "cannot read client hello",
+        "cannot send welcome packet",
+        "obfuscated handshake is failed",
+        "cannot wrap into doppelganger connection",
+    )
+    for marker in expected_failure_markers:
+        assert marker in src, (
+            f"MTProxyResponder lost the failure marker {marker!r}. "
+            f"This marker decrements the handshake counter — without "
+            f"it, scanner traffic on the public-facing port inflates "
+            f"connection_count and listener verdicts become false-OK."
+        )
+
+    # Pin -d (debug) flag presence — without it, mtg's default zerolog
+    # WarnLevel suppresses the Info-level handshake events entirely
+    # and the counter is permanently zero. Verified critical 2026-05.
+    assert '"-d"' in src or "'-d'" in src, (
+        "MTProxyResponder no longer passes -d/--debug to mtg. Without "
+        "this flag mtg silences all handshake events (default zerolog "
+        "level is Warn, our markers are Info), and connection_count "
+        "stays at 0 forever → every probe reports listener-side BLOCKED."
     )
 
 

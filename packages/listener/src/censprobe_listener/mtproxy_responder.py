@@ -44,9 +44,24 @@ class MTProxyResponder:
         # ``-t`` is mtg's network-timeout knob (default 10s). 30s gives
         # slow client networks margin without affecting handshake-success
         # accounting; the responder runs until SIGTERM regardless.
+        #
+        # ``-d`` (debug) is REQUIRED for handshake counting to work at
+        # all. mtg's default zerolog level is WarnLevel (see
+        # internal/cli/run_proxy.go::makeLogger), and the
+        # ``Stream has been started`` event we count is emitted at
+        # InfoLevel — which is BELOW Warn and therefore silently
+        # dropped from stdout without ``-d``. Verified 2026-05 against
+        # MTG_COMMIT 269852a4: in non-debug mode the responder never
+        # prints anything until an ERROR is hit, so connection_count
+        # stays at 0 forever and every probe reports listener-side
+        # BLOCKED while the client validates the faketls handshake
+        # cleanly. Log volume in debug mode is modest (~2 lines/sec
+        # idle plus a few lines per stream) — survivable for the
+        # typical 3-minute session.
         cmd = [
             "mtg",
             "simple-run",
+            "-d",
             "-t",
             "30s",
             f"0.0.0.0:{self.port}",
@@ -108,13 +123,26 @@ class MTProxyResponder:
     async def _monitor_output(self) -> None:
         """Tail mtg stdout and count successful handshakes.
 
-        mtg logs one ``Stream has been started`` line at the moment a
-        client passes the faketls handshake (see mtglib/proxy.go). We
-        match on that token rather than ``Stream has been finished`` so a
-        single client that opens-and-closes still yields a count of 1.
-        Domain-fronting fallbacks log under different tokens and are
-        intentionally NOT counted — they would inflate the metric on any
-        unrelated TCP probe that hits the port.
+        mtg's flow (mtglib/proxy.go::Serve): on every TCP accept it
+        emits ``Stream has been started`` *before* attempting the
+        faketls handshake. So a port-scanner sending garbage bytes
+        increments that counter just like a real client would. We
+        therefore *subtract* the per-stream failure markers mtg emits
+        when the faketls or doppelganger steps fail — net result: the
+        counter only retains streams that survived the faketls layer.
+        ``Stream has been finished`` is intentionally ignored (every
+        stream emits it, success or failure), and domain-fronting
+        fallbacks are reflected by the doppelganger-failure marker.
+
+        Failure markers grepped from MTG_COMMIT 269852a4
+        (mtglib/proxy.go ~ln 95-205 and faketls path):
+          * "cannot parse client hello"
+          * "cannot read client hello"
+          * "cannot send welcome packet"
+          * "obfuscated handshake is failed"
+          * "cannot wrap into doppelganger connection"
+          * "ip was rejected by allowlist" / "ip was blacklisted"
+          * "connection was concurrency limited"
         """
         if self._proc is None or self._proc.stdout is None:
             return
@@ -127,8 +155,28 @@ class MTProxyResponder:
                 if not line:
                     continue
                 logger.debug("[mtg] %s", line)
-                if "stream has been started" in line.lower():
+                low = line.lower()
+                if "stream has been started" in low:
                     self.connection_count += 1
+                elif any(
+                    marker in low
+                    for marker in (
+                        "cannot parse client hello",
+                        "cannot read client hello",
+                        "cannot send welcome packet",
+                        "obfuscated handshake is failed",
+                        "cannot wrap into doppelganger connection",
+                        "ip was rejected by allowlist",
+                        "ip was blacklisted",
+                        "connection was concurrency limited",
+                    )
+                ):
+                    # Subtract the start that preceded this failure so
+                    # only streams that survived the faketls layer
+                    # remain. Floor at 0 — extra/unmatched failures
+                    # (e.g. concurrency limit before a stream-start)
+                    # must not push the counter negative.
+                    self.connection_count = max(0, self.connection_count - 1)
         except Exception as e:
             logger.debug("mtg monitor ended: %s", e)
 
