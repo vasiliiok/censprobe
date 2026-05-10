@@ -122,7 +122,11 @@ class MTProxyResponder:
             self._log_task = None
 
         if self._proc is not None:
-            logger.info("Stopping mtg")
+            # Include port so the two mtg instances (mtproto_proxy on
+            # 443 and mtproto_proxy_alt on 8888) are distinguishable in
+            # the operator log. Without the port the two stop sequences
+            # interleave indistinguishably.
+            logger.info("Stopping mtg on port %d", self.port)
             try:
                 self._proc.terminate()
             except ProcessLookupError:
@@ -139,7 +143,8 @@ class MTProxyResponder:
             self._proc = None
 
         logger.info(
-            "mtproto_proxy responder stopped (connections: %d, data_pkts: %d)",
+            "mtg responder on port %d stopped (connections: %d, data_pkts: %d)",
+            self.port,
             self.connection_count,
             self._final_data_packets,
         )

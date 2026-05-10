@@ -154,7 +154,7 @@ class MTProxyOrigResponder:
             self._log_task = None
 
         if self._proc is not None:
-            logger.info("Stopping mtproto-proxy (original C)")
+            logger.info("Stopping mtproto-proxy (original C) on port %d", self.port)
             try:
                 self._proc.terminate()
             except ProcessLookupError:
@@ -169,7 +169,8 @@ class MTProxyOrigResponder:
             self._proc = None
 
         logger.info(
-            "mtproto_orig responder stopped (connections: %d)",
+            "mtproto_orig responder on port %d stopped (connections: %d)",
+            self.port,
             self.connection_count,
         )
 

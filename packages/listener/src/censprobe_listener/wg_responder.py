@@ -204,7 +204,8 @@ AllowedIPs = 10.202.0.2/32
             self._tmpdir = None
 
         logger.info(
-            "WireGuard responder stopped (handshakes=%d, rx=%d bytes)",
+            "WireGuard responder on UDP/%d stopped (handshakes=%d, rx=%d bytes)",
+            self.port,
             self._final_hs_count,
             self._final_rx_bytes,
         )
@@ -344,7 +345,8 @@ AllowedIPs = 10.201.0.2/32
             self._tmpdir = None
 
         logger.info(
-            "AmneziaWG responder stopped (handshakes=%d, rx=%d bytes)",
+            "AmneziaWG responder on UDP/%d stopped (handshakes=%d, rx=%d bytes)",
+            self.port,
             self._final_hs_count,
             self._final_rx_bytes,
         )

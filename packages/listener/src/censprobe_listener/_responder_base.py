@@ -159,8 +159,9 @@ class SubprocessResponder(ABC):
             self._tmpdir = None
 
         logger.info(
-            "%s responder stopped (connections: %d)",
+            "%s responder on port %d stopped (connections: %d)",
             self.proto_label,
+            self.port,
             self.connection_count,
         )
 

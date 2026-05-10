@@ -324,7 +324,8 @@ verb 1
             self._config_dir = None
 
         logger.info(
-            "OpenVPN responder stopped (handshakes: %d, bytes: %d, data_pkts: %d)",
+            "OpenVPN responder on UDP/%d stopped (handshakes: %d, bytes: %d, data_pkts: %d)",
+            self.port,
             self._final_handshake_count,
             self._final_bytes_received,
             self._final_data_packets,
