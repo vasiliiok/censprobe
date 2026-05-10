@@ -1863,9 +1863,7 @@ class _TlsRecordReader:
                 # Body-read timeout (buf already has bytes) stays ERROR
                 # because mid-stream stall is genuinely ambiguous.
                 if not self._buf:
-                    return _mtg_error_result(
-                        "orig_resPQ_len_timeout_post_init", Verdict.BLOCKED
-                    )
+                    return _mtg_error_result("orig_resPQ_len_timeout_post_init", Verdict.BLOCKED)
                 return _mtg_error_result("orig_resPQ_body_timeout", Verdict.ERROR)
             if hdr[0] != self._APP_DATA_TYPE:
                 return _mtg_error_result(
@@ -1991,9 +1989,7 @@ async def _exchange_obfuscated2_respq(
             # data ⇒ confirmed L7 block of the obfuscated2 protocol.
             # Preflight DC-reach guarantees the upstream isn't the
             # cause. BLOCKED preserves the invariant.
-            return _mtg_error_result(
-                "orig_resPQ_len_timeout_post_init", Verdict.BLOCKED
-            )
+            return _mtg_error_result("orig_resPQ_len_timeout_post_init", Verdict.BLOCKED)
 
     length_pt = recv_cipher.update(length_ct)
     length = int.from_bytes(length_pt, "little")

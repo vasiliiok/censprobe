@@ -438,9 +438,7 @@ class TestExchangeObfuscated2RespQTimeout:
         return reader, writer
 
     @pytest.mark.asyncio
-    async def test_raw_path_len_timeout_is_blocked(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_raw_path_len_timeout_is_blocked(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Squeeze the probe timeout so the test finishes in well under
         # a second instead of waiting the production 15s constant.
         monkeypatch.setattr(protocol_probes, "PROBE_TIMEOUT", 0.05)
@@ -504,9 +502,7 @@ class TestPingEchoReturnShape:
         assert rtt == 12.5
 
     @pytest.mark.asyncio
-    async def test_partial_success_above_threshold(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_partial_success_above_threshold(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # min_received default is 2; 2/3 received still passes.
         async def _fake(*_a: object, **_kw: object) -> tuple[int, str, str]:
             return 0, self._ping_output(2, avg_rtt=8.7), ""

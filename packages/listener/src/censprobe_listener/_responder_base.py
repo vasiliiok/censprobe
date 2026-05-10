@@ -218,10 +218,7 @@ class SubprocessResponder(ABC):
         if self.echo_server is not None:
             try:
                 bytes_seen = int(
-                    self.echo_server.snapshot()
-                    .get(self.proto_label, {})
-                    .get("bytes", 0)
-                    or 0
+                    self.echo_server.snapshot().get(self.proto_label, {}).get("bytes", 0) or 0
                 )
             except (TypeError, ValueError):
                 bytes_seen = None

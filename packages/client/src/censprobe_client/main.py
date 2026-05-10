@@ -83,6 +83,8 @@ class _PermanentEndpointError(RuntimeError):
     Auth failures (401/403), exhausted single-use credentials (410),
     cert pinning mismatch, malformed response. Retries don't help.
     """
+
+
 _DISCLAIMER = """
 [yellow]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/yellow]
  This tool tests VPN protocol reachability from

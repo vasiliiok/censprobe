@@ -67,9 +67,7 @@ class TestRetryPolicy:
 
         monkeypatch.setattr(client_main, "_pinned_get", _fake)
         with pytest.raises(client_main._TransientEndpointError, match="listener down"):
-            client_main._pinned_get_with_retry(
-                "h", 1, "t", "f" * 64, path="/creds", max_attempts=3
-            )
+            client_main._pinned_get_with_retry("h", 1, "t", "f" * 64, path="/creds", max_attempts=3)
         # 1 initial + 2 retries == 3 total attempts.
         assert attempts["n"] == 3
 
@@ -85,15 +83,11 @@ class TestRetryPolicy:
 
         monkeypatch.setattr(client_main, "_pinned_get", _fake)
         with pytest.raises(client_main._PermanentEndpointError, match="403"):
-            client_main._pinned_get_with_retry(
-                "h", 1, "t", "f" * 64, path="/creds", max_attempts=3
-            )
+            client_main._pinned_get_with_retry("h", 1, "t", "f" * 64, path="/creds", max_attempts=3)
         # NO retries — permanent errors propagate immediately.
         assert attempts["n"] == 1
 
-    def test_value_error_propagates_without_retry(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_value_error_propagates_without_retry(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # ValueError on cert format is raised BEFORE any I/O, so it
         # propagates straight through the retry wrapper just like a
         # permanent error would.
@@ -174,5 +168,3 @@ def test_backoff_helper_imports_clean() -> None:
     assert callable(client_main.time.sleep)
     assert hasattr(client_main, "_FETCH_MAX_ATTEMPTS")
     assert client_main._FETCH_MAX_ATTEMPTS >= 1
-
-
