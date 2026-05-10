@@ -1,6 +1,6 @@
 # Censprobe
 
-**Censprobe** — инструмент измерения цензуры и оценки устойчивости серверов к сетевым блокировкам в России и других странах с глубокой инспекцией трафика. Автоматически проверяет видимость публичных ресурсов с аплинка сервера, тестирует восемь VPN/обход-протоколов через DPI и атрибутирует троттлинг и SNI-блокировки.
+**Censprobe** — инструмент измерения цензуры и оценки устойчивости серверов к сетевым блокировкам в России и других странах с глубокой инспекцией трафика. Автоматически проверяет видимость публичных ресурсов с аплинка сервера, тестирует девять VPN/обход-протоколов через DPI и атрибутирует троттлинг и SNI-блокировки.
 
 Все компоненты работают автономно через Docker Compose, результаты сохраняются в `reports/<TEST_ID>/` локально и публикуются вручную (`git push`). Grafana собирает дашборды из импортированных отчётов.
 
@@ -21,7 +21,7 @@
 - [CLI-параметры](#cli-параметры)
 - [Конфигурация: `censprobe.yaml`](#конфигурация-censprobeyaml)
 - [Цели тестирования: `targets/`](#цели-тестирования-targets)
-- [Восемь VPN-протоколов](#восемь-vpn-протоколов)
+- [Девять VPN-протоколов](#девять-vpn-протоколов)
 - [Восемь модулей измерения](#восемь-модулей-измерения)
 - [Скоринг](#скоринг)
 - [Дашборд (Grafana)](#дашборд-grafana)
@@ -126,7 +126,7 @@ docker compose --profile listener run --rm listener \
   --session-id client-home-rt-spb
 ```
 
-Listener генерирует одноразовые credentials в памяти, поднимает все respondery (OpenVPN UDP, WireGuard UDP, AmneziaWG UDP, Shadowsocks 2022 TCP, VLESS+Reality TCP, Hysteria 2 UDP, MTProto-proxy TCP на 443, MTProto-proxy TCP на alt-порте 8888 для A/B port-vs-L7 DPI), запускает HTTPS endpoint для credentials на `CREDS_PORT` (по умолчанию 8443/tcp) и **печатает готовую команду для запуска client'а**. Скопируйте её — она содержит TEST_ID, SESSION_ID, SERVER_HOST, CREDS_TOKEN и CREDS_CERT_SHA256.
+Listener генерирует одноразовые credentials в памяти, поднимает все respondery (OpenVPN UDP, WireGuard UDP, AmneziaWG UDP, Shadowsocks 2022 TCP, VLESS+Reality TCP, Hysteria 2 UDP, MTProto-proxy mtg на TCP/443 и alt-TCP/8888 для A/B port-vs-L7 DPI, оригинальный MTProto-proxy C на TCP/2080), запускает HTTPS-сервер на `CREDS_PORT` (по умолчанию 8443/tcp) с двумя endpoint'ами (`/creds` — single-use bearer-pinned выдача credentials YAML; `/snapshot` — multi-serve live counter snapshot для cross-verification клиентом) и **печатает готовую команду для запуска client'а**. Скопируйте её — она содержит TEST_ID, SESSION_ID, SERVER_HOST, CREDS_TOKEN и CREDS_CERT_SHA256.
 
 > Открытый порт **8443/tcp** должен быть доступен с клиентской сети. Credentials живут только в памяти процесса, на диск не пишутся.
 
@@ -151,9 +151,15 @@ docker compose --profile client run --rm client \
   --creds-cert-sha256 <sha256-fingerprint>
 ```
 
-Client тянет credentials с listener'а через TLS-pinning (cert проверяется по SHA-256), bearer-token проверяется через `hmac.compare_digest`, потом пробует все включённые протоколы с opsec-jitter (0.5–3 с между пробами). Probe для каждого протокола различает `OK`, `HANDSHAKE_ONLY` (handshake прошёл, но throughput не подтверждён), `BLOCKED`, `ERROR`.
+> **Рекомендация: запускайте клиент на Linux-хосте** (Ubuntu desktop, WSL2 с systemd, любая Linux VM). Docker Desktop на macOS/Windows работает в синтетическом netns внутри VM, и в редких случаях для UDP-протоколов с обфускацией (особенно AmneziaWG) это даёт client-side false-OK: userspace-демон сообщает rx_bytes>0 даже когда listener не получил ни одного пакета. **Final-вердикт всё равно корректен** — listener-side counters authoritative, и cross-verification таблица в выводе клиента показывает расхождение явно с пометкой `client overread`. Но на Linux-клиенте client/listener-вердикты сходятся напрямую без таких квирков. TCP-протоколы (Shadowsocks, VLESS+Reality, Hysteria 2 over QUIC, mtproto_*) Docker Desktop пропускает прозрачно.
 
-После завершения клиента — вернитесь в терминал сервера и нажмите `Ctrl+C` в процессе Listener. Listener сохранит отчёт в `reports/<TEST_ID>/server-listener-<SESSION_ID>-<timestamp>.json`.
+Client тянет credentials с listener'а через TLS-pinning (cert проверяется по SHA-256), bearer-token проверяется через `hmac.compare_digest`, потом пробует все включённые протоколы с opsec-jitter (0.5–3 с между пробами). Probe для каждого протокола различает `OK`, `HANDSHAKE_ONLY`, `BLOCKED`, `ERROR`.
+
+**Cross-verification.** После всех probes клиент дополнительно фетчит `/snapshot` с listener'а (тот же bearer-token, multi-serve) и печатает таблицу `Client | Listener | Final` per-protocol. Listener — authoritative источник (kernel-level counters, HMAC-валидация, iptables). Если client-вердикт расходится с listener — final = listener, в колонке `Note` появится `client overread (listener saw less)` либо `listener saw data the client missed`. По умолчанию final-вердикт `CONNECTED` означает "протокол реально работает"; `HANDSHAKE_ONLY` и `BLOCKED` оба означают "не работает" (различие диагностическое: HANDSHAKE_ONLY ⇒ DPI режет data plane после рукопожатия; BLOCKED ⇒ блок на L3/L4 либо silent drop сразу после init). Для mtproto-семейства `length_timeout_post_init` (TCP жив, init принят, но resPQ через DC не вернулся) детерминированно классифицируется как BLOCKED — это canonical DPI silent-drop сигнатура.
+
+**Retry на сетевых ошибках.** И `/creds`, и `/snapshot` retry до 3 попыток с exponential backoff (1с → 2с) при transient-ошибках (connection refused, timeout, 5xx). Permanent-ошибки (401/403/410, cert pinning mismatch) короткозамыкают на первой попытке без retry. Если `/creds` не достучался после retries — клиент абортит с понятной диагностикой. Если `/snapshot` — клиент продолжит работать и напечатает client-only таблицу + warning "snapshot unavailable".
+
+После завершения клиента — вернитесь в терминал сервера и нажмите `Ctrl+C` в процессе Listener. Listener сохранит отчёт в `reports/<TEST_ID>/server-listener-<SESSION_ID>-<timestamp>.json`. **Listener-вердикт в JSON-отчёте — single source of truth**; client-вывод информационный.
 
 ### Шаг 4. Дополнительные клиентские сети
 
@@ -523,9 +529,10 @@ Solo report (`server-solo-*.json`):
 - `module_failures: dict[str, str]` — модули, упавшие с исключением
 
 Listener report (`server-listener-<SESSION_ID>-*.json`):
-- `test_id`, `session_id`, `client` (EndpointMeta — IP-free network identity, country/ASN/network family)
-- `protocol_results: list[ProtocolResult]` — handshake/throughput per protocol
-- `connection_count`, `handshake_count` — operator status counters
+- `test_id`, `session_id`, `listener_started_at`, `listener_stopped_at`, `duration_sec`
+- `client_connected: bool` — забрал ли клиент credentials по `/creds`. False ⇒ сильнейший сигнал блокировки (сеть не пускает даже к HTTPS-эндпоинту 8443; per-protocol BLOCKED в таком отчёте — network-level, не protocol-level)
+- `client: EndpointMeta | null` — IP-free network identity забравшего creds клиента (ASN/route/company/datacenter/location), null если ipapi.is enrichment упал или client не подключался
+- `results: dict[str, ProtocolResult]` — per-protocol verdict + handshake_count + data_transfer_ok + avg_throughput_mbps
 
 JSON Schema снимки (regen-able через `CENSPROBE_REGENERATE_SCHEMAS=1 pytest tests/snapshots/`) — `tests/snapshots/schemas/test_result.schema.json`, `listener_report.schema.json`. Pinned против фикстур (`tests/snapshots/fixtures/test_result_minimal.json`, `listener_report_minimal.json`).
 
@@ -539,7 +546,7 @@ JSON Schema снимки (regen-able через `CENSPROBE_REGENERATE_SCHEMAS=1 
 
 | Job | Что делает |
 |-----|-----------|
-| `lint` | ruff (E/F/W/B/I/UP/S), ruff format, yamllint, actionlint, hadolint, mypy strict over `packages/*/src` (47 файлов) |
+| `lint` | ruff (E/F/W/B/I/UP/S), ruff format, yamllint, actionlint, hadolint, mypy strict over `packages/*/src` (51 файл) |
 | `validate-config` | inline `load_config()` + `load_targets()` с promotion warning'ов в errors |
 | `test (probe-core)` `test (solo)` `test (listener)` `test (client)` `test (sync-api)` | matrix pytest с `services: postgres:16-alpine` |
 | `cross-package-tests` | `pytest tests/contracts tests/snapshots` (Grafana ↔ subcategories, yaml round-trip, wire-format snapshots) |

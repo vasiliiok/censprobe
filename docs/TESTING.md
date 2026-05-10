@@ -201,7 +201,7 @@ I/O запретами выгрезает на уровне transport-layer mock
 
 Полный набор не-pytest проверок описан в [`TEST_COVERAGE.md`](TEST_COVERAGE.md). Кратко:
 
-- **Static analysis**: `ruff check + ruff format --check` (E/F/W/B/I/UP/S), `mypy strict` (полный `packages/*/src` tree, 47 файлов), `bandit -ll` (Python security), `hadolint` (Dockerfile), `actionlint` (workflow YAML), `yamllint` (configuration YAML).
+- **Static analysis**: `ruff check + ruff format --check` (E/F/W/B/I/UP/S), `mypy strict` (полный `packages/*/src` tree, 51 файл), `bandit -ll` (Python security), `hadolint` (Dockerfile), `actionlint` (workflow YAML), `yamllint` (configuration YAML).
 - **Dependency security**: `pip-audit` (PyPI vuln feed), `actions/dependency-review-action@v4` (PR-only, fail-on `high`), `gitleaks` (secret scanning, PR-diff и full history).
 - **Configuration validation**: `validate-config` job — pydantic-load `censprobe.yaml` + `targets/*.yaml`; warn-уровень логи промотятся в errors. Pre-commit hook `validate-targets` дублирует это локально.
 - **Container scanning** (`security-fast` job, push/PR): `aquasecurity/trivy-action` filesystem-scan (`scan-ref: .`, scanners `vuln,secret,config`, severity `HIGH,CRITICAL`, `exit-code: 0` — surfaced через SARIF, не блокирует merge на transient feed update). Image-registry scanning против опубликованных `outtakes/censprobe-*:main` снят вместе с удалением nightly. Image budgets enforced post-build в `build.yml` (`solo` ≤ 600 MB, `listener`/`client` ≤ 400 MB, `sync-api` ≤ 250 MB) + non-root verification для `sync-api`.

@@ -4,9 +4,9 @@
 
 Цифры:
 
-- **46 тест-файлов** в 6 деревьях.
-- **606 collected test** (после расширения `parametrize`); из них 604 default + 2 deselected (e2e, `e2e-dashboard` job).
-- **Coverage on new code: ~39%** (общая coverage растёт по плану — см. раздел «Roadmap»; точное число — в SonarCloud отчёте последнего PR).
+- **55 тест-файлов** в 6 деревьях.
+- **738 collected test** (после расширения `parametrize`); из них 736 default + 2 deselected (e2e, `e2e-dashboard` job).
+- **Coverage on new code: ~40%** (общая coverage растёт по плану — см. раздел «Roadmap»; точное число — в SonarCloud отчёте последнего PR).
 - **8 required CI gates** (`lint`, `validate-config`, `test × 5-package matrix`, `cross-package-tests`, `network-tests`, `e2e-dashboard`, `security-fast`, `sonar`) + image gates в `build.yml` (size + non-root) + 1 informational (weekly CodeQL).
 
 ---
@@ -15,36 +15,39 @@
 
 ### `packages/probe-core/`
 
-#### Pure-unit (`tests/unit/`, 13 файлов, 206 тестов)
+#### Pure-unit (`tests/unit/`, 14 файлов, 256 тестов)
 
 | Src-модуль | Тест-файл(ы) | Тестов | Что покрыто |
 |------------|--------------|-------:|-------------|
 | `censprobe_core` (whole pkg) | `test_smoke_imports.py` | 1 | `pkgutil.walk_packages` обход — каждый submodule импортится без side-effects, циклических импортов, недостающих зависимостей |
-| `censprobe_core.config.ProtocolsConfig` | `test_config_validation.py` | 10 | `_check_ports_cover_enabled` (missing port, orphan port, invalid range), `extra="forbid"` на typo-полях, fatal startup error на missing field |
+| `censprobe_core.config.ProtocolsConfig` | `test_config_validation.py` | 24 | `_check_ports_cover_enabled` (missing port, orphan port, invalid range), `extra="forbid"` на typo-полях, fatal startup error на missing field |
 | `censprobe_core.credentials_reader` | `test_credentials_reader.py` | 14 | fail-loud контракт: `_protocols_enabled` обязателен (missing/null/non-list/non-string-entries), все операционные поля каждой секции обязательны (port, method, server_name, AWG h1..h4 и s1/s2/jc/jmin/jmax), invalid port range, top-level non-mapping, section non-mapping, absent section keeps zero defaults |
+| `censprobe_core.protocol_probes` (helpers) | `test_protocol_probes_helpers.py` | 41 | `_classify_proxy_outcome` SOCKS-routed verdict mapping; `_wg_peer_rx_bytes` parser; `_build_obfuscated2_init` byte-shape (transport tag = `\xdd\xdd\xdd\xdd`, forbidden first-int32 set, second-int32 ≠ 0); `_validate_res_pq` (truncated body, bad auth_key_id, bad TL ID, nonce mismatch); **`_exchange_obfuscated2_respq` length-timeout-after-init = BLOCKED in BOTH raw obfuscated2 and faketls paths** (Bug A regression); **`ping_echo` returns `(ok, avg_rtt_ms)`** parsed from iputils `rtt min/avg/max/mdev` line — full success / partial above threshold / below threshold / total failure / zero-received-no-rtt-line |
 | `censprobe_core.runner.ProbeRunner` | `test_runner_orchestration.py` | 9 | `asyncio.gather(return_exceptions=True)` изолирует упавшие модули, `module_failures` появляется в `_summarize`, enabled/disabled-фильтрация, parallel + serial phase, registry-driven lookup |
 | `censprobe_core.scoring` | `test_scoring.py` | 35 | `_ok_pct` / `_latency_to_score` / `_protocol_reachability` / `_recommend_protocols` (priority order, signature-blocked filter), `compute_scores` (empty results / all-OK / all-blocked / mixed / listener-fallback / weights ≠ 1.0), log-line `entry=N/A` rendering when `listener_session_count == 0` |
-| `censprobe_core.subcategories.derive` | `test_subcategories.py` | 10 | все 4 уровня (prefix → suffix → substring → name override), unknown name → fallback |
+| `censprobe_core.subcategories.derive` | `test_subcategories.py` | 35 | все 4 уровня (prefix → suffix → substring → name override), unknown name → fallback |
 | `censprobe_core.targets` | `test_targets_load.py` | 20 | `Target`, `CfHttpTarget` host/domain coercion, `TelegramDC.ports` required + min_length=1, `load_targets()` (auto-discovery, explicit files, module_owned exclusion, malformed YAML warn-skip, non-mapping, symlink rejection), `TargetSet` views (`domains` dedup+sort, `tcp_targets`, `tls_targets`, `http_targets`) |
 | `censprobe_core.modules.telegram._test_dc_port` | `test_telegram_frame.py` | 1 | байт-точная сверка MTProto abridged-transport frame |
-| `censprobe_core.utils.validate_id` | `test_utils_validate_id.py` | 7 | path-traversal (`..`, `/`, `\`), `\x00`, U+200B, empty, max length, valid IDs |
+| `censprobe_core.modules.telegram` (DC enumeration) | `test_telegram_enumerate.py` | 6 | DC × IP-family × port matrix expansion |
+| `censprobe_core.utils.validate_id` | `test_utils_validate_id.py` | 27 | path-traversal (`..`, `/`, `\`), `\x00`, U+200B, empty, max length, valid IDs |
+| `censprobe_core.modules.dns._cert_san_covers_domain_family` | `test_dns_cert_san.py` | 18 | wildcard-apex relaxation, single-label match, RFC 6125 |
+| `censprobe_core.modules.tls._pick_neutral_sni` | `test_tls_neutral_sni.py` | 17 | per-IP-family neutral SNI selection (Cloudflare/Akamai/AWS prefixes) |
+| `censprobe_core.modules.http._verdict_from_response` (basic) | `test_http_classify.py` | 7 | 200/expected_status, 403/451 + valid_tls → `GEOBLOCK_NOT_CENSORSHIP` |
 
-#### Mocked-unit modules (`tests/modules/`, 10 файлов, 100 тестов)
+#### Mocked-unit modules (`tests/modules/`, 10 файлов, 99 тестов)
 
 | Src-модуль | Тест-файл | Тестов | Что покрыто |
 |------------|-----------|-------:|-------------|
 | `censprobe_core.modules.cloudflare` (builders) | `test_cloudflare_packets.py` | 12 | `_build_quic_vn_trigger` (long-header version=0x00000001, dst_cid_len, packet number 0), `_build_masque_probe_packet` (UDP encap, length, CID), `_build_wg_handshake_init` (148-byte payload, message_type=1, ephemeral key shape) |
 | `censprobe_core.modules.dns` | `test_dns_helpers.py` | 10 | `_parse_first_nameserver` (resolv.conf parsing), `_get_isp_resolver` (systemd-resolved fallback chain) |
-| `censprobe_core.modules.dns._cert_san_covers_domain_family` | `test_dns_cert_san.py` | 11 | wildcard-apex relaxation (`*.dw.com` ⊃ `dw.com`), single-label wildcard match, two-label rejection per RFC 6125, unrelated-wildcard MITM still rejected, IP-SAN ignored for DNS targets, case-insensitivity, trailing-dot normalisation |
-| `censprobe_core.modules.http._verdict_from_response` | `test_http_verdict.py` | 10 | 200/expected_status, 403/451 + valid_tls → `GEOBLOCK_NOT_CENSORSHIP` (порядок проверок load-bearing), body length / cap |
-| `censprobe_core.modules.middlebox._test_header_manipulation` | `test_middlebox_parsing.py` | 3 | OONI-style header field manipulation parsing |
+| `censprobe_core.modules.http._verdict_from_response` | `test_http_verdict.py` | 20 | 200/expected_status, 403/451 + valid_tls → `GEOBLOCK_NOT_CENSORSHIP` (порядок проверок load-bearing), body length / cap |
+| `censprobe_core.modules.middlebox._test_header_manipulation` | `test_middlebox_parsing.py` | 7 | OONI-style header field manipulation parsing |
 | `censprobe_core.modules.tcp` | `test_tcp.py` | 11 | `_single_tcp_attempt` (OK / IP_DROPPED / REFUSED / fast-RST → SUSPECTED RST_INJECTED только в RU vantage), `_majority` aggregator (tie-breaker, all-error, single result) |
 | `censprobe_core.modules.telegram` (`_compute_health_score`, `_ok_ratio`) | `test_telegram_health.py` | 11 | weighted avg dc:55%/web:25%/cdn:20%, `_ok_ratio` empty/all-OK/mixed |
 | `censprobe_core.modules.telegram` (`_compile_owned_patterns`, `_match_owned_cert`) | `test_telegram_owned_cert.py` | 8 | RFC 6125 wildcard semantics — single label match, no embedded wildcards, SAN/CN matching против `owned_cert_patterns` |
 | `censprobe_core.modules.throttling.run_throttling_tests` | `test_throttling_vantage.py` | 3 | off-vantage → INCONCLUSIVE marker (not real probe); on-vantage → real probe invoked with cfg.modules.throttling; `require_censoring_vantage=False` bypasses gate |
-| `censprobe_core.modules.throttling._decide_method_b_verdict` | `test_throttling_verdict.py` | 7 | trigger < 0.25 × min(correct, typo) → `YOUTUBE_SNI_THROTTLED`, INCONCLUSIVE при bw=0, OK иначе, division-by-zero |
-| `censprobe_core.modules.tls._attribute_tls_failure` | `test_tls_attribution.py` | 4 | SNI-blocked vs cert-mismatch vs network-error attribution |
-| `censprobe_core.modules.tls._pick_neutral_sni` | `test_tls_neutral_sni.py` | 17 | per-IP-family neutral SNI selection: Cloudflare/default → `cloudflare.com`, Akamai (2.16/13, 23/12, 104.64/10) → `www.akamai.com`, AWS CloudFront (17 prefixes incl. 13.249/16) → `aws.amazon.com`, malformed IP → safe fallback |
+| `censprobe_core.modules.throttling._decide_method_b_verdict` | `test_throttling_verdict.py` | 11 | trigger < 0.25 × min(correct, typo) → `YOUTUBE_SNI_THROTTLED`, INCONCLUSIVE при bw=0, OK иначе, division-by-zero |
+| `censprobe_core.modules.tls._attribute_tls_failure` | `test_tls_attribution.py` | 7 | SNI-blocked vs cert-mismatch vs network-error attribution |
 
 #### Property-based (`tests/property/`, 3 файла, 12 тестов)
 
@@ -54,7 +57,7 @@
 | `censprobe_core.subcategories.derive` | `test_subcategories_property.py` | 4 | для любого test_name результат непуст и принадлежит замкнутому множеству |
 | `censprobe_core.utils.validate_id` | `test_validate_id_property.py` | 4 | accept-set / reject-set дискриминируются |
 
-**Probe-core total: 26 файлов, 318 тестов.**
+**Probe-core total: 27 файлов, 367 тестов.**
 
 ---
 
@@ -73,11 +76,16 @@
 | Src-модуль | Тест-файл | Тестов | Что покрыто |
 |------------|-----------|-------:|-------------|
 | `censprobe_listener` (whole pkg) | `unit/test_smoke_imports.py` | 1 | submodule import |
-| `censprobe_listener.credentials._awg_magic_headers`, `_apply_ports` | `unit/test_credentials_constraints.py` | 6 | H1..H4 pairwise distinct + не в `{1,2,3,4}`, S1+56 ≠ S2, `_apply_ports` complete-map требование |
+| `censprobe_listener.credentials._awg_magic_headers`, `_apply_ports` | `unit/test_credentials_constraints.py` | 153 | H1..H4 pairwise distinct + не в `{1,2,3,4}`, S1+56 ≠ S2, `_apply_ports` complete-map требование (heavily parametrized — 50 итераций × несколько inv проверок) |
 | `censprobe_listener.credentials.creds_to_yaml`, `ProtocolCredentials` | `unit/test_credentials_yaml_roundtrip.py` | 14 | round-trip всех секций (включая `mtproto_proxy_alt` и `mtproto_orig` с `dd<32-hex>` секретом без SNI hex-suffix) без `wg`/`xray`/`openvpn` (synthetic creds), `enabled_protocols` filter, server-private fields НЕ leak в YAML, `_protocols_enabled` echo, alt-секрет независим от primary, mtproto_orig секрет независим от обоих mtg |
+| `censprobe_listener.preflight` | `unit/test_preflight.py` | 14 | conntrack health (`_check_conntrack` low-max + NOTRACK downgrade, high-water warn, missing /proc skip), `_check_iptables_capability` (no PATH = warn, rule-absent = ok proves CAP_NET_ADMIN, EPERM = warn with hint), `_cleanup_orphan_rules` (no rules → ok, orphans deleted via `-A→-D` conversion), `_check_telegram_dc_reach` (3 DC parallel TCP, all-unreachable warn), `run_preflight` orchestrator order |
+| `censprobe_listener.cred_server.CredServer` (snapshot endpoint) | `unit/test_cred_server_snapshot.py` | 9 | `/snapshot` bearer-token auth (401 / 403 / 200 paths), lifecycle (503 before `attach_responders` and after `detach_responders`), multi-serve (no exhaustion), per-protocol error surfacing (one responder's `live_snapshot` raising → typed `error` field, others still serialised), 404 on unrelated paths |
+| `censprobe_listener.openvpn_responder` | `unit/test_openvpn_status_parsing.py` | 18 | scanner-noise + tun-noise rejection (only `Auth read bytes` is unforgeable), 1500-byte fallback for hosts without iptables, **iptables INPUT counter AND-gated against `handshake_count > 0`** (Bug B regression: `data_pkts=8 + Auth=0 → not data_transfer_ok`), **`_max_auth_bytes_seen` latch** (real handshake captured before peer aged out via `keepalive 60` → counter zeroed → latched value still surfaces handshake) |
+| `censprobe_listener.mtproto_orig_responder` | `unit/test_mtproto_orig_responder.py` | 5 | secret parsing (dd-prefix stripped for `-S` argv), iptables OUTPUT PSH+ACK rule shape, idempotent re-install path |
+| `censprobe_listener` handshake-pattern snapshot | `unit/test_handshake_pattern_snapshot.py` | 6 | regression: each responder uses the documented kernel-counter shape (mtproto-orig PSH+ACK iptables rule, openvpn UDP length filter, mtg PSH+ACK on OUTPUT) — guards against silent regression on rule semantics |
 | `censprobe_listener.credentials._awg_magic_headers` | `property/test_credentials_property.py` | 4 | Hypothesis @settings(derandomize=True, max_examples=500) на AWG header invariants + S-сравнение |
 
-**Listener total: 4 файла, 172 collected test.** Большая часть — `parametrize`-расширения в `test_credentials_constraints.py` (50 итераций × 3 проверки AWG-инвариантов). Subprocess-respondery (ss/vless/hysteria/openvpn/wg/mtproxy/mtproto-proxy-orig) и `cred_server.CredServer` не покрыты pytest'ом — verification через `e2e-dashboard` (на каждый push/PR) или ручной запуск.
+**Listener total: 9 файлов, 224 collected test.** Большая часть — `parametrize`-расширения в `test_credentials_constraints.py`. Subprocess-respondery (ss/vless/hysteria/openvpn/wg) verifyются via `e2e-dashboard` или ручной запуск. `cred_server.CredServer` POW покрывает только snapshot endpoint; `_serve_creds` остаётся покрытым только E2E.
 
 ---
 
@@ -86,8 +94,10 @@
 | Src-модуль | Тест-файл | Тестов | Что покрыто |
 |------------|-----------|-------:|-------------|
 | `censprobe_client` (whole pkg) | `unit/test_smoke_imports.py` | 1 | submodule import |
+| `censprobe_client.main` (cross-verification helpers) | `unit/test_cross_verification.py` | 10 | `_listener_verdict` mirrors `ProtocolResult.finalize` (handshake+data ⇒ OK, handshake-only ⇒ HANDSHAKE_ONLY, no handshake ⇒ BLOCKED, scanner-pattern data without handshake ⇒ still BLOCKED); `_agreed_verdict` listener-wins matrix — both-OK no note, client-overconfident → "client overread", listener-OK + client-not → "listener saw data", other disagreements → `client=X` note |
+| `censprobe_client.main` (retry policy) | `unit/test_retry.py` | 20 | `_pinned_get_with_retry`: first-attempt success no retry, transient-then-success, exhausted retries propagate `_TransientEndpointError`, permanent (`_PermanentEndpointError`) short-circuits on first attempt, `ValueError` (cert-format input error) propagates without retry; HTTP status classification matrix (5xx + 408 → transient; 4xx → permanent; malformed status line → permanent; non-numeric → permanent) |
 
-**Client total: 1 файл, 1 тест.** Probe-dispatch и main CLI domain-тестами не покрыты.
+**Client total: 3 файла, 31 тест.** Probe-dispatch и main CLI orchestration domain-тестами не покрыты — verifycaция via end-to-end run.
 
 ---
 
@@ -146,13 +156,13 @@
 
 | Tree | Файлы | Тестов (collected) | Покрытие |
 |------|-------:|-------:|----------|
-| `packages/probe-core/tests` | 26 | 318 | плотное (config, scoring, subcategories, runner, все 8 модулей измерений, credentials_reader) |
+| `packages/probe-core/tests` | 27 | 367 | плотное (config, scoring, subcategories, runner, все 8 модулей измерений, credentials_reader, protocol_probes helpers + ping_echo + mtproto BLOCKED-on-timeout) |
 | `packages/solo/tests` | 1 | 1 | smoke-only |
-| `packages/listener/tests` | 4 | 171 | credentials + AWG invariants (parametrize-heavy); respondery без покрытия |
-| `packages/client/tests` | 1 | 1 | smoke-only |
+| `packages/listener/tests` | 9 | 224 | credentials + AWG invariants (parametrize-heavy), preflight checks, openvpn AND-gate + auth-bytes latch, mtproto-orig responder, cred_server `/snapshot` endpoint |
+| `packages/client/tests` | 3 | 31 | smoke + cross-verification helpers + retry policy (transient/permanent classification) |
 | `packages/dashboard/sync-api/tests` | 8 | 99 | parser + endpoints + DB schema |
 | `tests/` (workspace) | 6 | 16 | contracts + snapshots + e2e (`e2e-dashboard` job, 2 deselected по дефолту) |
-| **Total** | **46** | **335** (`grep -c def test_`) / **606** (после parametrize, из них 604 default + 2 deselected e2e) | — |
+| **Total** | **55** | **738** (после parametrize, из них 736 default + 2 deselected e2e) | — |
 
 ---
 
@@ -161,16 +171,16 @@
 ### Высокий приоритет
 
 - **`packages/solo/src/censprobe_solo/main.py`** — Click CLI, orchestration. Нет тестов на argument parsing, CLI flag handling, server_meta caching, report writing.
-- **`packages/listener/src/censprobe_listener/cred_server.py`** — TLS-pinning HTTPS endpoint, one-shot bearer token, hmac.compare_digest. Криптографически чувствительная зона.
-- **`packages/client/src/censprobe_client/main.py`** — fetch credentials, jitter, dispatch. Нет тестов на `_fetch_credentials` (TLS cert SHA-256 mismatch reject).
+- **`packages/listener/src/censprobe_listener/cred_server.py` (creds endpoint)** — `/snapshot` lifecycle и serialisation покрыты unit-тестом `test_cred_server_snapshot.py`; `/creds` (one-shot bearer token, single-use exhaustion, client_ip capture) и сам TLS-pinning + cert-генерация остаются покрыты только через `e2e-dashboard` и ручные прогоны.
 - **`packages/probe-core/src/censprobe_core/server_meta.py`** — `detect_server_meta` orchestration, ipapi.is enrichment fallback chains.
 
 ### Средний приоритет
 
-- **Listener responder lifecycle** — `_responder_base` (mkdtemp → 0o600 config → spawn → wait), `ss/vless/hysteria/openvpn/wg/mtproxy` wrappers. Subprocess-heavy, требует extensive `mocker.patch("asyncio.create_subprocess_exec")`.
+- **Listener responder lifecycle** — `_responder_base` (mkdtemp → 0o600 config → spawn → wait), `ss/vless/hysteria/wg` wrappers. Subprocess-heavy, требует extensive `mocker.patch("asyncio.create_subprocess_exec")`. **`openvpn_responder` (status parsing + AND-gate + auth-latch) и `mtproto_orig_responder` (PSH+ACK rule shape) покрыты unit-тестами.**
 - **`modules/dns.py` высокоуровневый `run_dns_tests`** — есть тесты helpers, но не сама ladder ISP→public→DoH→DoT с полной CERTainty-attribution.
 - **`modules/tls.py` высокоуровневый `run_tls_tests`** — есть `_attribute_tls_failure` unit-тест, но не блок paired blocked/neutral SNI handshake.
 - **`modules/http.py` высокоуровневый `run_http_tests`** — есть `_verdict_from_response`, но не сам fetch loop с body cap и redirect handling.
+- **`packages/client/src/censprobe_client/main.py` orchestration** — `_async_main` flow (probe ordering, jitter, `_print_cross_verification` rendering), `_pinned_get` сама I/O-функция (TLS cert SHA-256 mismatch reject, bearer token roundtrip) покрыты только через end-to-end. **Pure helpers (`_listener_verdict`, `_agreed_verdict`, `_pinned_get_with_retry`, status-code classification) покрыты unit-тестами.**
 
 ### Низкий приоритет (косвенно покрыто)
 
@@ -194,7 +204,7 @@
 | **7. Heavy push/PR jobs** ✅ | `e2e-dashboard` (sync-api build + compose up), `network-tests` placeholder, `trivy-fs` в `security-fast`, `codeql.yml` weekly. Изначально жили в `nightly.yml`; nightly целиком удалён вместе с image-registry CVE сканированием. | все три job'а зелёные на main |
 | **8. Maintenance posture** 🔄 ongoing | Каждую неделю +1 модуль остальных пакетов на mypy strict; новый модуль = новый тест-файл с минимум 1 OK + 1 BLOCKED | — |
 
-Этапы 3 (mocked unit для всех 8 модулей измерений) и 8 (тесты для solo/listener/client domain logic) ещё не завершены — отсюда coverage 38.9% на новый код. Тестовый suite растёт с каждым PR.
+Этапы 3 (mocked unit для всех 8 модулей измерений) и 8 (тесты для solo/listener/client domain logic) ещё не завершены, но прогрессируют — 5 из 9 listener-модулей (preflight, openvpn-responder, mtproto-orig-responder, cred_server snapshot endpoint, handshake-pattern snapshot) и 2 client-helper модуля (cross-verification, retry-policy) перешли с smoke-only на полный unit-coverage (см. таблицы выше). Тестовый suite растёт с каждым PR.
 
 ---
 
@@ -206,7 +216,7 @@
 
 | Job | Бюджет | Что запускает |
 |-----|--------|---------------|
-| `lint` | ~30 с | `ruff check .` + `ruff format --check .` (E/F/W/B/I/UP/S правила, ignore S101/S404/S603/S607); `yamllint` (`.github/`, `targets/`, `censprobe.yaml`, `docker-compose.yml`); `actionlint` (workflow YAML); `hadolint` рекурсивно (`failure-threshold: warning`, ignore DL3008/DL3003); `mypy strict` для всего `packages/*/src` (47 файлов) |
+| `lint` | ~30 с | `ruff check .` + `ruff format --check .` (E/F/W/B/I/UP/S правила, ignore S101/S404/S603/S607); `yamllint` (`.github/`, `targets/`, `censprobe.yaml`, `docker-compose.yml`); `actionlint` (workflow YAML); `hadolint` рекурсивно (`failure-threshold: warning`, ignore DL3008/DL3003); `mypy strict` для всего `packages/*/src` (51 файл) |
 | `validate-config` | ~25 с | inline Python — `load_config(Path("."))` + `load_targets(Path("targets"))` с capture WARNING-уровня логов и promotion в errors |
 | `test (probe-core)` `test (solo)` `test (listener)` `test (client)` `test (sync-api)` | matrix, ~25–60 с per entry | `pytest <pkg>/tests --cov --cov-report=xml --junitxml=junit.xml -v` с реальным `services: postgres:16-alpine`. Артефакты `coverage-${slug}.xml` + `junit-${slug}.xml` загружаются для SonarCloud |
 | `cross-package-tests` | ~30 с | `pytest tests/contracts tests/snapshots --cov=censprobe_core` — Grafana ↔ subcategories contract, censprobe.yaml round-trip, targets/*.yaml validate, JSON Schema + wire-format byte snapshots. Coverage загружается под `coverage-cross.xml` для Sonar |
@@ -264,7 +274,7 @@
   - `censprobe_listener.{ss_responder, _responder_dispatch, vless_reality_wrapper, hysteria_wrapper, openvpn_responder, mtproxy_responder, wg_responder, echo_server, credentials, cred_server, _responder_base, main}`.
   - `censprobe_client.{_probe_dispatch, main}`.
   - `censprobe_solo.main`.
-- CI один раз: `mypy packages/probe-core/src packages/solo/src packages/listener/src packages/client/src packages/dashboard/sync-api/src` — 47 файлов всё strict.
+- CI один раз: `mypy packages/probe-core/src packages/solo/src packages/listener/src packages/client/src packages/dashboard/sync-api/src` — 51 файл всё strict.
 
 ### `pyproject.toml [tool.bandit]`
 
