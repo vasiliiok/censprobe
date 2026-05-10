@@ -41,17 +41,31 @@ class TestConntrackCheck:
         assert result.status == "ok"
         assert "1048576" in result.message
 
-    def test_low_max_warns_with_sysctl_fix(
+    def test_low_max_warns_when_no_notrack(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         # 8192 is the Yandex Cloud Ubuntu 24.04 default that bit us in
-        # production — keep the literal pinned.
+        # production — keep the literal pinned. Without NOTRACK on the
+        # VPN ports, this is a real risk and surfaces as warn.
         self._wire_proc(monkeypatch, tmp_path, max_v=8192, count_v=100)
-        result = preflight._check_conntrack()
+        result = preflight._check_conntrack(notrack_installed=False)
         assert result.status == "warn"
         assert "nf_conntrack_max=8192" in result.message
-        assert "sysctl" in result.message
         assert "1048576" in result.message  # recommended value
+        assert "sysctl" in result.message
+
+    def test_low_max_downgraded_to_ok_when_notrack_installed(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # When NOTRACK is in place on VPN UDP ports, a low conntrack
+        # max no longer threatens probe verdicts — VPN flows skip
+        # conntrack entirely. The check downgrades to ok-with-advisory.
+        self._wire_proc(monkeypatch, tmp_path, max_v=8192, count_v=100)
+        result = preflight._check_conntrack(notrack_installed=True)
+        assert result.status == "ok"
+        assert "VPN reachability is unaffected" in result.message
+        # Operator still gets the host-side fix hint for completeness.
+        assert "1048576" in result.message
 
     def test_high_water_warns(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         self._wire_proc(monkeypatch, tmp_path, max_v=1_048_576, count_v=600_000)
@@ -84,6 +98,10 @@ class TestRunPreflight:
 
         results = preflight.run_preflight(udp_ports=[1194, 51820, 51821, 443])
         names = [r.name for r in results]
+        # Order matters: NOTRACK runs first so its outcome can downgrade
+        # the conntrack severity, but the conntrack result is *reported*
+        # first because operators read top-down and the conntrack state
+        # is the more load-bearing signal.
         assert names == ["conntrack", "conntrack-dmesg", "notrack-autosetup"]
         # No warnings on a healthy host with stubbed-out tools.
         assert all(r.status in {"ok", "skip"} for r in results)

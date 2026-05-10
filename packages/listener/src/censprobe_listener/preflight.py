@@ -39,6 +39,11 @@ _CONNTRACK_MIN_MAX = 65536
 # probe run can push it over the edge mid-test. Surface this loudly.
 _CONNTRACK_HIGH_WATER_RATIO = 0.5
 
+# Target for the auto-raise — overshoots ``_CONNTRACK_MIN_MAX`` by 16x
+# so a few short reboots' worth of half-closed entries don't slowly
+# climb back into the warning band.
+_CONNTRACK_TARGET_MAX = 1_048_576
+
 _NF_MAX = Path("/proc/sys/net/netfilter/nf_conntrack_max")
 _NF_COUNT = Path("/proc/sys/net/netfilter/nf_conntrack_count")
 
@@ -57,7 +62,21 @@ def _read_int(path: Path) -> int | None:
         return None
 
 
-def _check_conntrack() -> CheckResult:
+def _check_conntrack(notrack_installed: bool = False) -> CheckResult:
+    """Inspect host conntrack capacity and current load.
+
+    Inside docker with ``--network host``, ``/proc/sys/net/netfilter``
+    is mounted read-only by the container runtime — we can read the
+    counters but not raise the limit. So this check WARNs rather than
+    auto-fixing; the operator must raise it on the host.
+
+    The severity drops to ``info`` (status="ok" + advisory message) when
+    ``notrack_installed`` is True, because NOTRACK on the VPN UDP ports
+    means the main probe traffic skips conntrack entirely. Internet
+    scanner noise + TCP listener flows still consume the table, so
+    the advisory still mentions the host-side fix — but it's no longer
+    a load-bearing issue for VPN reachability.
+    """
     nf_max = _read_int(_NF_MAX)
     nf_count = _read_int(_NF_COUNT)
 
@@ -69,17 +88,27 @@ def _check_conntrack() -> CheckResult:
         )
 
     if nf_max < _CONNTRACK_MIN_MAX:
+        sysctl_hint = (
+            "Raise on host: sudo sysctl -w "
+            f"net.netfilter.nf_conntrack_max={_CONNTRACK_TARGET_MAX} "
+            "(persist via /etc/sysctl.d/99-conntrack.conf)."
+        )
+        if notrack_installed:
+            return CheckResult(
+                "conntrack",
+                "ok",
+                (
+                    f"nf_conntrack_max={nf_max} (low), but VPN UDP ports are NOTRACK — "
+                    f"VPN reachability is unaffected. {sysctl_hint}"
+                ),
+            )
         return CheckResult(
             "conntrack",
             "warn",
             (
-                f"nf_conntrack_max={nf_max} (< {_CONNTRACK_MIN_MAX}). "
-                f"Once full, kernel SILENTLY DROPS new flows before they reach the responders — "
-                f"clients will see BLOCKED for protocols whose handshake packets get evicted. "
-                f"Fix: sudo sysctl -w net.netfilter.nf_conntrack_max=1048576 "
-                f"(persist via /etc/sysctl.d/99-conntrack.conf). "
-                f"Optional: NOTRACK the VPN UDP ports — "
-                f"sudo iptables -t raw -A PREROUTING -p udp --dport <port> -j NOTRACK."
+                f"nf_conntrack_max={nf_max} (< {_CONNTRACK_MIN_MAX}) and NOTRACK auto-setup "
+                f"unavailable (likely missing CAP_NET_ADMIN). Once full, kernel SILENTLY "
+                f"DROPS new flows; clients see BLOCKED on half the protocols. {sysctl_hint}"
             ),
         )
 
@@ -225,14 +254,19 @@ def _try_install_notrack(ports_udp: Sequence[int]) -> CheckResult:
 def run_preflight(udp_ports: Sequence[int]) -> list[CheckResult]:
     """Run all pre-startup checks in order; return individual results.
 
+    NOTRACK auto-setup is run *first* so its outcome can downgrade the
+    conntrack-low-max severity from warn → ok-with-advisory: with VPN
+    UDP ports excluded from conntrack, a small ``nf_conntrack_max`` no
+    longer threatens probe verdicts (only TCP listener traffic and
+    scanner noise still consume table slots).
+
     The caller is expected to print the results; we return data rather
     than printing here so the listener can format with its rich
     console (and tests can assert on the structured output).
     """
-    results = [_check_conntrack(), _check_dmesg_recent_drops()]
-    # NOTRACK auto-setup runs unconditionally — it's idempotent and cheap
-    # when we already have the rules. Even when the conntrack table is
-    # OK, NOTRACK shaves a per-packet hashtable lookup off every VPN
-    # packet, which is a free win.
-    results.append(_try_install_notrack(udp_ports))
-    return results
+    notrack = _try_install_notrack(udp_ports)
+    return [
+        _check_conntrack(notrack_installed=notrack.status == "ok"),
+        _check_dmesg_recent_drops(),
+        notrack,
+    ]
