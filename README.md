@@ -118,6 +118,8 @@ docker compose --profile solo run --rm solo --test-id selectel-spb-001
 
 ### Шаг 2. Listener (RU-сервер, после solo)
 
+> **Только Linux-host.** Listener использует `network_mode: host` + raw sockets + iptables-счётчики для kernel-level cross-validation вердиктов. Docker Desktop на macOS / Windows не пускает контейнер в реальный host-netns, поэтому listener там работать не будет. Запускай на Linux: облачная VM, bare metal, WSL2 с systemd. **Client side** этого ограничения не имеет — пробу из Mac/Windows запускать можно.
+
 ```bash
 docker compose --profile listener run --rm listener \
   --test-id selectel-spb-001 \
@@ -127,6 +129,8 @@ docker compose --profile listener run --rm listener \
 Listener генерирует одноразовые credentials в памяти, поднимает все respondery (OpenVPN UDP, WireGuard UDP, AmneziaWG UDP, Shadowsocks 2022 TCP, VLESS+Reality TCP, Hysteria 2 UDP, MTProto-proxy TCP на 443, MTProto-proxy TCP на alt-порте 8888 для A/B port-vs-L7 DPI), запускает HTTPS endpoint для credentials на `CREDS_PORT` (по умолчанию 8443/tcp) и **печатает готовую команду для запуска client'а**. Скопируйте её — она содержит TEST_ID, SESSION_ID, SERVER_HOST, CREDS_TOKEN и CREDS_CERT_SHA256.
 
 > Открытый порт **8443/tcp** должен быть доступен с клиентской сети. Credentials живут только в памяти процесса, на диск не пишутся.
+
+**Pre-flight checks.** При старте listener печатает результаты быстрых проверок окружения (есть ли CAP_NET_ADMIN, чистоту conntrack, достижимы ли Telegram DC из его egress'а, не висят ли осиротевшие iptables-правила от предыдущего падения). Жёлтая панель `Pre-flight warnings` появится ДО `Listener is ready` если что-то требует вмешательства оператора — каждый WARN содержит конкретную команду исправления.
 
 `SESSION_ID`: формат `client-<тип>-<провайдер>-<город>`:
 - `client-home-rt-spb` — домашний Ростелеком, СПб

@@ -2,13 +2,21 @@
 preflight.py — Listener-side pre-startup environment checks.
 
 Runs once during listener boot, before responders bind to ports. Surfaces
-silent kernel/host conditions that look like censorship at the client
-side but are actually local resource exhaustion. The canonical example
-is ``nf_conntrack: table full, dropping packet`` — kernel drops new
-flows before they reach userspace, so the listener log is clean while
-every responder mysteriously stops responding to half the protocols.
+silent kernel/host conditions that would otherwise look like censorship
+at the client side but are actually local resource exhaustion or
+listener-side connectivity gaps. Canonical examples:
 
-Each check returns a small status string ("ok" | "warn" | "fail") plus
+* ``nf_conntrack: table full, dropping packet`` — kernel drops new
+  flows before they reach userspace; listener log is clean while every
+  responder mysteriously stops responding.
+* CAP_NET_ADMIN missing — iptables counters can't install, mtproto_*
+  / openvpn data_transfer_ok stays False even on successful probes.
+* Telegram DC unreachable from listener egress — mtproto_proxy /
+  mtproto_orig probes timeout on the resPQ leg, returning
+  HANDSHAKE_ONLY. Without this preflight the operator can't tell
+  "client-side DPI" apart from "my listener can't reach DCs".
+
+Each check returns a small status string ("ok" | "warn" | "skip") plus
 a human-readable message. Listener startup never *aborts* on a warning
 — operators may legitimately run on a constrained VM and not be able
 to fix sysctls — but every WARN is printed loudly so the user gets the
@@ -17,6 +25,8 @@ chance to fix it before puzzling over the result table.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 import shutil
 import subprocess  # noqa: S404 — listener already shells out elsewhere
@@ -46,6 +56,21 @@ _CONNTRACK_TARGET_MAX = 1_048_576
 
 _NF_MAX = Path("/proc/sys/net/netfilter/nf_conntrack_max")
 _NF_COUNT = Path("/proc/sys/net/netfilter/nf_conntrack_count")
+
+# Public Telegram DC IPv4 addresses. Sourced from
+# ``targets/telegram.yaml`` (which the solo package treats as
+# canonical) — duplicated here as a literal because the listener
+# image doesn't volume-mount the targets/ dir during all
+# deployments and we want this preflight to be self-contained.
+# Three DCs is enough to distinguish "all blocked" (all 3 fail)
+# from "one DC moved" (1-2 fail). If Telegram migrates an IP we
+# tolerate up to 2 stale entries before this preflight gives a
+# false WARN — refresh by re-reading the YAML on bump.
+_TELEGRAM_DC_PROBES: tuple[tuple[str, int, str], ...] = (
+    ("149.154.175.53", 443, "DC1 pluto"),
+    ("149.154.167.51", 443, "DC2 venus"),
+    ("149.154.175.100", 443, "DC3 aurora"),
+)
 
 
 @dataclass(frozen=True)
@@ -251,22 +276,238 @@ def _try_install_notrack(ports_udp: Sequence[int]) -> CheckResult:
     return CheckResult("notrack-autosetup", "skip", "no UDP ports to NOTRACK")
 
 
-def run_preflight(udp_ports: Sequence[int]) -> list[CheckResult]:
+def _check_iptables_capability() -> CheckResult:
+    """Verify the container has CAP_NET_ADMIN by running a benign
+    iptables operation.
+
+    Method: ``iptables -C OUTPUT <fake rule>`` — when the rule is
+    absent (it always is, the comment is a session-fresh literal),
+    iptables returns rc=1 with the message "Bad rule (does a matching
+    rule exist in that chain?)". rc=1 means "command worked, rule
+    just isn't there", which proves CAP_NET_ADMIN is effective. Other
+    non-zero codes indicate capability or privilege failure (typical
+    EPERM message: "Operation not permitted"), and a warning is
+    surfaced so the operator immediately sees that the listener will
+    NOT be able to install handshake counters and the listener-side
+    verdicts will degrade to ``HANDSHAKE_ONLY`` for mtproto_* and
+    fall back to the conservative auth-read-byte heuristic for openvpn.
+    """
+    if shutil.which("iptables") is None:
+        return CheckResult(
+            "iptables-cap",
+            "warn",
+            (
+                "iptables not in PATH — kernel-level handshake counters "
+                "won't install. mtproto_proxy/_alt/_orig will report "
+                "data_transfer_ok=False even on successful probes; "
+                "openvpn falls back to the auth-read-byte heuristic. "
+                "On Alpine: `apk add iptables`."
+            ),
+        )
+    try:
+        proc = subprocess.run(  # noqa: S603 — fixed argv
+            [
+                "iptables",
+                "-C",
+                "OUTPUT",
+                "-p",
+                "tcp",
+                "--sport",
+                "65535",
+                "-m",
+                "comment",
+                "--comment",
+                "censprobe-cap-probe",
+                "-j",
+                "ACCEPT",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (subprocess.SubprocessError, OSError) as e:
+        return CheckResult(
+            "iptables-cap",
+            "warn",
+            f"iptables -C raised {type(e).__name__} — counter installs will fail.",
+        )
+
+    err = proc.stderr.strip().lower()
+    if proc.returncode == 1 and (
+        "matching rule exist" in err or "does a matching rule" in err or err == ""
+    ):
+        return CheckResult(
+            "iptables-cap", "ok", "iptables operations permitted (counters available)"
+        )
+    if "permission" in err or "operation not permitted" in err:
+        return CheckResult(
+            "iptables-cap",
+            "warn",
+            (
+                "iptables operations refused — CAP_NET_ADMIN missing. "
+                "Listener cannot install kernel-level handshake counters; "
+                "mtproto_* / openvpn data_transfer_ok will report False even "
+                "on successful probes. Add `cap_add: [NET_ADMIN, NET_RAW]` to "
+                "docker-compose.yml or run with `--cap-add=NET_ADMIN`."
+            ),
+        )
+    return CheckResult(
+        "iptables-cap",
+        "warn",
+        f"iptables -C unexpected outcome (rc={proc.returncode}, err={err[:120]!r}); "
+        f"counter installs may fail.",
+    )
+
+
+def _cleanup_orphan_rules() -> CheckResult:
+    """Delete leftover ``censprobe-*`` iptables/ip6tables rules from
+    a previous crashed listener run.
+
+    Each responder removes its rule on graceful shutdown (``stop()``),
+    but a SIGKILL or host crash leaves the rule in the kernel. Over
+    many restart cycles they accumulate, slowing ``iptables -L`` and
+    cluttering the host firewall view. This check parses
+    ``iptables -S`` output, identifies rules whose comment starts
+    with ``censprobe-`` (our naming convention), and deletes each by
+    flipping the ``-A`` to ``-D`` and re-running iptables. Also runs
+    against ``ip6tables`` if available.
+
+    Idempotent: if no orphans exist, this is a no-op.
+    """
+    deleted_total = 0
+    skipped_families: list[str] = []
+    for cmd in ("iptables", "ip6tables"):
+        if shutil.which(cmd) is None:
+            skipped_families.append(cmd)
+            continue
+        try:
+            listing = subprocess.run(  # noqa: S603 — fixed argv
+                [cmd, "-S"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+        except (subprocess.SubprocessError, OSError):
+            continue
+        if listing.returncode != 0:
+            continue
+        for line in listing.stdout.splitlines():
+            # Lines starting with ``-A`` are rules in append form. Only
+            # ours carry the ``censprobe-`` comment marker.
+            if not line.startswith("-A "):
+                continue
+            if "censprobe-" not in line:
+                continue
+            # Convert ``-A CHAIN ...`` into ``-D CHAIN ...`` and re-run.
+            del_args = line.split()
+            del_args[0] = "-D"
+            try:
+                sub = subprocess.run(  # noqa: S603 — args derived from iptables -S
+                    [cmd, *del_args],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    check=False,
+                )
+            except (subprocess.SubprocessError, OSError):
+                continue
+            if sub.returncode == 0:
+                deleted_total += 1
+                logger.info("preflight: removed orphan %s rule (%s)", cmd, line[:80])
+
+    if deleted_total > 0:
+        return CheckResult(
+            "orphan-rules",
+            "ok",
+            f"removed {deleted_total} stale censprobe rule(s) from previous run",
+        )
+    if len(skipped_families) == 2:
+        return CheckResult("orphan-rules", "skip", "no iptables/ip6tables on PATH")
+    return CheckResult("orphan-rules", "ok", "no orphan censprobe rules")
+
+
+async def _check_telegram_dc_reach(
+    timeout_s: float = 3.0,
+) -> CheckResult:
+    """Verify the listener egress can TCP-connect to ≥1 Telegram DC.
+
+    ``probe_mtproto_proxy`` and ``probe_mtproto_orig`` now actively
+    exchange a full obfuscated2 + req_pq_multi handshake which mtg /
+    mtproto-proxy(C) RELAY to a real Telegram DC. If the listener
+    can't open TCP to any DC (firewall on the listener host blocking
+    149.154.0.0/16, or ISP-level egress filter), the resPQ never
+    arrives and BOTH probes degrade to HANDSHAKE_ONLY/BLOCKED. That
+    is *correct* (data plane really is broken end-to-end), but
+    surfacing it here at startup distinguishes "client-side DPI"
+    from "my listener can't reach DCs".
+
+    We probe 3 DCs in parallel. ``warn`` if 0/3 reachable; ``ok``
+    otherwise (Telegram load-balances across all 5 DCs, so partial
+    reachability is normally fine).
+    """
+
+    async def _connect(ip: str, port: int) -> bool:
+        try:
+            _, writer = await asyncio.wait_for(asyncio.open_connection(ip, port), timeout=timeout_s)
+        except (TimeoutError, OSError):
+            return False
+        with contextlib.suppress(Exception):
+            writer.close()
+            await writer.wait_closed()
+        return True
+
+    results = await asyncio.gather(*(_connect(ip, port) for ip, port, _ in _TELEGRAM_DC_PROBES))
+    reachable = sum(1 for ok in results if ok)
+    total = len(_TELEGRAM_DC_PROBES)
+    if reachable == 0:
+        names = ", ".join(name for _, _, name in _TELEGRAM_DC_PROBES)
+        return CheckResult(
+            "telegram-dc-reach",
+            "warn",
+            (
+                f"0/{total} Telegram DCs reachable from listener egress ({names}). "
+                f"mtproto_proxy / mtproto_orig probes will report HANDSHAKE_ONLY "
+                f"or BLOCKED — clients see this as 'reachable but DC blocked'. "
+                f"Check the listener's outbound network can reach 149.154.0.0/16 "
+                f"(no upstream firewall, no Telegram-block-at-egress jurisdiction)."
+            ),
+        )
+    return CheckResult(
+        "telegram-dc-reach",
+        "ok",
+        f"{reachable}/{total} Telegram DCs reachable",
+    )
+
+
+async def run_preflight(udp_ports: Sequence[int]) -> list[CheckResult]:
     """Run all pre-startup checks in order; return individual results.
 
-    NOTRACK auto-setup is run *first* so its outcome can downgrade the
-    conntrack-low-max severity from warn → ok-with-advisory: with VPN
-    UDP ports excluded from conntrack, a small ``nf_conntrack_max`` no
-    longer threatens probe verdicts (only TCP listener traffic and
-    scanner noise still consume table slots).
+    Order matters:
+      1. ``orphan-rules`` runs FIRST so subsequent installs aren't
+         shadowed by leftover identically-named rules from a previous
+         crashed listener.
+      2. ``iptables-cap`` exposes "no CAP_NET_ADMIN" loudly so the
+         operator knows the iptables-counter signals will be silent
+         before they go puzzling over verdict mismatches.
+      3. NOTRACK auto-setup ``-A``s our raw-table rules so the rest
+         of the run skips conntrack accounting on VPN UDP ports.
+      4. ``conntrack`` reads the table state — its severity is
+         downgraded to ok-with-advisory when NOTRACK is in place.
+      5. ``conntrack-dmesg`` looks for recent table-full drops.
+      6. ``telegram-dc-reach`` opens TCP to a few Telegram DCs in
+         parallel — informs the operator BEFORE probes run whether
+         the mtproto verdicts will have a working DC backend.
 
-    The caller is expected to print the results; we return data rather
-    than printing here so the listener can format with its rich
-    console (and tests can assert on the structured output).
+    The caller is expected to print the results; we return data
+    rather than printing here so the listener can format with its
+    rich console (and tests can assert on the structured output).
     """
+    orphan = _cleanup_orphan_rules()
+    cap = _check_iptables_capability()
     notrack = _try_install_notrack(udp_ports)
-    return [
-        _check_conntrack(notrack_installed=notrack.status == "ok"),
-        _check_dmesg_recent_drops(),
-        notrack,
-    ]
+    conntrack = _check_conntrack(notrack_installed=notrack.status == "ok")
+    dmesg = _check_dmesg_recent_drops()
+    dc = await _check_telegram_dc_reach()
+    return [orphan, cap, notrack, conntrack, dmesg, dc]

@@ -53,6 +53,19 @@ services:
     # binds, OpenVPN tun device) and for the credentials HTTPS endpoint
     # on TCP 8443. Make sure the firewall on the test server allows
     # inbound TCP 8443 from the client network during the session.
+    #
+    # ── Listener requires a Linux host ────────────────────────────────────
+    # Docker Desktop on macOS / Windows DOES NOT honour ``network_mode: host``
+    # the way Linux does — the container still runs in a synthetic netns
+    # behind a hidden VM, so iptables counters and raw-socket binds are
+    # invisible to the actual host network. The listener will start but:
+    #   * iptables-counter rules tick zero (data_transfer_ok stays False
+    #     for mtproto_proxy/_alt/_orig and openvpn falls back to the
+    #     conservative auth-read-byte heuristic).
+    #   * No external client can reach the listener's ports.
+    # Run the listener on a Linux host (cloud VM, bare metal, WSL2 with
+    # systemd). The CLIENT side has no such constraint and runs fine on
+    # Docker Desktop / Mac / Windows.
     network_mode: host
     cap_add: [NET_ADMIN, NET_RAW]
     # OpenVPN responder needs /dev/net/tun.

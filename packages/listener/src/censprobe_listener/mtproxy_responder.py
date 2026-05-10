@@ -20,7 +20,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import shutil
+
+from censprobe_listener._iptables_counter import (
+    install_counter,
+    read_counter,
+    remove_counter,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -94,14 +99,15 @@ class MTProxyResponder:
             raise RuntimeError(f"mtg failed to start: {tail.decode(errors='replace')}")
 
         self._log_task = asyncio.create_task(self._monitor_output())
-        await self._counter_install()
+        await install_counter("OUTPUT", self._counter_rule_args(), self._counter_comment)
 
     async def stop(self) -> None:
         # Read the iptables counter BEFORE we tear down — the rule's
-        # counters are zeroed when ``_counter_remove`` deletes it.
-        observed = await self._counter_read()
-        self._final_data_packets = observed
-        await self._counter_remove()
+        # counters are zeroed when ``remove_counter`` deletes it. Sums
+        # across iptables + ip6tables so an IPv6 client also flips
+        # ``data_transfer_ok``.
+        self._final_data_packets = await read_counter("OUTPUT", self._counter_comment)
+        await remove_counter("OUTPUT", self._counter_rule_args())
 
         if self._log_task is not None:
             self._log_task.cancel()
@@ -195,9 +201,9 @@ class MTProxyResponder:
         except Exception as e:
             logger.debug("mtg monitor ended: %s", e)
 
-    async def _counter_install(self) -> None:
-        """Install an iptables OUTPUT rule that counts PSH+ACK packets
-        emitted from sport=<self.port>.
+    def _counter_rule_args(self) -> list[str]:
+        """Rule args for the OUTPUT counter that ticks once per data
+        segment mtg emits from ``sport=<self.port>``.
 
         Each TCP segment mtg writes back to a client carrying user-
         plane bytes (WelcomePacket, then post-WelcomePacket relayed
@@ -206,92 +212,17 @@ class MTProxyResponder:
         are skipped — so port scanners that only complete TCP can't
         tick the counter.
 
-        Why: censprobe's ``probe_mtproto_proxy`` now actively
-        exchanges obfuscated2 init + req_pq with the upstream DC via
-        mtg (see ``protocol_probes._exchange_obfuscated2_respq``), so
-        the listener can finally observe whether mtg responded with
-        wire-level data. Before this change ``data_transfer_ok``
-        returned False unconditionally and the listener verdict was
-        always HANDSHAKE_ONLY — the iptables counter is the
-        independent kernel-level signal that turns it into CONNECTED.
+        ``probe_mtproto_proxy`` actively exchanges obfuscated2 init +
+        req_pq with the upstream DC via mtg (see
+        ``protocol_probes._exchange_obfuscated2_respq``); the iptables
+        counter is the independent kernel-level signal that confirms
+        mtg actually emitted bytes — turning the listener verdict
+        from HANDSHAKE_ONLY into CONNECTED.
 
-        No ``-j`` target — counter-only match falls through to other
-        OUTPUT rules a host firewall may have. ``shutil.which``
-        short-circuits the install on hosts without iptables; the
-        property then returns ``False`` and the listener reports
-        HANDSHAKE_ONLY (the pre-change behaviour, equivalent to a
-        regression-safe fallback).
+        Mirrored on ``ip6tables`` by the shared ``install_counter``
+        helper. No ``-j`` target — see ``_iptables_counter`` for the
+        rationale.
         """
-        if shutil.which("iptables") is None:
-            return
-        rule_args = self._counter_rule_args()
-        check = await asyncio.create_subprocess_exec(
-            "iptables",
-            "-C",
-            "OUTPUT",
-            *rule_args,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        if await check.wait() == 0:
-            return
-        add = await asyncio.create_subprocess_exec(
-            "iptables",
-            "-A",
-            "OUTPUT",
-            *rule_args,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        rc = await add.wait()
-        if rc != 0:
-            logger.warning(
-                "mtproto_proxy: iptables counter rule failed (rc=%d) — "
-                "data_transfer_ok will fall back to False; raise CAP_NET_ADMIN",
-                rc,
-            )
-
-    async def _counter_read(self) -> int:
-        if shutil.which("iptables") is None:
-            return 0
-        proc = await asyncio.create_subprocess_exec(
-            "iptables",
-            "-L",
-            "OUTPUT",
-            "-v",
-            "-n",
-            "-x",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        out_b, _ = await proc.communicate()
-        for ln in out_b.decode(errors="replace").splitlines():
-            if self._counter_comment not in ln:
-                continue
-            parts = ln.split()
-            if not parts:
-                continue
-            try:
-                return int(parts[0])
-            except ValueError:
-                return 0
-        return 0
-
-    async def _counter_remove(self) -> None:
-        if shutil.which("iptables") is None:
-            return
-        rule_args = self._counter_rule_args()
-        proc = await asyncio.create_subprocess_exec(
-            "iptables",
-            "-D",
-            "OUTPUT",
-            *rule_args,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        await proc.wait()
-
-    def _counter_rule_args(self) -> list[str]:
         return [
             "-p",
             "tcp",

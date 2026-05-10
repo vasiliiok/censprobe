@@ -11,12 +11,17 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import shutil
 import tempfile
 from pathlib import Path
 
 from censprobe_core.link_utils import delete_iface
 from censprobe_core.utils import write_secret
+
+from censprobe_listener._iptables_counter import (
+    install_counter,
+    read_counter,
+    remove_counter,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +141,7 @@ verb 1
             tail = log_path.read_text(errors="replace") if log_path.exists() else "<no log>"
             raise RuntimeError(f"OpenVPN failed to start:\n{tail[-2000:]}")
         logger.info("OpenVPN responder started on UDP/%d (iface: %s)", self.port, _OVPN_SRV_IFACE)
-        await self._counter_install()
+        await install_counter("INPUT", self._counter_rule_args(), self._counter_comment)
 
     def _read_status(self) -> tuple[int, int]:
         """Parse status file → (handshake_observed, tunnel_bytes).
@@ -228,9 +233,11 @@ verb 1
         # Capture status BEFORE teardown so data_transfer_ok is observable.
         self._final_handshake_count, self._final_bytes_received = self._read_status()
         # Read the iptables data-packet counter while the rule is still
-        # in place (``_counter_remove`` resets the counter to 0).
-        self._final_data_packets = await self._counter_read()
-        await self._counter_remove()
+        # in place (``remove_counter`` deletes the rule and its counter).
+        # Sums across iptables + ip6tables so an IPv6 client also flips
+        # ``data_transfer_ok``.
+        self._final_data_packets = await read_counter("INPUT", self._counter_comment)
+        await remove_counter("INPUT", self._counter_rule_args())
         self._snapshot_taken = True
 
         if self._proc:
@@ -275,92 +282,6 @@ verb 1
             return self._final_handshake_count
         hs, _ = self._read_status()
         return hs
-
-    async def _counter_install(self) -> None:
-        """Install an INPUT rule that counts inbound UDP packets to
-        ``self.port`` whose UDP datagram is at least
-        ``_DATA_INPUT_LENGTH_MIN`` bytes — i.e. larger than any
-        handshake control or keepalive packet observed in static-key
-        mode (see calibration note on ``_DATA_INPUT_LENGTH_MIN``).
-
-        The rule has no ``-j`` target; it only matches and ticks the
-        counter, then falls through to subsequent INPUT rules. We
-        deliberately avoid ``-j ACCEPT`` because that would short-
-        circuit any user-installed firewall on the same port. If
-        CAP_NET_ADMIN is missing or iptables is not on PATH, the
-        whole helper short-circuits and ``data_transfer_ok`` falls
-        back to the old auth-read-byte heuristic — see that property's
-        docstring for why this regression-equivalent behaviour is
-        acceptable.
-        """
-        if shutil.which("iptables") is None:
-            return
-        rule_args = self._counter_rule_args()
-        check = await asyncio.create_subprocess_exec(
-            "iptables",
-            "-C",
-            "INPUT",
-            *rule_args,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        if await check.wait() == 0:
-            return
-        add = await asyncio.create_subprocess_exec(
-            "iptables",
-            "-A",
-            "INPUT",
-            *rule_args,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        rc = await add.wait()
-        if rc != 0:
-            logger.warning(
-                "openvpn: iptables data-counter install failed (rc=%d) — "
-                "data_transfer_ok will fall back to auth-read heuristic",
-                rc,
-            )
-
-    async def _counter_read(self) -> int:
-        if shutil.which("iptables") is None:
-            return 0
-        proc = await asyncio.create_subprocess_exec(
-            "iptables",
-            "-L",
-            "INPUT",
-            "-v",
-            "-n",
-            "-x",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        out_b, _ = await proc.communicate()
-        for ln in out_b.decode(errors="replace").splitlines():
-            if self._counter_comment not in ln:
-                continue
-            parts = ln.split()
-            if not parts:
-                continue
-            try:
-                return int(parts[0])
-            except ValueError:
-                return 0
-        return 0
-
-    async def _counter_remove(self) -> None:
-        if shutil.which("iptables") is None:
-            return
-        rule_args = self._counter_rule_args()
-        proc = await asyncio.create_subprocess_exec(
-            "iptables",
-            "-D",
-            "INPUT",
-            *rule_args,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        await proc.wait()
 
     def _counter_rule_args(self) -> list[str]:
         # ``-m length`` matches against IP+TCP/UDP total length. Our

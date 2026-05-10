@@ -28,8 +28,13 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import shutil
 import socket
+
+from censprobe_listener._iptables_counter import (
+    install_counter,
+    read_counter,
+    remove_counter,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -127,15 +132,17 @@ class MTProxyOrigResponder:
             raise RuntimeError(f"mtproto-proxy failed to start: {tail.decode(errors='replace')}")
 
         self._log_task = asyncio.create_task(self._monitor_output())
-        await self._counter_install()
+        await install_counter("OUTPUT", self._counter_rule_args(), self._counter_comment)
 
     async def stop(self) -> None:
-        # Read the iptables packet counter BEFORE we tear down (the rule
-        # is removed in `_counter_remove`, which zeroes the count).
-        observed = await self._counter_read()
+        # Read the iptables packet counter BEFORE we tear down — the
+        # ``-D`` in ``remove_counter`` drops the rule and its counter
+        # together. Sums across iptables + ip6tables so an IPv6 client
+        # also flips ``data_transfer_ok``.
+        observed = await read_counter("OUTPUT", self._counter_comment)
         if observed > self.connection_count:
             self.connection_count = observed
-        await self._counter_remove()
+        await remove_counter("OUTPUT", self._counter_rule_args())
 
         if self._log_task is not None:
             self._log_task.cancel()
@@ -193,9 +200,9 @@ class MTProxyOrigResponder:
         except Exception as e:
             logger.debug("mtproto-proxy monitor ended: %s", e)
 
-    async def _counter_install(self) -> None:
-        """Install an iptables OUTPUT rule that counts data segments
-        the proxy emits from sport=<self.port>.
+    def _counter_rule_args(self) -> list[str]:
+        """Rule args for the OUTPUT counter that ticks once per data
+        segment the proxy emits from ``sport=<self.port>``.
 
         We count packets where the server emits a TCP segment with
         PSH+ACK set — i.e. a data-bearing response from mtproto-proxy
@@ -203,111 +210,18 @@ class MTProxyOrigResponder:
         produces ≥ 1 such packet (the encrypted resPQ frame, ~165
         bytes inc. headers); failed/garbage clients get only TCP
         control packets (SYN-ACK, bare ACK, RST/FIN) which lack PSH
-        and therefore don't tick the counter. This is a more reliable
-        success signal than stdout-grep for two reasons:
+        and therefore don't tick the counter. This is more reliable
+        than stdout-grep because it works regardless of mtproto-proxy
+        verbosity flags or upstream version, and it's measured at the
+        kernel level *after* the C binary actually wrote bytes onto
+        the wire.
 
-          1. It works regardless of mtproto-proxy verbosity flags or
-             upstream version.
-          2. It's measured at the kernel level *after* the C binary
-             actually wrote bytes onto the wire, so a process that
-             crashes before responding can't false-tick the counter.
-
-        The rule has no ``-j`` target — it's a counter-only match
-        that falls through to subsequent OUTPUT rules. iptables does
-        accept this form (verified against iptables 1.8 on Debian
-        bookworm), and we deliberately avoid ``-j ACCEPT`` because it
-        would short-circuit any user-installed OUTPUT firewall on
-        non-trivial host setups. ``shutil.which`` short-circuits the
-        whole path on hosts without iptables (alpine, macOS dev box)
-        — connection_count then stays 0 and the listener verdict
-        falls back to the stdout-derived behaviour, which is
-        equivalent to the old code path.
+        The shared ``install_counter`` helper installs this on both
+        ``iptables`` and ``ip6tables`` so an IPv6 client also flips
+        ``data_transfer_ok``. The rule has no ``-j`` target — see
+        ``_iptables_counter`` for the rationale on counter-only
+        matches and ``-j ACCEPT`` avoidance.
         """
-        if shutil.which("iptables") is None:
-            return
-        rule_args = self._counter_rule_args()
-        # Idempotent: skip if a leftover rule from a previous run
-        # already matches (shouldn't happen since stop() removes it,
-        # but the listener may have been killed mid-run).
-        check = await asyncio.create_subprocess_exec(
-            "iptables",
-            "-C",
-            "OUTPUT",
-            *rule_args,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        if await check.wait() == 0:
-            return
-        add = await asyncio.create_subprocess_exec(
-            "iptables",
-            "-A",
-            "OUTPUT",
-            *rule_args,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        rc = await add.wait()
-        if rc != 0:
-            # Most common cause: missing CAP_NET_ADMIN. Log once at
-            # WARNING so the operator knows the listener will under-
-            # count handshakes for this protocol; the cross-check
-            # against the client report still surfaces real
-            # blocking, just less precisely.
-            logger.warning(
-                "mtproto_orig: iptables counter rule failed (rc=%d) — "
-                "handshake count will undercount; raise CAP_NET_ADMIN",
-                rc,
-            )
-
-    async def _counter_read(self) -> int:
-        """Read the packet count from our installed counter rule.
-
-        Returns 0 if iptables is unavailable, the rule wasn't
-        installed, or the listing format doesn't contain a parseable
-        first column. ``-x`` disables iptables' "12K"/"1.2M" SI
-        abbreviations so the first column is always a plain integer.
-        """
-        if shutil.which("iptables") is None:
-            return 0
-        proc = await asyncio.create_subprocess_exec(
-            "iptables",
-            "-L",
-            "OUTPUT",
-            "-v",
-            "-n",
-            "-x",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        out_b, _ = await proc.communicate()
-        for ln in out_b.decode(errors="replace").splitlines():
-            if self._counter_comment not in ln:
-                continue
-            parts = ln.split()
-            if not parts:
-                continue
-            try:
-                return int(parts[0])
-            except ValueError:
-                return 0
-        return 0
-
-    async def _counter_remove(self) -> None:
-        if shutil.which("iptables") is None:
-            return
-        rule_args = self._counter_rule_args()
-        proc = await asyncio.create_subprocess_exec(
-            "iptables",
-            "-D",
-            "OUTPUT",
-            *rule_args,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        await proc.wait()
-
-    def _counter_rule_args(self) -> list[str]:
         return [
             "-p",
             "tcp",

@@ -282,7 +282,7 @@ async def _async_main(test_id: str, session_id: str, creds_port: int) -> None:
     # before responders see them). Never aborts startup — operators may
     # not have permission to fix sysctls — but every WARN is loud.
     cfg = get_config()
-    _print_preflight(run_preflight(udp_ports=_listener_udp_ports(cfg.protocols.ports)))
+    _print_preflight(await run_preflight(udp_ports=_listener_udp_ports(cfg.protocols.ports)))
 
     # ── Step 1: Generate fresh credentials in memory ──────────────────────────
     # Each session gets its own one-time credential set; nothing is written
