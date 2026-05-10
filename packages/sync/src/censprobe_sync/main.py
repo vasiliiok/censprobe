@@ -204,7 +204,7 @@ def _is_unroutable(ip: str) -> bool:
 def _query_public_ip_echo() -> str | None:
     for url in _PUBLIC_IP_ECHOES:
         try:
-            with urllib.request.urlopen(url, timeout=_PUBLIC_IP_TIMEOUT_SEC) as r:  # noqa: S310
+            with urllib.request.urlopen(url, timeout=_PUBLIC_IP_TIMEOUT_SEC) as r:  # noqa: S310  # nosec B310
                 ip: str = r.read().decode("ascii", errors="replace").strip()
             ipaddress.IPv4Address(ip)
             return ip

@@ -304,6 +304,7 @@ jobs:
           pip install -e "packages/listener[test]"
           pip install -e "packages/client[test]"
           pip install -e "packages/solo[test]"
+          pip install -e "packages/sync[test]"
           pip install -e "packages/dashboard/sync-api[test]"
 
       - name: pytest -m network
