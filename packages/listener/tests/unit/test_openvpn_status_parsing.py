@@ -211,24 +211,60 @@ def test_data_transfer_ok_true_when_real_data_flowed(tmp_path: Path) -> None:
     assert r.data_transfer_ok is True
 
 
-def test_data_transfer_ok_when_iptables_counter_saw_a_data_packet(tmp_path: Path) -> None:
+def test_data_transfer_ok_when_iptables_counter_saw_data_packets(tmp_path: Path) -> None:
     """The iptables INPUT counter is the canonical signal for short
     probe sessions where Auth-read alone never crosses the legacy
     1500-byte threshold.
 
     Reproduces the GCP→DE clean-path observation on 2026-05-10:
-    Auth-read=364 (handshake control + 0–1 ICMP echoes) is below the
-    fallback threshold, but tcpdump showed three 140-byte data
-    packets reach the responder. ``_final_data_packets >= 1`` flips
-    ``data_transfer_ok`` to True so the listener verdict aligns with
-    the client's OK, even though Auth-read remained "small".
+    Auth-read=337 (handshake control + a few keepalives) is below the
+    fallback threshold, but ping_echo's 3 ICMP echo requests show up
+    as ≥130-byte UDP packets in INPUT. The 2-packet floor (bumped
+    from 1 on 2026-05-10 to defeat single-shot scanner traffic on
+    UDP/1194) flips data_transfer_ok to True once two echoes arrive,
+    so the listener verdict aligns with the client's OK.
     """
     r = _make_responder(tmp_path, _PRODUCTION_HANDSHAKE_PLUS_KEEPALIVE_NO_DATA)
     r._final_handshake_count, r._final_bytes_received = r._read_status()
-    r._final_data_packets = 1  # one ≥130-byte UDP datagram observed
+    r._final_data_packets = 3  # 3 ICMP echo requests (ping_echo default)
     r._snapshot_taken = True
     assert r.connection_count == 1
     assert r.data_transfer_ok is True
+
+
+def test_data_transfer_ok_rejects_scanner_pattern_without_handshake(tmp_path: Path) -> None:
+    """Bug B regression (RU mobile 2026-05-10): listener observed
+    ``handshakes=0, bytes=0, data_pkts=8`` and reported BLOCKED with
+    data_transfer=yes — an inconsistent split. Eight ≥130-B UDP
+    packets came in but none passed HMAC, so they were almost
+    certainly Shodan/RB scanner shots on UDP/1194 on a cloud IP.
+
+    The AND-gate against ``handshake_count > 0`` rejects this pattern:
+    without an authed packet, no data-packet count is trustworthy.
+    """
+    r = _make_responder(tmp_path, _SCANNER_NOISE_ONLY)  # Auth=0
+    r._final_handshake_count, r._final_bytes_received = r._read_status()
+    r._final_data_packets = 8  # well past the threshold, but no auth
+    r._snapshot_taken = True
+    assert r.connection_count == 0
+    assert r.data_transfer_ok is False, (
+        "Without handshake_count > 0, no data-packet count can be "
+        "trusted — must NOT report data_transfer=yes."
+    )
+
+
+def test_data_transfer_ok_rejects_single_scanner_shot_with_handshake(tmp_path: Path) -> None:
+    """A single ≥130-B UDP packet on top of a real handshake is
+    indistinguishable from one scanner artifact during a real session.
+    Threshold 2 keeps the verdict honest.
+    """
+    r = _make_responder(tmp_path, _REAL_HANDSHAKE_NO_DATA)  # Auth=256 → hs=1
+    r._final_handshake_count, r._final_bytes_received = r._read_status()
+    r._final_data_packets = 1  # only one scanner-sized packet
+    r._snapshot_taken = True
+    assert r.connection_count == 1
+    # 1 packet + Auth=256 (< 1500 fallback) → not enough to claim OK.
+    assert r.data_transfer_ok is False
 
 
 def test_data_transfer_ok_falls_back_to_auth_read_when_counter_missing(tmp_path: Path) -> None:

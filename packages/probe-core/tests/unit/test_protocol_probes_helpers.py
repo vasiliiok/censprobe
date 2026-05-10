@@ -402,3 +402,65 @@ class TestValidateResPQ:
         result = _validate_res_pq(body, b"X" * 16)
         assert isinstance(result, ProbeResult)
         assert result.error == "orig_resPQ_nonce_mismatch"
+
+
+class TestExchangeObfuscated2RespQTimeout:
+    """Regression: ``len_timeout_post_init`` (TCP held open + init bytes
+    accepted but no L7 resPQ ever surfaces) MUST verdict as ``BLOCKED``,
+    not ``HANDSHAKE_ONLY``.
+
+    Why: preflight already verified DC reach from the listener host, so
+    a silent stall here is the canonical DPI signature — a third party
+    fingerprinted the obfuscated2 envelope and dropped the data path.
+    The protocol is functionally unusable, which is a confirmed L7
+    block. Treating it as HANDSHAKE_ONLY misled operators into reading
+    \"protocol reachable\" when the protocol could not move data.
+
+    Covers BOTH transport variants:
+      * raw obfuscated2 (``probe_mtproto_orig`` — wrap_inner=False)
+      * faketls-wrapped (``probe_mtproto_proxy``/``_alt`` —
+        wrap_inner=True): timeout while reading the TLS record header
+        for the encrypted-length prefix.
+    """
+
+    @staticmethod
+    def _make_blocking_reader_writer() -> tuple[
+        protocol_probes.asyncio.StreamReader, protocol_probes.asyncio.StreamWriter
+    ]:
+        # A real ``StreamReader`` that never gets data fed into it —
+        # ``readexactly`` will raise ``TimeoutError`` under
+        # ``asyncio.wait_for``. The writer is a stub: ``write`` is a
+        # no-op, ``drain`` returns immediately. We don't need a real
+        # transport; the probe never reads back from the writer.
+        reader = protocol_probes.asyncio.StreamReader()
+        writer = AsyncMock()
+        writer.write = lambda _b: None
+        return reader, writer
+
+    @pytest.mark.asyncio
+    async def test_raw_path_len_timeout_is_blocked(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Squeeze the probe timeout so the test finishes in well under
+        # a second instead of waiting the production 15s constant.
+        monkeypatch.setattr(protocol_probes, "PROBE_TIMEOUT", 0.05)
+        reader, writer = self._make_blocking_reader_writer()
+        result = await protocol_probes._exchange_obfuscated2_respq(
+            reader, writer, secret_key=b"\x00" * 16, wrap_inner_in_tls_record=False
+        )
+        assert isinstance(result, ProbeResult)
+        assert result.verdict == Verdict.BLOCKED
+        assert result.error == "orig_resPQ_len_timeout_post_init"
+
+    @pytest.mark.asyncio
+    async def test_faketls_path_len_timeout_is_blocked(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(protocol_probes, "PROBE_TIMEOUT", 0.05)
+        reader, writer = self._make_blocking_reader_writer()
+        result = await protocol_probes._exchange_obfuscated2_respq(
+            reader, writer, secret_key=b"\x00" * 16, wrap_inner_in_tls_record=True
+        )
+        assert isinstance(result, ProbeResult)
+        assert result.verdict == Verdict.BLOCKED
+        assert result.error == "orig_resPQ_len_timeout_post_init"

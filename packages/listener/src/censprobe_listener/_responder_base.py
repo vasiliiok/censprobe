@@ -39,6 +39,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from censprobe_core.echo_ports import ECHO_PORTS
+from censprobe_core.models import LiveSnapshot
 from censprobe_core.utils import graceful_terminate, write_secret
 
 if TYPE_CHECKING:
@@ -200,3 +201,31 @@ class SubprocessResponder(ABC):
         if self.echo_server is None:
             return False
         return self.echo_server.data_ok(self.proto_label)
+
+    def live_snapshot(self) -> LiveSnapshot:
+        """Live snapshot for the cred-server /snapshot endpoint.
+
+        ``connection_count`` is incremented in ``_monitor_output`` on
+        every handshake-marker line, so reading it any time during
+        the session is correct. Data-phase verdict is derived from
+        the loopback echo server's per-protocol byte counter (same
+        source as the property above) — the snapshot reflects exactly
+        what the listener would commit to ``ProtocolResult`` if the
+        session ended now.
+        """
+        bytes_seen: int | None = None
+        if self.echo_server is not None:
+            try:
+                bytes_seen = int(
+                    self.echo_server.snapshot()
+                    .get(self.proto_label, {})
+                    .get("bytes", 0)
+                    or 0
+                )
+            except (TypeError, ValueError):
+                bytes_seen = None
+        return LiveSnapshot(
+            handshake_count=self.connection_count,
+            data_transfer_ok=self.data_transfer_ok,
+            bytes_received=bytes_seen,
+        )

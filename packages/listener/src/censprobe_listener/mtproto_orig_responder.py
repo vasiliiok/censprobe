@@ -30,9 +30,12 @@ import contextlib
 import logging
 import socket
 
+from censprobe_core.models import LiveSnapshot
+
 from censprobe_listener._iptables_counter import (
     install_counter,
     read_counter,
+    read_counter_sync,
     remove_counter,
 )
 
@@ -243,3 +246,19 @@ class MTProxyOrigResponder:
     @property
     def data_transfer_ok(self) -> bool:
         return self.connection_count > 0
+
+    def live_snapshot(self) -> LiveSnapshot:
+        """Live snapshot for the cred-server /snapshot endpoint.
+
+        ``mtproto-proxy`` (C) emits no per-connection stdout marker at
+        default verbosity, so the iptables PSH-ACK counter is the
+        ONLY ground-truth signal. The handshake_count we surface here
+        is the live counter value — same source the post-stop verdict
+        uses, just sampled mid-session.
+        """
+        live_packets = read_counter_sync("OUTPUT", self._counter_comment)
+        return LiveSnapshot(
+            handshake_count=live_packets,
+            data_transfer_ok=live_packets > 0,
+            data_packets=live_packets,
+        )

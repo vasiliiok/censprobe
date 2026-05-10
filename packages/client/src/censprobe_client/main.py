@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import json
 import logging
 import random
 import socket
@@ -34,7 +35,7 @@ from pathlib import Path
 import click
 from censprobe_core.config import load_config
 from censprobe_core.credentials_reader import parse_protocols_yaml
-from censprobe_core.models import Verdict
+from censprobe_core.models import LiveSnapshot, Verdict
 from censprobe_core.protocol_probes import ProbeResult
 from censprobe_core.protocol_registry import enabled_protocols, known_names
 from rich.console import Console
@@ -144,7 +145,7 @@ def main(
     # test_id / session_id are surfaced in the banner above but aren't
     # consumed by the async core — they were previously forwarded for
     # symmetry, which Sonar S1172 flagged as unused parameters.
-    results = asyncio.run(
+    results, listener_snapshot = asyncio.run(
         _async_main(
             server_host=server_host,
             creds_port=creds_port,
@@ -154,6 +155,7 @@ def main(
         )
     )
     _print_results(results, server_host)
+    _print_cross_verification(results, listener_snapshot)
 
 
 async def _async_main(
@@ -163,7 +165,7 @@ async def _async_main(
     creds_token: str,
     creds_cert_sha256: str,
     no_jitter: bool,
-) -> dict[str, ProbeResult]:
+) -> tuple[dict[str, ProbeResult], dict[str, LiveSnapshot] | None]:
     # ── Step 0: Load top-level config ────────────────────────────────────────
     # proxy_throughput (called from the SS / VLESS+Reality / Hysteria-2
     # probes after a successful echo) reads target_bytes / timeout_sec
@@ -252,7 +254,27 @@ async def _async_main(
             logger.error("Probe %s failed with exception: %s", name, e)
             results[name] = ProbeResult(verdict=Verdict.ERROR, error=str(e))
 
-    return results
+    # ── Step 3: Fetch listener-side counter snapshot ─────────────────────────
+    # The listener IS the ground truth: kernel-level counters, post-
+    # handshake auth-validated bytes, iptables packet counts. Whatever
+    # the client sees can be spoofed by the OS/networking layer (the
+    # canonical Windows Docker Desktop fake-ICMP-replies case), so the
+    # cross-verification step asks the listener "what did YOU see?" and
+    # surfaces both verdicts side-by-side. Soft-fail on fetch errors:
+    # if the snapshot fetch fails we still print the client-side table.
+    listener_snapshot: dict[str, LiveSnapshot] | None = None
+    try:
+        listener_snapshot = await asyncio.to_thread(
+            _fetch_snapshot,
+            server_host,
+            creds_port,
+            creds_token,
+            creds_cert_sha256,
+        )
+    except Exception as e:
+        logger.warning("Could not fetch listener snapshot: %s", e)
+
+    return results, listener_snapshot
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -266,12 +288,58 @@ def _fetch_credentials(
     token: str,
     expected_sha256: str,
 ) -> str:
-    """GET https://host:port/creds with bearer-token + cert pinning.
+    """GET https://host:port/creds with bearer-token + cert pinning."""
+    return _pinned_get(host, port, token, expected_sha256, path="/creds")
 
-    Self-signed cert from the listener: `verify_mode=CERT_NONE` and
-    `check_hostname=False`, then DER hash the peer cert and compare with
-    the operator-supplied expected fingerprint. A MitM presenting a
-    different self-signed cert is rejected here regardless of any
+
+def _fetch_snapshot(
+    host: str,
+    port: int,
+    token: str,
+    expected_sha256: str,
+) -> dict[str, LiveSnapshot]:
+    """GET https://host:port/snapshot — listener-side live counters.
+
+    Reuses the same bearer token and pinned cert as ``/creds``. The
+    listener allows multiple snapshot fetches (unlike /creds which is
+    single-use), so a network-flaky client can retry without
+    invalidating the credential window.
+
+    Returns a per-protocol ``LiveSnapshot`` map. Protocols whose
+    snapshot reader threw an exception on the listener are
+    represented as a ``LiveSnapshot`` with default zeros — the
+    server already logged the failure, the client just shows a
+    "no listener data" cell.
+    """
+    body = _pinned_get(host, port, token, expected_sha256, path="/snapshot")
+    raw = json.loads(body)
+    out: dict[str, LiveSnapshot] = {}
+    for name, payload in raw.items():
+        if isinstance(payload, dict) and "error" not in payload:
+            try:
+                out[name] = LiveSnapshot.model_validate(payload)
+            except Exception as e:
+                logger.debug("invalid snapshot for %s: %s", name, e)
+                out[name] = LiveSnapshot()
+        else:
+            out[name] = LiveSnapshot()
+    return out
+
+
+def _pinned_get(
+    host: str,
+    port: int,
+    token: str,
+    expected_sha256: str,
+    *,
+    path: str,
+) -> str:
+    """Pinned-TLS bearer-auth GET. Shared by /creds and /snapshot.
+
+    Self-signed cert from the listener: ``verify_mode=CERT_NONE`` and
+    ``check_hostname=False``, then DER hash the peer cert and compare
+    with the operator-supplied expected fingerprint. A MitM presenting
+    a different self-signed cert is rejected here regardless of any
     network-layer interception.
     """
     expected = expected_sha256.lower().replace(":", "").strip()
@@ -297,7 +365,7 @@ def _fetch_credentials(
                 )
             # Pinning passed — now safe to ship the bearer token.
             request = (
-                f"GET /creds HTTP/1.1\r\n"
+                f"GET {path} HTTP/1.1\r\n"
                 f"Host: {host}:{port}\r\n"
                 f"Authorization: Bearer {token}\r\n"
                 f"Connection: close\r\n"
@@ -413,6 +481,122 @@ def _print_results(results: dict[str, ProbeResult], server_host: str) -> None:
             title="Summary",
         )
     )
+
+
+def _listener_verdict(snap: LiveSnapshot) -> Verdict:
+    """Apply :meth:`ProtocolResult.finalize` semantics to a live snapshot.
+
+    Same predicates the listener will use when committing the JSON
+    report at session end, so the cross-verification table reflects
+    what the operator will see in reports/.
+    """
+    if snap.handshake_count > 0 and snap.data_transfer_ok:
+        return Verdict.OK
+    if snap.handshake_count > 0:
+        return Verdict.HANDSHAKE_ONLY
+    return Verdict.BLOCKED
+
+
+def _agreed_verdict(client: Verdict, listener: Verdict) -> tuple[str, str]:
+    """Combine client + listener verdicts into a final + comment.
+
+    The listener is authoritative — it's the one running the kernel
+    counters and HMAC validation. The client's role is to ATTEMPT
+    each protocol; whether anything actually arrived at the server
+    is the listener's call.
+
+    Three outcomes:
+      * ``agree``: both sides report the same verdict. Final =
+        either side, comment empty.
+      * ``client_overconfident``: client says OK, listener says
+        BLOCKED/HANDSHAKE_ONLY. Final = listener's (the strict
+        view). This is the canonical Windows Docker Desktop quirk
+        where ICMP/UDP responses get spoofed locally even though
+        nothing reached the server.
+      * ``listener_overconfident``: listener says OK, client
+        BLOCKED/HANDSHAKE_ONLY. Final = listener's (data did reach
+        server, client measurement underread).
+    """
+    if client == listener:
+        return str(listener), ""
+    # Both sides disagree — listener wins, but flag it.
+    if client == Verdict.OK:
+        return str(listener), "client overread (listener saw less)"
+    if listener == Verdict.OK:
+        return str(listener), "listener saw data the client missed"
+    # Both non-OK but different (e.g. HANDSHAKE_ONLY vs BLOCKED).
+    return str(listener), f"client={client}"
+
+
+def _print_cross_verification(
+    results: dict[str, ProbeResult],
+    snapshot: dict[str, LiveSnapshot] | None,
+) -> None:
+    """Side-by-side client / listener / final verdict table.
+
+    Skipped silently when the snapshot fetch failed (older listener,
+    transient HTTPS error). The client-only table from ``_print_results``
+    is still printed by main(), so the operator never loses output.
+    """
+    if snapshot is None:
+        console.print(
+            "\n[yellow]Listener snapshot unavailable — falling back to "
+            "client-side verdicts only. The listener's JSON report "
+            "remains the authoritative record.[/yellow]"
+        )
+        return
+
+    table = Table(
+        title="Cross-verified verdicts (listener is authoritative)",
+        header_style="bold magenta",
+        show_header=True,
+    )
+    table.add_column("Protocol", style="cyan", width=20)
+    table.add_column("Client", width=18)
+    table.add_column("Listener", width=18)
+    table.add_column("Final", width=18)
+    table.add_column("Note", style="dim", width=42)
+
+    verdict_color = {
+        Verdict.OK: "green",
+        Verdict.HANDSHAKE_ONLY: "yellow",
+        Verdict.BLOCKED: "red",
+        Verdict.ERROR: "dim",
+    }
+
+    disagreements = 0
+    for name, client_r in results.items():
+        snap = snapshot.get(name)
+        if snap is None:
+            # Listener didn't surface this protocol — defaults to BLOCKED
+            # so the table cell is still meaningful instead of blank.
+            snap = LiveSnapshot()
+
+        listener_v = _listener_verdict(snap)
+        final, note = _agreed_verdict(client_r.verdict, listener_v)
+        if note:
+            disagreements += 1
+
+        client_v = client_r.verdict
+        c_color = verdict_color.get(client_v, "white")
+        l_color = verdict_color.get(listener_v, "white")
+        f_color = verdict_color.get(Verdict(final), "white")
+        table.add_row(
+            name,
+            f"[{c_color}]{client_v}[/{c_color}]",
+            f"[{l_color}]{listener_v}[/{l_color}]",
+            f"[{f_color}]{final}[/{f_color}]",
+            note,
+        )
+
+    console.print("\n")
+    console.print(table)
+    if disagreements:
+        console.print(
+            f"[yellow]{disagreements} protocol(s) disagreed — "
+            "listener-side verdict wins. Common cause: client OS/Docker "
+            "Desktop netstack spoofing local responses.[/yellow]"
+        )
 
 
 if __name__ == "__main__":

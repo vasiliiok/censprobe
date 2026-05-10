@@ -28,6 +28,7 @@ import contextlib
 import hmac
 import http.server
 import ipaddress
+import json
 import logging
 import secrets
 import socket
@@ -37,13 +38,16 @@ import threading
 import urllib.request
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from censprobe_core.utils import write_secret
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
+
+if TYPE_CHECKING:
+    from censprobe_listener._responder_dispatch import Responder
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +158,10 @@ class CredServer:
         # plain str field plus the existing _lock is sufficient — no
         # event/condition variable is needed.
         self._client_ip: str | None = None
+        # Set by main.py after responders have started so /snapshot can
+        # read live counter state. ``None`` while responders are still
+        # spinning up — /snapshot returns 503 until then.
+        self._responders: dict[str, Responder] | None = None
 
     def start(self) -> None:
         handler_cls = self._make_handler()
@@ -188,6 +196,26 @@ class CredServer:
             self.bind,
             self.port,
         )
+
+    def attach_responders(self, responders: dict[str, Responder]) -> None:
+        """Plug the running responders dict into the cred-server.
+
+        Called from main.py once ``_start_responders`` has populated
+        the dict. After this call, the /snapshot endpoint starts
+        returning per-protocol live counter values; before it, the
+        endpoint replies 503 (Service Unavailable) so an over-eager
+        client can't race responder startup.
+        """
+        with self._lock:
+            self._responders = responders
+
+    def detach_responders(self) -> None:
+        """Mirror of :meth:`attach_responders` — called from main.py
+        right before the responders are stopped, so /snapshot stops
+        reading counters that are about to disappear.
+        """
+        with self._lock:
+            self._responders = None
 
     @property
     def client_ip(self) -> str | None:
@@ -237,20 +265,28 @@ class CredServer:
                 self.wfile.write(reason.encode("utf-8"))
 
             def do_GET(self) -> None:  # noqa: N802 — http.server method name
-                if self.path != "/creds":
-                    self._reject(404, "not found")
+                if self.path == "/creds":
+                    self._serve_creds()
                     return
+                if self.path == "/snapshot":
+                    self._serve_snapshot()
+                    return
+                self._reject(404, "not found")
 
+            def _check_bearer(self) -> bool:
                 auth = self.headers.get("Authorization", "")
                 if not auth.startswith("Bearer "):
                     self._reject(401, "missing bearer token")
-                    return
-
+                    return False
                 presented = auth[len("Bearer ") :]
                 if not hmac.compare_digest(presented, srv.token):
                     self._reject(403, "invalid token")
-                    return
+                    return False
+                return True
 
+            def _serve_creds(self) -> None:
+                if not self._check_bearer():
+                    return
                 with srv._lock:
                     if srv._serves_remaining <= 0:
                         self._reject(410, "credentials exhausted")
@@ -270,6 +306,44 @@ class CredServer:
                 self.send_header("Cache-Control", "no-store")
                 self.end_headers()
                 self.wfile.write(srv.creds_bytes)
+
+            def _serve_snapshot(self) -> None:
+                """Per-protocol live counter snapshot for cross-verification.
+
+                Authenticates with the same bearer token as ``/creds`` —
+                anyone who fetched credentials already knows it, and
+                snapshots are read-only state, so we don't need a
+                separate auth scope. Unlike /creds this endpoint
+                allows MULTIPLE serves (no exhaustion counter): the
+                client polls it once per probe run, but it's also
+                useful for ad-hoc operator debugging during a session.
+                """
+                if not self._check_bearer():
+                    return
+                with srv._lock:
+                    responders = srv._responders
+                if responders is None:
+                    self._reject(503, "responders not yet ready")
+                    return
+
+                snapshots: dict[str, dict[str, Any]] = {}
+                for name, responder in responders.items():
+                    try:
+                        snap = responder.live_snapshot()
+                        snapshots[name] = snap.model_dump(mode="json")
+                    except Exception as e:
+                        # A buggy snapshot reader must not 500 the whole
+                        # endpoint — surface the per-protocol error in
+                        # the JSON so the client sees which one failed.
+                        snapshots[name] = {"error": f"{type(e).__name__}: {e}"}
+
+                payload = json.dumps(snapshots, separators=(",", ":")).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(payload)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(payload)
 
             def do_POST(self) -> None:  # noqa: N802
                 self._reject(405, "method not allowed")

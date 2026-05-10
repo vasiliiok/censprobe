@@ -20,6 +20,7 @@ import tempfile
 from pathlib import Path
 
 from censprobe_core.link_utils import delete_iface, rm_amneziawg_socket
+from censprobe_core.models import LiveSnapshot
 from censprobe_core.protocol_probes import AmneziaWGObfuscation
 from censprobe_core.utils import write_secret
 
@@ -225,6 +226,16 @@ AllowedIPs = 10.202.0.2/32
         _, rx, _ = _read_wg_transfer(self.interface, tool="wg")
         return rx > _MIN_ECHO_BYTES
 
+    def live_snapshot(self) -> LiveSnapshot:
+        """Live ``wg show`` read for the cred-server's /snapshot."""
+        hs, rx, _ = _read_wg_transfer(self.interface, tool="wg")
+        return LiveSnapshot(
+            handshake_count=hs,
+            data_transfer_ok=rx > _MIN_ECHO_BYTES,
+            data_packets=None,  # WG doesn't expose a packet counter
+            bytes_received=rx,
+        )
+
 
 class AmneziaWGResponder:
     """AmneziaWG responder using awg-quick. Identical structure, plus junk params."""
@@ -351,3 +362,23 @@ AllowedIPs = 10.201.0.2/32
             return self._final_rx_bytes > _MIN_ECHO_BYTES
         _, rx, _ = _read_wg_transfer(self.interface, tool="awg")
         return rx > _MIN_ECHO_BYTES
+
+    def live_snapshot(self) -> LiveSnapshot:
+        """Live ``awg show`` read for the cred-server's /snapshot.
+
+        The Windows-Docker-Desktop false-OK regression is the whole
+        reason this endpoint exists: the listener will report rx=0
+        when the AWG packets never reach the host, while the client
+        sees its userspace counter tick (occasionally even without
+        real handshake completion). Surfacing the listener's rx_bytes
+        via /snapshot lets the client-side cross-verifier turn
+        client-OK + listener-rx=0 into the right verdict
+        (DISPUTED/BLOCKED instead of OK).
+        """
+        hs, rx, _ = _read_wg_transfer(self.interface, tool="awg")
+        return LiveSnapshot(
+            handshake_count=hs,
+            data_transfer_ok=rx > _MIN_ECHO_BYTES,
+            data_packets=None,
+            bytes_received=rx,
+        )

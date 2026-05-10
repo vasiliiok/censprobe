@@ -1813,18 +1813,21 @@ class _TlsRecordReader:
                 return _mtg_error_result("orig_resPQ_truncated_len", Verdict.BLOCKED)
             except TimeoutError:
                 # Empty buffer + record-header timeout = mtg accepted our
-                # obfuscated2 init but DC-side never relayed anything back.
-                # Treat as HANDSHAKE_ONLY rather than BLOCKED to preserve
-                # the strict "BLOCKED implies confirmed block" invariant.
-                # Body-read timeout (buf already has bytes) is the
-                # ambiguous mid-stream-stall ERROR case.
+                # obfuscated2 init but no encrypted resPQ ever surfaced.
+                # That means: TCP held open, faketls handshake survived,
+                # init bytes (which a wrong-secret frame would have RST'd)
+                # were accepted — but the L7 resPQ exchange did not
+                # complete. Preflight already verified DC reach from the
+                # listener host, so a silent stall here is a confirmed
+                # L7 block (DPI silent-drop after fingerprinting the
+                # obfuscated2 envelope). Verdict is BLOCKED — the
+                # protocol cannot move data, the invariant holds.
+                # Body-read timeout (buf already has bytes) stays ERROR
+                # because mid-stream stall is genuinely ambiguous.
                 if not self._buf:
-                    result = ProbeResult()
-                    result.handshake_ok = True
-                    result.data_ok = False
-                    result.verdict = Verdict.HANDSHAKE_ONLY
-                    result.error = "orig_resPQ_len_timeout_post_init"
-                    return result
+                    return _mtg_error_result(
+                        "orig_resPQ_len_timeout_post_init", Verdict.BLOCKED
+                    )
                 return _mtg_error_result("orig_resPQ_body_timeout", Verdict.ERROR)
             if hdr[0] != self._APP_DATA_TYPE:
                 return _mtg_error_result(
@@ -1894,9 +1897,12 @@ async def _exchange_obfuscated2_respq(
         body truncation after a valid length prefix). Each of these
         means a third party severed the connection AFTER we wrote the
         obfuscated init — i.e. observed the L7 content and acted on it.
-      * ``HANDSHAKE_ONLY`` for length-read timeout while TCP stays open
-        — proxy accepted our init bytes (a wrong-secret frame would
-        have RST'd immediately) but the upstream DC never replied.
+      * ``BLOCKED`` for a length-read timeout while TCP stays open —
+        proxy accepted our init (a wrong-secret frame would have
+        RST'd) but no L7 resPQ ever surfaced. Preflight DC-reach has
+        already verified the upstream is reachable from the listener,
+        so a silent stall is the canonical DPI signature: a confirmed
+        block of the protocol's data path.
       * ``ERROR`` for a body-read timeout after we already got a valid
         length — ambiguous mid-stream stall, neither confirmed BLOCK
         nor confirmed reachability. Preserves the strict
@@ -1942,12 +1948,14 @@ async def _exchange_obfuscated2_respq(
         except asyncio.IncompleteReadError:
             return _mtg_error_result("orig_resPQ_truncated_len", Verdict.BLOCKED)
         except TimeoutError:
-            result = ProbeResult()
-            result.handshake_ok = True
-            result.data_ok = False
-            result.verdict = Verdict.HANDSHAKE_ONLY
-            result.error = "orig_resPQ_len_timeout_post_init"
-            return result
+            # Same reasoning as the faketls path: TCP held open + init
+            # accepted (would have RST'd on wrong secret) + zero L7
+            # data ⇒ confirmed L7 block of the obfuscated2 protocol.
+            # Preflight DC-reach guarantees the upstream isn't the
+            # cause. BLOCKED preserves the invariant.
+            return _mtg_error_result(
+                "orig_resPQ_len_timeout_post_init", Verdict.BLOCKED
+            )
 
     length_pt = recv_cipher.update(length_ct)
     length = int.from_bytes(length_pt, "little")

@@ -24,6 +24,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Protocol
 
+from censprobe_core.models import LiveSnapshot
+
 from censprobe_listener.credentials import ProtocolCredentials
 from censprobe_listener.echo_server import EchoServer
 from censprobe_listener.hysteria_wrapper import HysteriaResponder
@@ -68,6 +70,12 @@ class Responder(Protocol):
 
     async def start(self) -> None: ...
     async def stop(self) -> None: ...
+
+    # Sync (no-event-loop) snapshot for the cred-server's /snapshot
+    # endpoint. Each responder reads its own live counters and
+    # returns the same shape, so the cross-thread HTTP handler can
+    # build a uniform JSON without dispatching by class.
+    def live_snapshot(self) -> LiveSnapshot: ...
 
 
 # Each factory takes (creds, echo_server) and returns a fresh, unstarted

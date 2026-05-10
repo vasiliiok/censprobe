@@ -15,11 +15,13 @@ import tempfile
 from pathlib import Path
 
 from censprobe_core.link_utils import delete_iface
+from censprobe_core.models import LiveSnapshot
 from censprobe_core.utils import write_secret
 
 from censprobe_listener._iptables_counter import (
     install_counter,
     read_counter,
+    read_counter_sync,
     remove_counter,
 )
 
@@ -41,12 +43,15 @@ logger = logging.getLogger(__name__)
 # even if the session is left open for hours of keepalive accumulation.
 _DATA_INPUT_LENGTH_MIN = 130
 
-# A handful of inbound data-plane packets is enough to declare the
-# session "data flowed". Set to 1 because we're already filtering by
-# size (only ICMP echoes / real bulk data qualify), so ``count >= 1``
-# is unforgeable by keepalives or scanner traffic. Kept as a named
-# constant to make the threshold semantics explicit at the call site.
-_MIN_OVPN_DATA_PACKETS = 1
+# Inbound data-plane packets needed to declare the session "data
+# flowed". Bumped from 1 to 2 (2026-05-10): UDP/1194 on cloud IPs gets
+# probed by Shodan / DPI scanners that send ≥130-B payload bursts and
+# can tick the size filter once. Requiring two packets, plus the
+# AND-gate against ``handshake_count > 0`` in ``data_transfer_ok``
+# below, lifts the threshold above any scanner shot we've observed
+# in the wild while still firing on a single ``ping_echo`` round-trip
+# (the client probe sends 3 ICMP echoes, so 2 is well within reach).
+_MIN_OVPN_DATA_PACKETS = 2
 
 # Deterministic tun name so we can scrub a stale interface left behind by
 # a SIGKILL — without this, a leftover tun keeps the 10.200.0.x peer route
@@ -283,6 +288,33 @@ verb 1
         hs, _ = self._read_status()
         return hs
 
+    def live_snapshot(self) -> LiveSnapshot:
+        """Live-read sibling of the post-stop snapshot.
+
+        Reads the OpenVPN status file directly + the iptables INPUT
+        counter via the sync iptables helper (no event loop required —
+        this runs in the cred-server's HTTP thread).
+
+        ``data_transfer_ok`` here applies the SAME AND-gate as the
+        post-stop ``data_transfer_ok`` property (handshake AND data
+        packets), so a snapshot taken mid-session and the listener's
+        eventual JSON verdict use the same predicate.
+        """
+        hs, auth_bytes = self._read_status()
+        live_packets = read_counter_sync("INPUT", self._counter_comment)
+        if hs == 0:
+            data_ok = False
+        elif live_packets >= _MIN_OVPN_DATA_PACKETS:
+            data_ok = True
+        else:
+            data_ok = auth_bytes > 1500
+        return LiveSnapshot(
+            handshake_count=hs,
+            data_transfer_ok=data_ok,
+            data_packets=live_packets,
+            bytes_received=auth_bytes,
+        )
+
     def _counter_rule_args(self) -> list[str]:
         # ``-m length`` matches against IP+TCP/UDP total length. Our
         # _DATA_INPUT_LENGTH_MIN is calibrated against the *UDP datagram*
@@ -307,32 +339,42 @@ verb 1
 
     @property
     def data_transfer_ok(self) -> bool:
-        """True when at least one large UDP packet (≥ ``_DATA_INPUT_LENGTH_MIN``)
-        arrived from a client.
+        """True when a real client both authed AND sent data through the
+        tunnel.
 
-        Earlier iterations gated this on the ``Auth read bytes`` counter
-        from openvpn's status file vs a static byte threshold. That
-        counter conflates handshake control + keepalive overhead with
-        real data plane and the only sound threshold (≥ 1500 bytes
-        after a 3-min idle session) was too high to fire on the short
-        (≤ 30 s) probe sessions censprobe actually generates — every
-        run produced a HANDSHAKE_ONLY listener verdict in disagreement
-        with the client's OK, even on an unobstructed path.
+        Two independent signals must agree:
 
-        The new mechanism is an INPUT iptables rule that counts only
-        UDP packets the client sent that are *bigger* than any
-        keepalive / handshake packet observed on UDP/1194 in static-
-        key mode (≤ 108 B). Empirically calibrated against ICMP
-        echoes through the tunnel (~140 B encrypted), so a single
-        successful echo round-trip ticks the counter once and the
-        property flips to True. Idle sessions with only keepalives
-        and scanner noise stay at 0. CAP_NET_ADMIN is required to
-        install the rule; on hosts without it the property reverts
-        to its previous semantics, gating on the auth-read counter
-        with the high threshold (kept exactly to avoid regressing
-        the false-OK rejection on those hosts).
+          1. ``handshake_count > 0`` — at least one HMAC-validated
+             packet hit our static-key. Unforgeable by anyone without
+             our PSK (the AND below shields against scanner traffic
+             that ticks the size filter without ever passing auth).
+          2. ``data_packets >= _MIN_OVPN_DATA_PACKETS`` — at least two
+             ≥ ``_DATA_INPUT_LENGTH_MIN``-byte UDP packets arrived
+             on our port. Calibrated to fire on ICMP echo round-trips
+             through the tunnel (~140 B encrypted) and stay below
+             keepalive / handshake packets (≤ 108 B). The 2-packet
+             threshold rejects single-shot scanner artifacts.
+
+        Why the AND. Empirically (RU run 2026-05-10) we saw a session
+        where ``handshakes=0, bytes=0, data_pkts=8``: eight ≥130-B
+        UDP packets hit the port — none from a real client (Auth
+        read bytes was 0) — but the size filter ticked anyway. That's
+        Shodan/RB-style scanners on a cloud IP fingerprinting the
+        OpenVPN port. Coupling data_pkts to ``handshake_count > 0``
+        makes the verdict ``BLOCKED`` (no auth) instead of an
+        inconsistent ``BLOCKED + data_transfer=yes``.
+
+        Fallback path (no iptables / no CAP_NET_ADMIN): falls back to
+        the historical auth-bytes threshold (≥ 1500 B). It's the only
+        signal we still have on hosts without the kernel counter, and
+        it's already auth-gated by construction (Auth read bytes only
+        increments after HMAC), so the AND is implicit.
         """
         if self._snapshot_taken:
+            # Without a real handshake, no data-packet count can be
+            # trusted — see docstring. Refuse to claim data flowed.
+            if self._final_handshake_count == 0:
+                return False
             if self._final_data_packets >= _MIN_OVPN_DATA_PACKETS:
                 return True
             # Fallback path for hosts where iptables is unavailable

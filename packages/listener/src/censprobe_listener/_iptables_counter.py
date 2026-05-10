@@ -29,6 +29,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import shutil
+import subprocess
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +144,48 @@ async def read_counter(chain: str, comment: str) -> int:
             logger.warning("%s -L %s for %r failed: %s", cmd, chain, comment, e)
             continue
         for ln in out_b.decode(errors="replace").splitlines():
+            if comment not in ln:
+                continue
+            parts = ln.split()
+            if not parts:
+                continue
+            try:
+                total += int(parts[0])
+            except ValueError:
+                continue
+    return total
+
+
+def read_counter_sync(chain: str, comment: str) -> int:
+    """Synchronous twin of :func:`read_counter` for use from non-async
+    contexts (specifically the cred-server's snapshot HTTP handler,
+    which runs in a stdlib http.server thread without an event loop).
+
+    Same iptables/ip6tables -L -v -n -x scrape, same comment-match
+    summing across families. We don't share the parser because the
+    async version would force the caller to bridge via
+    ``asyncio.run_coroutine_threadsafe`` — adding a sync helper is
+    less code and removes the cross-thread asyncio coupling.
+
+    Errors are swallowed (returns 0) for the same best-effort reason
+    as the async version: a missing iptables binary or a transient
+    EAGAIN must not crash the responder snapshot.
+    """
+    total = 0
+    for cmd in _IPTABLES_FAMILIES:
+        if shutil.which(cmd) is None:
+            continue
+        try:
+            proc = subprocess.run(  # noqa: S603 — args are hardcoded constants
+                [cmd, "-L", chain, "-v", "-n", "-x"],
+                capture_output=True,
+                timeout=_IPTABLES_TIMEOUT_S,
+                check=False,
+            )
+        except (subprocess.TimeoutExpired, OSError) as e:
+            logger.debug("%s -L %s for %r failed (sync): %s", cmd, chain, comment, e)
+            continue
+        for ln in proc.stdout.decode(errors="replace").splitlines():
             if comment not in ln:
                 continue
             parts = ln.split()

@@ -216,6 +216,39 @@ class ReportMeta(BaseModel):
 # Listener / Protocol models
 
 
+class LiveSnapshot(BaseModel):
+    """Live per-protocol counter snapshot served by the listener's
+    cred-server ``/snapshot`` endpoint mid-session.
+
+    The client probe fetches one of these after its own probes finish
+    so it can render an "agreed verdict" — counter values are the
+    listener's authoritative ground truth, while the client's pass/fail
+    is the *probe-side* observation. When the two agree the verdict is
+    trustworthy; when they disagree the disagreement itself is the
+    interesting signal (e.g. Windows Docker Desktop spoofing ICMP/UDP
+    replies for a tunnel that never reached the listener).
+
+    Fields are deliberately the same shape as :class:`ProtocolResult`
+    (handshake_count + data_transfer_ok) so the client can apply the
+    SAME ``finalize()`` logic to derive the listener's verdict from a
+    snapshot. The data-phase counter (data_packets / rx_bytes) is
+    surfaced as a non-authoritative diagnostic for operators who want
+    to see the underlying tick rate.
+    """
+
+    handshake_count: int = 0
+    data_transfer_ok: bool = False
+    # Diagnostic only — exposes the underlying counter so operators
+    # can see "how close was it to flipping". None when the responder
+    # has no per-protocol data-counter (mostly the SOCKS-routed
+    # families, which signal data-phase via the echo server).
+    data_packets: int | None = None
+    # Subprotocol-flavoured diagnostic. For OpenVPN this is "Auth read
+    # bytes" from the status file; for WG/AWG it's the kernel's
+    # ``peer->rx_bytes`` counter. Independent of ``data_packets``.
+    bytes_received: int | None = None
+
+
 class ProtocolResult(BaseModel):
     """Aggregated result for one protocol in a listener session.
 

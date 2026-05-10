@@ -21,9 +21,12 @@ import asyncio
 import contextlib
 import logging
 
+from censprobe_core.models import LiveSnapshot
+
 from censprobe_listener._iptables_counter import (
     install_counter,
     read_counter,
+    read_counter_sync,
     remove_counter,
 )
 
@@ -253,3 +256,19 @@ class MTProxyResponder:
         # pre-change behaviour, so listener verdict on those hosts
         # falls back to HANDSHAKE_ONLY rather than regressing.
         return self._final_data_packets > 0
+
+    def live_snapshot(self) -> LiveSnapshot:
+        """Live snapshot for the cred-server /snapshot endpoint.
+
+        ``connection_count`` is updated mid-session by ``_monitor_output``
+        (each ``Stream has been started`` line increments, each
+        listed faketls failure decrements with floor 0). The data
+        counter must be sync-read from iptables since
+        ``_final_data_packets`` only crystalises in ``stop()``.
+        """
+        live_packets = read_counter_sync("OUTPUT", self._counter_comment)
+        return LiveSnapshot(
+            handshake_count=self.connection_count,
+            data_transfer_ok=live_packets > 0,
+            data_packets=live_packets,
+        )
