@@ -261,8 +261,10 @@ def _classify_proxy_outcome(
     return False, False
 
 
-async def ping_echo(ip: str, timeout: float = 3.0, count: int = 3, min_received: int = 2) -> bool:
-    """Ping a tunnel IP and verify the peer actually replies.
+async def ping_echo(
+    ip: str, timeout: float = 3.0, count: int = 3, min_received: int = 2
+) -> tuple[bool, float | None]:
+    """Ping a tunnel IP and return (data_plane_ok, avg_rtt_ms).
 
     Sends ``count`` ICMP echoes, requires at least ``min_received`` replies
     to declare the data plane working. A single ping is too weak: in some
@@ -275,6 +277,15 @@ async def ping_echo(ip: str, timeout: float = 3.0, count: int = 3, min_received:
     The ``ping`` exit status is ``0`` only when at least one reply was
     received, so we additionally parse "N received" out of stdout to apply
     the stricter ``min_received`` threshold.
+
+    The avg-RTT we surface is iputils' own ``rtt min/avg/max/mdev``
+    summary line. WG / AWG probes use this as the displayed RTT
+    instead of the previous "time to first non-zero
+    latest-handshakes timestamp" reading: that one was a polling-
+    resolution artifact (1 ms when the handshake completed during
+    ``wg-quick up``, 505 ms when the polling tick was 0.5 s) and
+    misled operators about actual data-plane latency. Ping RTT is
+    the honest data-plane round-trip after the tunnel is up.
     """
     deadline = max(int(timeout), 1)
     code, out, _ = await run_cmd(
@@ -283,12 +294,13 @@ async def ping_echo(ip: str, timeout: float = 3.0, count: int = 3, min_received:
         timeout=count * deadline + 2,
     )
     if code != 0:
-        return False
+        return False, None
     # iputils-ping summary line:
     #   "<count> packets transmitted, <received> received, 0% packet loss, ..."
     # Exit code 0 means ≥1 reply received, but we need a stricter
     # threshold to filter the single-shot quirk above.
     received = 0
+    avg_rtt: float | None = None
     for line in out.splitlines():
         stripped = line.strip()
         if "packets transmitted" in stripped and " received" in stripped:
@@ -297,8 +309,17 @@ async def ping_echo(ip: str, timeout: float = 3.0, count: int = 3, min_received:
                 tokens = parts[1].strip().split()
                 if tokens and tokens[0].isdigit():
                     received = int(tokens[0])
-                    break
-    return received >= min_received
+        elif stripped.startswith("rtt ") and "/" in stripped:
+            # "rtt min/avg/max/mdev = 0.067/0.094/0.123/0.024 ms"
+            # Extract the avg field (index 1 of the four-slash group).
+            try:
+                values = stripped.split("=", 1)[1].strip().split()[0]
+                fields = values.split("/")
+                if len(fields) >= 2:
+                    avg_rtt = float(fields[1])
+            except (IndexError, ValueError):
+                avg_rtt = None
+    return received >= min_received, avg_rtt
 
 
 async def _wg_peer_rx_bytes(tool: str, iface: str) -> int:
@@ -618,9 +639,17 @@ verb 1
                 drain_task = _start_log_drain(proc, drain_buf)
                 try:
                     result.verdict = Verdict.HANDSHAKE_ONLY
-                    if await ping_echo("10.200.0.1"):
+                    ok, _avg_rtt = await ping_echo("10.200.0.1")
+                    if ok:
                         result.data_ok = True
                         result.verdict = Verdict.OK
+                        # Keep the existing rtt_ms (time-to-handshake from
+                        # OpenVPN's "Initialization Sequence Completed"
+                        # marker) — that's the metric operators are used
+                        # to seeing for OpenVPN. Ping RTT becomes useful
+                        # if we ever surface data-plane latency, but for
+                        # OpenVPN the handshake-to-completion window is
+                        # the dominant slow step on flaky links.
                 finally:
                     await _stop_log_drain(drain_task)
         finally:
@@ -632,7 +661,7 @@ verb 1
     return result
 
 
-async def _poll_wg_handshake(tool: str, iface: str, timeout: float) -> tuple[bool, float | None]:
+async def _poll_wg_handshake(tool: str, iface: str, timeout: float) -> bool:
     """Poll ``<tool> show <iface> latest-handshakes`` until a non-zero
     timestamp appears (peer replied) or ``timeout`` elapses.
 
@@ -641,9 +670,14 @@ async def _poll_wg_handshake(tool: str, iface: str, timeout: float) -> tuple[boo
     Sonar S3776's cognitive-complexity ceiling and removes the prior
     near-duplicate code blocks.
 
-    Returns ``(hs_ok, rtt_ms)``. ``rtt_ms`` is ``None`` when the loop
-    times out without a handshake — callers leave ``result.rtt_ms``
-    at its default in that case.
+    The function used to also return a "time to first non-zero
+    timestamp" reading, but that was a polling-resolution artifact
+    (1 ms when the handshake completed during ``wg-quick up`` and
+    the first poll caught it; 505 ms when the next poll tick was
+    0.5 s later) and was misinterpreted as data-plane RTT. The
+    actual round-trip is now sourced from ``ping_echo`` after
+    handshake completion — see :func:`probe_wireguard` and
+    :func:`probe_amneziawg`.
     """
     t0 = time.monotonic()
     while time.monotonic() - t0 < timeout:
@@ -651,9 +685,9 @@ async def _poll_wg_handshake(tool: str, iface: str, timeout: float) -> tuple[boo
         for line in out.splitlines():
             parts = line.split()
             if len(parts) >= 2 and parts[1] != "0":
-                return True, (time.monotonic() - t0) * 1000
+                return True
         await asyncio.sleep(0.5)
-    return False, None
+    return False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -705,10 +739,7 @@ PersistentKeepalive = 25
             return result
 
         try:
-            hs_ok, rtt_ms = await _poll_wg_handshake("wg", _WG_CLI_IFACE, PROBE_TIMEOUT)
-            if rtt_ms is not None:
-                result.rtt_ms = rtt_ms
-
+            hs_ok = await _poll_wg_handshake("wg", _WG_CLI_IFACE, PROBE_TIMEOUT)
             result.handshake_ok = hs_ok
             if hs_ok:
                 result.verdict = Verdict.HANDSHAKE_ONLY
@@ -717,7 +748,14 @@ PersistentKeepalive = 25
                 # (rx_bytes > 0). The second guards against Windows
                 # Docker Desktop ``network_mode: host`` spoofing ICMP
                 # replies — see _wg_peer_rx_bytes docstring.
-                if await ping_echo("10.202.0.1"):
+                ping_ok, ping_rtt = await ping_echo("10.202.0.1")
+                # Surface the ping-derived RTT regardless of OK
+                # promotion: even a HANDSHAKE_ONLY verdict is more
+                # informative when the operator can see "≥2 echoes
+                # came back this fast" vs "no echoes at all".
+                if ping_rtt is not None:
+                    result.rtt_ms = ping_rtt
+                if ping_ok:
                     rx = await _wg_peer_rx_bytes("wg", _WG_CLI_IFACE)
                     if rx > 0:
                         result.data_ok = True
@@ -800,10 +838,7 @@ PersistentKeepalive = 25
             # ping never fires, and the probe wrongly reports BLOCKED
             # while the listener side reports HANDSHAKE_ONLY (because
             # awg-quick already pushed an initiation on bring-up).
-            hs_ok, rtt_ms = await _poll_wg_handshake("awg", _AWG_CLI_IFACE, PROBE_TIMEOUT)
-            if rtt_ms is not None:
-                result.rtt_ms = rtt_ms
-
+            hs_ok = await _poll_wg_handshake("awg", _AWG_CLI_IFACE, PROBE_TIMEOUT)
             result.handshake_ok = hs_ok
             if hs_ok:
                 result.verdict = Verdict.HANDSHAKE_ONLY
@@ -814,7 +849,10 @@ PersistentKeepalive = 25
                 # daemon when real encrypted bytes from the peer
                 # have been decrypted, so a non-zero reading proves
                 # the listener-side responder actually answered.
-                if await ping_echo("10.201.0.1"):
+                ping_ok, ping_rtt = await ping_echo("10.201.0.1")
+                if ping_rtt is not None:
+                    result.rtt_ms = ping_rtt
+                if ping_ok:
                     rx = await _wg_peer_rx_bytes("awg", _AWG_CLI_IFACE)
                     if rx > 0:
                         result.data_ok = True

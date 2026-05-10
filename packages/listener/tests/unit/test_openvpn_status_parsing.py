@@ -280,6 +280,57 @@ def test_data_transfer_ok_falls_back_to_auth_read_when_counter_missing(tmp_path:
     assert r.data_transfer_ok is True
 
 
+def test_max_auth_bytes_latch_survives_peer_aging(tmp_path: Path) -> None:
+    """Bug fix (2026-05-10 e2e): a probe that finished > 60 s before
+    listener Ctrl+C otherwise reads Auth-read=0 because OpenVPN's
+    keepalive 10 60 zeros the per-peer counter when the client peer
+    ages out. The ``_max_auth_bytes_seen`` latch fixes this — the
+    poll task observes the high-water mark during the session, and
+    stop() uses ``max(latched, current)``.
+
+    Scenario simulated here:
+      1. Real handshake happened, status file showed Auth=8192
+         (latched).
+      2. Probe ended; openvpn aged the peer out; status file now
+         shows Auth=0.
+      3. stop() reads status (live=0) but uses latched 8192.
+    """
+    r = _make_responder(tmp_path, _SCANNER_NOISE_ONLY)  # status NOW shows Auth=0
+    # Simulate the latch having captured the real handshake earlier.
+    r._max_auth_bytes_seen = 8192
+    # Replicate what stop() does (without the iptables call paths).
+    _, live_auth = r._read_status()
+    r._final_bytes_received = max(r._max_auth_bytes_seen, live_auth)
+    r._final_handshake_count = 1 if r._final_bytes_received > 0 else 0
+    r._final_data_packets = 3
+    r._snapshot_taken = True
+
+    assert r.connection_count == 1, (
+        "latched Auth bytes from earlier in the session must dominate "
+        "the now-zero live read; otherwise listener falsely reports "
+        "BLOCKED for an old probe that succeeded"
+    )
+    assert r.data_transfer_ok is True
+
+
+def test_max_auth_bytes_latch_zero_when_no_handshake_ever(tmp_path: Path) -> None:
+    """The latch must NOT fabricate a handshake when none ever happened.
+
+    Without a real session, ``_max_auth_bytes_seen`` stays at its
+    initial 0; the post-stop snapshot agrees.
+    """
+    r = _make_responder(tmp_path, _SCANNER_NOISE_ONLY)
+    # Latch never advanced; current Auth-read is also 0.
+    _, live_auth = r._read_status()
+    r._final_bytes_received = max(r._max_auth_bytes_seen, live_auth)
+    r._final_handshake_count = 1 if r._final_bytes_received > 0 else 0
+    r._final_data_packets = 8  # scanner shots
+    r._snapshot_taken = True
+
+    assert r.connection_count == 0
+    assert r.data_transfer_ok is False
+
+
 def test_iptables_rule_args_are_well_formed() -> None:
     """The rule args feeding ``iptables -A INPUT ...`` must lock the
     chain to inbound UDP on the configured port and require a length

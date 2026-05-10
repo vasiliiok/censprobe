@@ -464,3 +464,99 @@ class TestExchangeObfuscated2RespQTimeout:
         assert isinstance(result, ProbeResult)
         assert result.verdict == Verdict.BLOCKED
         assert result.error == "orig_resPQ_len_timeout_post_init"
+
+
+class TestPingEchoReturnShape:
+    """``ping_echo`` returns ``(data_plane_ok, avg_rtt_ms)`` so WG/AWG
+    probes can surface a real round-trip number instead of the legacy
+    polling-resolution artifact (1 ms when the handshake completed
+    during ``wg-quick up``, 505 ms when the next poll tick was 0.5 s
+    later). Tests the parser branches without spawning a real ping.
+    """
+
+    @staticmethod
+    def _ping_output(received: int, *, avg_rtt: float | None) -> str:
+        # Emulate iputils-ping's textual summary: a "packets transmitted /
+        # received" header and an optional "rtt min/avg/max/mdev" line.
+        # avg_rtt=None drops the rtt line entirely (the case where every
+        # ping timed out and ping prints no rtt summary).
+        lines = [
+            "PING 10.0.0.1 (10.0.0.1) 56(84) bytes of data.",
+            f"3 packets transmitted, {received} received, 0% packet loss, time 600ms",
+        ]
+        if avg_rtt is not None:
+            # min/avg/max/mdev — we only parse avg, but real ping always
+            # includes all four when ANY reply is received.
+            lines.append(
+                f"rtt min/avg/max/mdev = "
+                f"{max(0.0, avg_rtt - 0.1):.3f}/{avg_rtt:.3f}/{avg_rtt + 0.1:.3f}/0.024 ms"
+            )
+        return "\n".join(lines)
+
+    @pytest.mark.asyncio
+    async def test_full_success_returns_ok_and_rtt(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        async def _fake(*_a: object, **_kw: object) -> tuple[int, str, str]:
+            return 0, self._ping_output(3, avg_rtt=12.5), ""
+
+        monkeypatch.setattr(protocol_probes, "run_cmd", _fake)
+        ok, rtt = await protocol_probes.ping_echo("10.0.0.1")
+        assert ok is True
+        assert rtt == 12.5
+
+    @pytest.mark.asyncio
+    async def test_partial_success_above_threshold(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # min_received default is 2; 2/3 received still passes.
+        async def _fake(*_a: object, **_kw: object) -> tuple[int, str, str]:
+            return 0, self._ping_output(2, avg_rtt=8.7), ""
+
+        monkeypatch.setattr(protocol_probes, "run_cmd", _fake)
+        ok, rtt = await protocol_probes.ping_echo("10.0.0.1")
+        assert ok is True
+        assert rtt == 8.7
+
+    @pytest.mark.asyncio
+    async def test_below_threshold_returns_false_with_rtt(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # 1/3 received: a single echo could be the Windows-Docker-Desktop
+        # spoof. ping_echo flags this as not-OK even though the rtt line
+        # is still parseable from the lone reply we did get.
+        async def _fake(*_a: object, **_kw: object) -> tuple[int, str, str]:
+            return 0, self._ping_output(1, avg_rtt=1.2), ""
+
+        monkeypatch.setattr(protocol_probes, "run_cmd", _fake)
+        ok, rtt = await protocol_probes.ping_echo("10.0.0.1")
+        assert ok is False
+        # Legitimate to surface the rtt anyway — the caller decides
+        # whether a sub-threshold echo's RTT is meaningful.
+        assert rtt == 1.2
+
+    @pytest.mark.asyncio
+    async def test_total_failure_returns_false_and_none(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # rc=1 from ping → no echoes received at all → no rtt line
+        # in stdout → (False, None).
+        async def _fake(*_a: object, **_kw: object) -> tuple[int, str, str]:
+            return 1, "", ""
+
+        monkeypatch.setattr(protocol_probes, "run_cmd", _fake)
+        ok, rtt = await protocol_probes.ping_echo("10.0.0.1")
+        assert ok is False
+        assert rtt is None
+
+    @pytest.mark.asyncio
+    async def test_zero_received_with_rc0_no_rtt_line(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Edge case: rc=0 (ping itself didn't crash) but iputils omitted
+        # the rtt summary because no replies came back.
+        async def _fake(*_a: object, **_kw: object) -> tuple[int, str, str]:
+            return 0, self._ping_output(0, avg_rtt=None), ""
+
+        monkeypatch.setattr(protocol_probes, "run_cmd", _fake)
+        ok, rtt = await protocol_probes.ping_echo("10.0.0.1")
+        assert ok is False
+        assert rtt is None

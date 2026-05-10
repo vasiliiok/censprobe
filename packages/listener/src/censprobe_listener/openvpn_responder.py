@@ -85,6 +85,17 @@ class OpenVPNResponder:
         self._final_bytes_received: int = 0
         self._final_data_packets: int = 0
         self._snapshot_taken: bool = False
+        # Latched maximum Auth-read bytes ever observed during the
+        # session. OpenVPN with ``keepalive 10 60`` re-enters peer-init
+        # state after 60 s of no traffic from the client, and the
+        # status file's Auth-read counter snapshots the CURRENT peer
+        # session — not a session-cumulative total. So a probe that
+        # finished 60 s+ before the operator hits Ctrl+C produces a
+        # status-file Auth-read=0 even though a real handshake clearly
+        # happened. The periodic poller below latches the max so the
+        # post-stop snapshot still sees the handshake.
+        self._max_auth_bytes_seen: int = 0
+        self._poll_task: asyncio.Task[None] | None = None
         # Comment that identifies our iptables INPUT counter rule. Per-port
         # so multiple OpenVPN responders on the same host don't collide.
         self._counter_comment = f"censprobe-ovpn-data-{self.port}"
@@ -147,6 +158,35 @@ verb 1
             raise RuntimeError(f"OpenVPN failed to start:\n{tail[-2000:]}")
         logger.info("OpenVPN responder started on UDP/%d (iface: %s)", self.port, _OVPN_SRV_IFACE)
         await install_counter("INPUT", self._counter_rule_args(), self._counter_comment)
+        self._poll_task = asyncio.create_task(self._latch_auth_bytes())
+
+    async def _latch_auth_bytes(self) -> None:
+        """Periodically read the status file and latch the running max.
+
+        Necessary because OpenVPN's ``Auth read bytes`` counter in p2p
+        static-key mode is per-peer-session: after the client peer
+        ages out (``keepalive 10 60`` → 60 s of no traffic), openvpn
+        zeros it out for the next would-be peer. A probe session that
+        completes well before the listener's ``Ctrl+C`` would
+        otherwise read auth_bytes=0 at stop and produce a false
+        listener-side BLOCKED verdict.
+
+        The poll interval is tied to OpenVPN's status-file refresh
+        interval (``status ... 5``) so we never miss a window: the
+        kernel writes a fresh status every 5 s, we read every 3 s.
+        """
+        while True:
+            try:
+                await asyncio.sleep(3.0)
+                _, b = self._read_status()
+                if b > self._max_auth_bytes_seen:
+                    self._max_auth_bytes_seen = b
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                # Status file might be temporarily unreadable on a busy
+                # filesystem — log at debug and try again on the next tick.
+                logger.debug("ovpn auth-latch poll error: %s", e)
 
     def _read_status(self) -> tuple[int, int]:
         """Parse status file → (handshake_observed, tunnel_bytes).
@@ -235,8 +275,18 @@ verb 1
 
     async def stop(self) -> None:
         """Capture final state, then terminate openvpn and cleanup."""
+        if self._poll_task is not None:
+            self._poll_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._poll_task
+            self._poll_task = None
         # Capture status BEFORE teardown so data_transfer_ok is observable.
-        self._final_handshake_count, self._final_bytes_received = self._read_status()
+        # Use max(latched, current) so a probe that finished long ago is
+        # still visible even if openvpn has zeroed the per-peer counter
+        # by the time we sample it here.
+        _, live_auth = self._read_status()
+        self._final_bytes_received = max(self._max_auth_bytes_seen, live_auth)
+        self._final_handshake_count = 1 if self._final_bytes_received > 0 else 0
         # Read the iptables data-packet counter while the rule is still
         # in place (``remove_counter`` deletes the rule and its counter).
         # Sums across iptables + ip6tables so an IPv6 client also flips
@@ -282,11 +332,17 @@ verb 1
 
     @property
     def connection_count(self) -> int:
-        """Handshake count snapshot (falls back to live read while running)."""
+        """Handshake count snapshot (falls back to live read while running).
+
+        Live-path uses ``max(latched, current)`` so a peer that aged
+        out before this read still counts as a handshake — the latched
+        max only resets when the responder restarts.
+        """
         if self._snapshot_taken:
             return self._final_handshake_count
-        hs, _ = self._read_status()
-        return hs
+        _, live_auth = self._read_status()
+        auth = max(self._max_auth_bytes_seen, live_auth)
+        return 1 if auth > 0 else 0
 
     def live_snapshot(self) -> LiveSnapshot:
         """Live-read sibling of the post-stop snapshot.
@@ -295,12 +351,17 @@ verb 1
         counter via the sync iptables helper (no event loop required —
         this runs in the cred-server's HTTP thread).
 
-        ``data_transfer_ok`` here applies the SAME AND-gate as the
-        post-stop ``data_transfer_ok`` property (handshake AND data
-        packets), so a snapshot taken mid-session and the listener's
-        eventual JSON verdict use the same predicate.
+        Uses ``max(latched, current Auth-read)`` so a probe that
+        completed > 60 s ago (and whose peer state openvpn has since
+        aged out, zeroing the live counter) still appears as a real
+        handshake. ``data_transfer_ok`` applies the SAME AND-gate as
+        the post-stop property (handshake AND data packets), so a
+        snapshot taken mid-session and the listener's eventual JSON
+        verdict use the same predicate.
         """
-        hs, auth_bytes = self._read_status()
+        _, live_auth = self._read_status()
+        auth_bytes = max(self._max_auth_bytes_seen, live_auth)
+        hs = 1 if auth_bytes > 0 else 0
         live_packets = read_counter_sync("INPUT", self._counter_comment)
         if hs == 0:
             data_ok = False
