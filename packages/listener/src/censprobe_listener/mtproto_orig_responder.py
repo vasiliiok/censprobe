@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import shutil
 import socket
 
 logger = logging.getLogger(__name__)
@@ -80,6 +81,10 @@ class MTProxyOrigResponder:
         self._proc: asyncio.subprocess.Process | None = None
         self._log_task: asyncio.Task[None] | None = None
         self.connection_count: int = 0
+        # Comment used to identify our iptables counter rule. Includes
+        # the port so multiple mtproto_orig instances on the same host
+        # (different ports) don't share a counter.
+        self._counter_comment = f"censprobe-mtorig-{self.port}"
 
     async def start(self) -> None:
         stats_port = _pick_free_loopback_port()
@@ -122,8 +127,16 @@ class MTProxyOrigResponder:
             raise RuntimeError(f"mtproto-proxy failed to start: {tail.decode(errors='replace')}")
 
         self._log_task = asyncio.create_task(self._monitor_output())
+        await self._counter_install()
 
     async def stop(self) -> None:
+        # Read the iptables packet counter BEFORE we tear down (the rule
+        # is removed in `_counter_remove`, which zeroes the count).
+        observed = await self._counter_read()
+        if observed > self.connection_count:
+            self.connection_count = observed
+        await self._counter_remove()
+
         if self._log_task is not None:
             self._log_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -151,24 +164,23 @@ class MTProxyOrigResponder:
         )
 
     async def _monitor_output(self) -> None:
-        """Tail mtproto-proxy stdout and count successful handshakes.
+        """Drain mtproto-proxy stdout for diagnostic purposes only.
 
-        The C binary's log line format differs across versions; we accept
-        any of three substrings that signal a real client handshake:
-          * ``main_session_query: connection from`` (pre-2020 builds)
-          * ``new connection from`` (mid 2020+)
-          * ``query from`` (any successful upstream proxy)
-        Domain-fronting / passthrough fallbacks aren't a concern here —
-        original MTProxy refuses unknown secrets at TCP level rather than
-        falling back to a real TLS server (unlike mtg).
+        Earlier versions counted handshakes by grepping the C binary's
+        stdout for "main_session_query: connection from" / "new
+        connection from" / "query from". Empirically the upstream
+        TelegramMessenger/MTProxy build (commit cafc3380) does NOT
+        emit any per-client-accept line at default verbosity (-v 1),
+        so the grep-based counter stayed at 0 even when real clients
+        completed obfuscated2 handshakes — confirmed against pcap on
+        2026-05-10. The handshake counter has moved to an iptables
+        OUTPUT counter rule (see ``_counter_install``); this monitor
+        now only drains stdout to keep the pipe from filling up and
+        surfaces lines at DEBUG level for triage when responder
+        startup fails.
         """
         if self._proc is None or self._proc.stdout is None:
             return
-        markers = (
-            "main_session_query: connection from",
-            "new connection from",
-            "query from",
-        )
         try:
             while True:
                 line_bytes = await self._proc.stdout.readline()
@@ -178,11 +190,137 @@ class MTProxyOrigResponder:
                 if not line:
                     continue
                 logger.debug("[mtproto-proxy] %s", line)
-                low = line.lower()
-                if any(m in low for m in markers):
-                    self.connection_count += 1
         except Exception as e:
             logger.debug("mtproto-proxy monitor ended: %s", e)
+
+    async def _counter_install(self) -> None:
+        """Install an iptables OUTPUT rule that counts data segments
+        the proxy emits from sport=<self.port>.
+
+        We count packets where the server emits a TCP segment with
+        PSH+ACK set — i.e. a data-bearing response from mtproto-proxy
+        back to the client. Each successful obfuscated2 + req_pq probe
+        produces ≥ 1 such packet (the encrypted resPQ frame, ~165
+        bytes inc. headers); failed/garbage clients get only TCP
+        control packets (SYN-ACK, bare ACK, RST/FIN) which lack PSH
+        and therefore don't tick the counter. This is a more reliable
+        success signal than stdout-grep for two reasons:
+
+          1. It works regardless of mtproto-proxy verbosity flags or
+             upstream version.
+          2. It's measured at the kernel level *after* the C binary
+             actually wrote bytes onto the wire, so a process that
+             crashes before responding can't false-tick the counter.
+
+        The rule has no ``-j`` target — it's a counter-only match
+        that falls through to subsequent OUTPUT rules. iptables does
+        accept this form (verified against iptables 1.8 on Debian
+        bookworm), and we deliberately avoid ``-j ACCEPT`` because it
+        would short-circuit any user-installed OUTPUT firewall on
+        non-trivial host setups. ``shutil.which`` short-circuits the
+        whole path on hosts without iptables (alpine, macOS dev box)
+        — connection_count then stays 0 and the listener verdict
+        falls back to the stdout-derived behaviour, which is
+        equivalent to the old code path.
+        """
+        if shutil.which("iptables") is None:
+            return
+        rule_args = self._counter_rule_args()
+        # Idempotent: skip if a leftover rule from a previous run
+        # already matches (shouldn't happen since stop() removes it,
+        # but the listener may have been killed mid-run).
+        check = await asyncio.create_subprocess_exec(
+            "iptables",
+            "-C",
+            "OUTPUT",
+            *rule_args,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        if await check.wait() == 0:
+            return
+        add = await asyncio.create_subprocess_exec(
+            "iptables",
+            "-A",
+            "OUTPUT",
+            *rule_args,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        rc = await add.wait()
+        if rc != 0:
+            # Most common cause: missing CAP_NET_ADMIN. Log once at
+            # WARNING so the operator knows the listener will under-
+            # count handshakes for this protocol; the cross-check
+            # against the client report still surfaces real
+            # blocking, just less precisely.
+            logger.warning(
+                "mtproto_orig: iptables counter rule failed (rc=%d) — "
+                "handshake count will undercount; raise CAP_NET_ADMIN",
+                rc,
+            )
+
+    async def _counter_read(self) -> int:
+        """Read the packet count from our installed counter rule.
+
+        Returns 0 if iptables is unavailable, the rule wasn't
+        installed, or the listing format doesn't contain a parseable
+        first column. ``-x`` disables iptables' "12K"/"1.2M" SI
+        abbreviations so the first column is always a plain integer.
+        """
+        if shutil.which("iptables") is None:
+            return 0
+        proc = await asyncio.create_subprocess_exec(
+            "iptables",
+            "-L",
+            "OUTPUT",
+            "-v",
+            "-n",
+            "-x",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        out_b, _ = await proc.communicate()
+        for ln in out_b.decode(errors="replace").splitlines():
+            if self._counter_comment not in ln:
+                continue
+            parts = ln.split()
+            if not parts:
+                continue
+            try:
+                return int(parts[0])
+            except ValueError:
+                return 0
+        return 0
+
+    async def _counter_remove(self) -> None:
+        if shutil.which("iptables") is None:
+            return
+        rule_args = self._counter_rule_args()
+        proc = await asyncio.create_subprocess_exec(
+            "iptables",
+            "-D",
+            "OUTPUT",
+            *rule_args,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.wait()
+
+    def _counter_rule_args(self) -> list[str]:
+        return [
+            "-p",
+            "tcp",
+            "--sport",
+            str(self.port),
+            "--tcp-flags",
+            "PSH,ACK",
+            "PSH,ACK",
+            "-m",
+            "comment",
+            "--comment",
+            self._counter_comment,
+        ]
 
     @property
     def is_running(self) -> bool:

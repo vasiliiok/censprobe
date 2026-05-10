@@ -98,16 +98,34 @@ def test_mtg_responder_handshake_marker() -> None:
     )
 
 
-def test_mtproto_orig_responder_handshake_markers() -> None:
-    """``MTProxyOrigResponder`` (TelegramMessenger/MTProxy) similarly
-    parses stdout in a custom path. Verify both markers it counts.
+def test_mtproto_orig_responder_uses_iptables_psh_ack_counter() -> None:
+    """``MTProxyOrigResponder`` no longer parses C-binary stdout for
+    handshake markers because the upstream TelegramMessenger/MTProxy
+    build (commit cafc3380) emits *no* per-client-accept line at
+    default verbosity (-v 1) — confirmed against pcap on 2026-05-10.
+    The handshake counter now lives in an iptables OUTPUT rule that
+    matches PSH+ACK packets emitted from sport=<port>; this snapshot
+    pins the rule shape so a future refactor can't silently switch
+    back to a stdout-grep path that would systematically under-count.
     """
     import inspect
 
     src = inspect.getsource(MTProxyOrigResponder)
-    for marker in ("new connection from", "query from"):
-        assert marker in src, (
-            f"MTProxyOrigResponder lost handshake marker {marker!r}. The "
-            f"original mtproto-proxy is rarely updated, but if its log "
-            f"format ever drifts, re-derive markers from a fresh build."
-        )
+    # The match string must remain `--tcp-flags PSH,ACK PSH,ACK` —
+    # bare ACK / SYN-ACK / FIN must not tick the counter, otherwise
+    # port scanners would inflate it.
+    assert '"--tcp-flags"' in src and '"PSH,ACK"' in src, (
+        "MTProxyOrigResponder lost the PSH,ACK iptables match — "
+        "the counter would tick on bare-ACK control segments and "
+        "scanner-induced TCP RSTs, producing false handshake counts."
+    )
+    # The OUTPUT chain (server-→-client direction) is what we want;
+    # INPUT would count incoming SYNs, which include port scanners
+    # that never complete the obfuscated2 handshake.
+    assert '"OUTPUT"' in src, (
+        "MTProxyOrigResponder counter must live on the OUTPUT chain so "
+        "only packets the proxy actually emitted in response are counted."
+    )
+    # Comment is the discriminator between our rule and any unrelated
+    # OUTPUT rules a host firewall may have installed.
+    assert "censprobe-mtorig" in src

@@ -34,3 +34,39 @@ def test_secret_for_argv_strips_dd_prefix(secret_in: str, expected_argv_secret: 
     # Argv form is exactly what the C binary's "-S" wants: 32 hex digits.
     assert r._secret_for_argv == expected_argv_secret
     assert len(r._secret_for_argv) == 32
+
+
+def test_iptables_counter_rule_args_match_psh_ack_on_sport() -> None:
+    """The OUTPUT counter rule must match data segments the proxy
+    emits and nothing else.
+
+    Specifically:
+      * ``-p tcp`` so non-TCP traffic isn't counted.
+      * ``--sport <port>`` so only the proxy's own outbound packets
+        count (--dport would count inbound segments, which never have
+        PSH set during a successful handshake the way we measure).
+      * ``--tcp-flags PSH,ACK PSH,ACK`` — bare ACK / SYN-ACK / FIN /
+        RST control segments are skipped; only data-bearing
+        PSH+ACK segments tick the counter.
+      * A unique comment so multiple responders / leftover rules
+        across listener restarts can be discriminated.
+    """
+    r = MTProxyOrigResponder(port=2080, secret="dd" + "0123456789abcdef" * 2)
+    args = r._counter_rule_args()
+    assert "-p" in args and "tcp" in args
+    assert "--sport" in args
+    assert "2080" in args
+    # The match arg pair appears in order.
+    flag_idx = args.index("--tcp-flags")
+    assert args[flag_idx + 1] == "PSH,ACK"
+    assert args[flag_idx + 2] == "PSH,ACK"
+    # Comment is per-port so two responders don't share a counter.
+    assert r._counter_comment.endswith("-2080")
+    assert "censprobe-mtorig" in r._counter_comment
+    assert r._counter_comment in args
+
+
+def test_per_port_counter_comments_are_unique() -> None:
+    a = MTProxyOrigResponder(port=2080, secret="dd" + "00" * 16)
+    b = MTProxyOrigResponder(port=4080, secret="dd" + "11" * 16)
+    assert a._counter_comment != b._counter_comment

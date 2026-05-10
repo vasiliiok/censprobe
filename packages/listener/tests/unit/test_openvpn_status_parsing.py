@@ -209,3 +209,52 @@ def test_data_transfer_ok_true_when_real_data_flowed(tmp_path: Path) -> None:
     r._snapshot_taken = True
     assert r.connection_count == 1
     assert r.data_transfer_ok is True
+
+
+def test_data_transfer_ok_when_iptables_counter_saw_a_data_packet(tmp_path: Path) -> None:
+    """The iptables INPUT counter is the canonical signal for short
+    probe sessions where Auth-read alone never crosses the legacy
+    1500-byte threshold.
+
+    Reproduces the GCP→DE clean-path observation on 2026-05-10:
+    Auth-read=364 (handshake control + 0–1 ICMP echoes) is below the
+    fallback threshold, but tcpdump showed three 140-byte data
+    packets reach the responder. ``_final_data_packets >= 1`` flips
+    ``data_transfer_ok`` to True so the listener verdict aligns with
+    the client's OK, even though Auth-read remained "small".
+    """
+    r = _make_responder(tmp_path, _PRODUCTION_HANDSHAKE_PLUS_KEEPALIVE_NO_DATA)
+    r._final_handshake_count, r._final_bytes_received = r._read_status()
+    r._final_data_packets = 1  # one ≥130-byte UDP datagram observed
+    r._snapshot_taken = True
+    assert r.connection_count == 1
+    assert r.data_transfer_ok is True
+
+
+def test_data_transfer_ok_falls_back_to_auth_read_when_counter_missing(tmp_path: Path) -> None:
+    """Hosts that drop iptables (e.g. macOS dev box) leave
+    ``_final_data_packets`` at 0; ``data_transfer_ok`` then reverts
+    to the auth-read threshold so we still flag long, data-rich
+    sessions correctly.
+    """
+    r = _make_responder(tmp_path, _REAL_HANDSHAKE_WITH_DATA)  # Auth=8192
+    r._final_handshake_count, r._final_bytes_received = r._read_status()
+    r._final_data_packets = 0  # iptables not available on this host
+    r._snapshot_taken = True
+    assert r.data_transfer_ok is True
+
+
+def test_iptables_rule_args_are_well_formed() -> None:
+    """The rule args feeding ``iptables -A INPUT ...`` must lock the
+    chain to inbound UDP on the configured port and require a length
+    of at least 130 bytes. The comment is per-port so a future
+    multi-instance setup keeps counters disjoint.
+    """
+    r = OpenVPNResponder(psk_pem="", port=1194)
+    args = r._counter_rule_args()
+    assert "-p" in args and "udp" in args
+    assert "--dport" in args
+    assert "1194" in args
+    length_idx = args.index("--length")
+    assert args[length_idx + 1].startswith("130")  # inclusive lower bound
+    assert "censprobe-ovpn-data-1194" in args
