@@ -57,6 +57,7 @@ from censprobe_listener.credentials import (
     generate_credentials,
 )
 from censprobe_listener.echo_server import EchoServer
+from censprobe_listener.preflight import CheckResult, run_preflight
 
 # Title reused for the three Rich panels that summarize client-network
 # state. Hoisted to a constant — Sonar S1192 otherwise flags the literal
@@ -156,6 +157,42 @@ def _load_config_or_exit() -> None:
         sys.exit(1)
 
 
+def _listener_udp_ports(port_overrides: dict[str, int]) -> list[int]:
+    """Resolve UDP-transport protocols to their actual bind ports.
+
+    Used by the pre-flight NOTRACK auto-setup. Reads the runtime port
+    overrides (which a port-allocator may have reshuffled, e.g. mtg
+    primary getting bumped off 443) and falls back to the registry's
+    ``default_port`` per protocol. Returns the de-duplicated list.
+    """
+    from censprobe_core.protocol_registry import all_protocols
+
+    ports: set[int] = set()
+    for spec in all_protocols():
+        if spec.transport != "udp":
+            continue
+        ports.add(port_overrides.get(spec.name, spec.default_port))
+    return sorted(ports)
+
+
+def _print_preflight(results: list[CheckResult]) -> None:
+    """Render pre-flight check results to the rich console.
+
+    Warnings are loud (yellow panel) so the operator sees them before
+    they puzzle over a half-broken probe run; ``ok``/``skip`` are
+    folded into a single dim line so the startup path stays quiet
+    when the host is healthy.
+    """
+    warnings = [r for r in results if r.status == "warn"]
+    if warnings:
+        body = "\n".join(f"[yellow]⚠ {r.name}:[/yellow] {r.message}" for r in warnings)
+        console.print(Panel(body, title="Pre-flight warnings", border_style="yellow"))
+    quiet = [r for r in results if r.status != "warn"]
+    if quiet:
+        line = " · ".join(f"{r.name}={r.status}" for r in quiet)
+        console.print(f"[dim]Pre-flight: {line}[/dim]")
+
+
 def _start_cred_server_or_exit(creds_yaml: str, creds_port: int) -> CredServer:
     """Bind the one-shot credentials HTTPS endpoint or exit cleanly."""
     cred_server = CredServer(creds_yaml=creds_yaml, port=creds_port)
@@ -239,12 +276,19 @@ async def _async_main(test_id: str, session_id: str, creds_port: int) -> None:
     # ── Step 0: Load top-level config (protocols.enabled, vantage list, …) ───
     _load_config_or_exit()
 
+    # ── Step 0b: Pre-flight environment checks ───────────────────────────────
+    # Surfaces conditions that would silently degrade verdicts mid-run
+    # (canonical: nf_conntrack table full → kernel drops handshakes
+    # before responders see them). Never aborts startup — operators may
+    # not have permission to fix sysctls — but every WARN is loud.
+    cfg = get_config()
+    _print_preflight(run_preflight(udp_ports=_listener_udp_ports(cfg.protocols.ports)))
+
     # ── Step 1: Generate fresh credentials in memory ──────────────────────────
     # Each session gets its own one-time credential set; nothing is written
     # to disk. The cred_server below hands them to the client over a
     # TLS-pinned channel and is shut down on Ctrl+C.
     console.print("[dim]Generating one-time credentials...[/dim]")
-    cfg = get_config()
     creds = generate_credentials(cfg.protocols.ports, cfg.protocols.sni)
 
     # ── Step 2: Start the credentials HTTPS endpoint ──────────────────────────

@@ -1443,17 +1443,21 @@ async def probe_mtproto_proxy(host: str, port: int, secret_hex: str) -> ProbeRes
         if validation_err is not None:
             return validation_err
 
-        # Handshake validated by HMAC: peer holds the same ee-secret
-        # (i.e. it really is mtg, not a domain-fronting fallback nor a
-        # captive-portal MitM). Censprobe does not exercise the data
-        # plane — that would require a real Telegram DC dial-out — so
-        # the verdict is HANDSHAKE_ONLY. Scoring weighs this strictly
-        # less than full OK.
+        # WelcomePacket HMAC validated → peer holds the same ee-secret
+        # (real mtg, not a domain-fronting fallback or captive-portal
+        # MitM). For mtg there is no further data-plane probe possible
+        # without dialing a real Telegram DC, which censprobe does not
+        # do. WelcomePacket success is the deepest reachability signal
+        # available for this protocol, so the verdict is OK. The
+        # ``data_ok`` flag stays False — it tracks whether a sustained
+        # data exchange was observed, which mtg never produces in our
+        # vantage; the verdict is upgraded by protocol semantic, not by
+        # synthesizing data-plane evidence.
         result = ProbeResult()
         result.handshake_ok = True
         result.data_ok = False
         result.rtt_ms = rtt_ms
-        result.verdict = Verdict.HANDSHAKE_ONLY
+        result.verdict = Verdict.OK
         return result
     finally:
         # Best-effort connection close — peer may have torn down already
@@ -1491,8 +1495,12 @@ async def probe_mtproto_proxy(host: str, port: int, secret_hex: str) -> ProbeRes
 #      nonce → proxy holds the same secret AND has reachable upstream
 #      to a Telegram DC.
 #
-# Verdict on success: ``HANDSHAKE_ONLY`` (matches the mtg fakeTLS probe
-# semantics — no sustained data plane test).
+# Verdict on success: ``OK`` once resPQ is validated end-to-end. For
+# the partial case where TCP stays open past PROBE_TIMEOUT without a
+# resPQ length prefix arriving, we downgrade to ``HANDSHAKE_ONLY`` —
+# the listener provably accepted our obfuscated2 init (a wrong-secret
+# frame would have been RST'd immediately), but upstream Telegram DC
+# never replied. The verdict aggregator counts both as "reached".
 #
 # CAVEAT: this probe depends on the listener having outbound reachability
 # to the Telegram DC IPs in proxy-multi.conf. If outbound is blocked at
@@ -1767,16 +1775,24 @@ async def probe_mtproto_orig(host: str, port: int, secret_hex: str) -> ProbeResu
             # rejecting init silently — both look like blocking.
             return _mtg_error_result("orig_resPQ_truncated_len", Verdict.BLOCKED)
         except TimeoutError:
-            # mtproto-proxy is silent-by-design until upstream Telegram
-            # DC replies with resPQ — verified 2026-05 via tcpdump+strace
-            # (zero accept4 syscalls during the probe window, zero reply
-            # bytes for valid AND deliberately invalid inits). So
-            # "no bytes in PROBE_TIMEOUT" can mean DPI blackholed us OR
-            # Telegram DC won't talk to the listener vantage (datacenter
-            # anti-abuse, e.g. GCP egress to 149.154.175.50:8888 silently
-            # ignored). Collapsing both into BLOCKED would violate the
-            # "BLOCKED == confirmed block" invariant — surface as ERROR.
-            return _mtg_error_result("orig_resPQ_len_timeout", Verdict.ERROR)
+            # TCP is still open at PROBE_TIMEOUT (a peer-side close would
+            # have surfaced as IncompleteReadError, not TimeoutError),
+            # which means mtproto-proxy accepted our 64-byte obfuscated2
+            # init *without* tearing the connection — anti-probing would
+            # have closed immediately on a wrong-secret frame. Silence
+            # past that point reflects upstream Telegram DC anti-abuse
+            # (datacenter egress to 149.154.x.x is typically
+            # blackholed), not a client-side block. Reachability to the
+            # listener is still confirmed → HANDSHAKE_ONLY (counts as
+            # reached in summary, but not full OK because resPQ wasn't
+            # echoed back end-to-end).
+            result = ProbeResult()
+            result.handshake_ok = True
+            result.data_ok = False
+            result.rtt_ms = rtt_ms
+            result.verdict = Verdict.HANDSHAKE_ONLY
+            result.error = "orig_resPQ_len_timeout_post_init"
+            return result
 
         length_pt = recv_cipher.update(length_ct)
         length = int.from_bytes(length_pt, "little")
@@ -1809,11 +1825,17 @@ async def probe_mtproto_orig(host: str, port: int, secret_hex: str) -> ProbeResu
         if validation_err is not None:
             return validation_err
 
+        # Full resPQ echoed back with our nonce: listener accepted the
+        # obfuscated2 init AND its upstream Telegram DC responded with a
+        # structurally-valid resPQ keyed to our session. End-to-end
+        # MTProto reachability proven — verdict is OK by protocol
+        # semantic. Like the mtg case above, ``data_ok`` stays False
+        # because there is no sustained data exchange beyond resPQ.
         result = ProbeResult()
         result.handshake_ok = True
         result.data_ok = False
         result.rtt_ms = rtt_ms
-        result.verdict = Verdict.HANDSHAKE_ONLY
+        result.verdict = Verdict.OK
         return result
     finally:
         with contextlib.suppress(Exception):

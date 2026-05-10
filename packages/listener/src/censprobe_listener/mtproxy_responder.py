@@ -189,13 +189,12 @@ class MTProxyResponder:
         # Censprobe's mtproto_proxy probe validates the faketls
         # WelcomePacket HMAC and then closes — it never opens an
         # upstream Telegram DC stream. So from the listener's
-        # perspective there is NO data-plane evidence to observe:
-        # everything we see is at the handshake layer. Returning
-        # ``False`` here makes the verdict aggregator consistently
-        # produce HANDSHAKE_ONLY (matching the client, which uses
-        # exactly the same HMAC-only criterion). Returning ``True``
-        # on connection_count > 0 — as the previous version did —
-        # produced false-OK verdicts at the listener while the
-        # client correctly reported HANDSHAKE_ONLY, splitting the
-        # dashboard's reachability matrix without informational gain.
+        # perspective there is NO sustained data plane to observe:
+        # everything we see is at the handshake layer. Keep this
+        # ``False`` so the listener report does NOT claim data-plane
+        # evidence it cannot have. The client-side verdict for mtg
+        # was upgraded (HANDSHAKE_ONLY → OK) by protocol semantic in
+        # ``protocol_probes.probe_mtproto_proxy`` — that decision
+        # belongs at the probe layer, not here, because the listener
+        # genuinely doesn't observe data-plane bytes.
         return False
