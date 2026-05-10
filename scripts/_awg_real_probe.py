@@ -70,12 +70,21 @@ async def main() -> None:
     # wrapper).
     creds = yaml.safe_load(body)
     awg = creds["amneziawg"]
-    print(f"[+] AWG creds OK: port={awg['port']} jc={awg['jc']} s1={awg['s1']} s2={awg['s2']}", flush=True)
+    print(
+        f"[+] AWG creds OK: port={awg['port']} jc={awg['jc']} s1={awg['s1']} s2={awg['s2']}",
+        flush=True,
+    )
 
     obf = AmneziaWGObfuscation(
-        jc=awg["jc"], jmin=awg["jmin"], jmax=awg["jmax"],
-        s1=awg["s1"], s2=awg["s2"],
-        h1=awg["h1"], h2=awg["h2"], h3=awg["h3"], h4=awg["h4"],
+        jc=awg["jc"],
+        jmin=awg["jmin"],
+        jmax=awg["jmax"],
+        s1=awg["s1"],
+        s2=awg["s2"],
+        h1=awg["h1"],
+        h2=awg["h2"],
+        h3=awg["h3"],
+        h4=awg["h4"],
     )
 
     print(f"[+] probing AWG {host}:{awg['port']} (run 1) …", flush=True)
