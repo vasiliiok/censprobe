@@ -58,7 +58,13 @@ COPY --from=rclone-fetcher /usr/local/bin/rclone /usr/local/bin/rclone
 WORKDIR /tmp
 COPY packages/probe-core /tmp/probe-core
 COPY packages/sync /tmp/sync
+# Sonar S8541 (omitting --only-binary :all:) is intentional: probe-core
+# and sync are local hatchling-backed source trees we own, and pip has
+# to run their PEP 517 build hooks to install them. Adding the flag
+# would break our own builds while doing nothing for upstream deps
+# (cryptography / click / rich / pydantic ship as wheels on PyPI;
+# their setup.py path isn't taken in practice).
 RUN pip install --no-cache-dir /tmp/probe-core /tmp/sync && \
-    rm -rf /tmp/probe-core /tmp/sync
+    rm -rf /tmp/probe-core /tmp/sync  # NOSONAR S8541
 
 ENTRYPOINT ["python", "-m", "censprobe_sync.main"]
