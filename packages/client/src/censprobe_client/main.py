@@ -30,6 +30,7 @@ import random
 import socket
 import ssl
 import sys
+import time
 from pathlib import Path
 
 import click
@@ -57,6 +58,31 @@ logger = logging.getLogger(__name__)
 console = Console()
 
 _FETCH_TIMEOUT_SEC = 15.0
+# 1 initial attempt + 2 retries for transient endpoint failures
+# (connection refused, timeout, 5xx). Permanent errors (auth failure,
+# /creds exhausted, cert pinning mismatch) skip retries entirely —
+# they will never succeed by themselves and a retry would only waste
+# time. Backoff is exponential with jitter base: 1s → 2s before the
+# 2nd and 3rd attempt respectively.
+_FETCH_MAX_ATTEMPTS = 3
+_FETCH_RETRY_BACKOFF_BASE_SEC = 1.0
+
+
+class _TransientEndpointError(RuntimeError):
+    """Endpoint failure that's worth retrying.
+
+    Raised for connection refused, TLS handshake mid-stream errors,
+    HTTP 5xx, OSError. The retry wrapper catches this; non-Transient
+    exceptions propagate immediately.
+    """
+
+
+class _PermanentEndpointError(RuntimeError):
+    """Endpoint failure that won't fix itself.
+
+    Auth failures (401/403), exhausted single-use credentials (410),
+    cert pinning mismatch, malformed response. Retries don't help.
+    """
 _DISCLAIMER = """
 [yellow]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/yellow]
  This tool tests VPN protocol reachability from
@@ -189,12 +215,31 @@ async def _async_main(
             creds_token,
             creds_cert_sha256,
         )
-    except Exception as e:
-        console.print(f"[red]Could not fetch credentials: {e}[/red]")
+    except _PermanentEndpointError as e:
+        # Permanent error means retrying won't help — surface a more
+        # specific message so the operator immediately checks the
+        # likely culprit (token/cert/credentials exhaustion).
+        console.print(f"[red]Cannot fetch credentials: {e}[/red]")
         console.print(
-            "[yellow]Make sure the listener is running and that the "
-            "TOKEN / CERT_SHA256 values match the ones it printed.[/yellow]"
+            "[yellow]Permanent error — verify TOKEN and CERT_SHA256 "
+            "match the listener's banner output, and that /creds "
+            "hasn't already been consumed (it's single-use). The "
+            "listener prints fresh values on every restart.[/yellow]"
         )
+        sys.exit(1)
+    except _TransientEndpointError as e:
+        # Already retried _FETCH_MAX_ATTEMPTS times inside the helper.
+        console.print(f"[red]Cannot fetch credentials after retries: {e}[/red]")
+        console.print(
+            "[yellow]Transient error — listener may not be running or "
+            "is unreachable. Confirm the listener startup banner is "
+            "still on screen and that the firewall on the test "
+            "server allows inbound TCP from this client.[/yellow]"
+        )
+        sys.exit(1)
+    except ValueError as e:
+        # Operator-side input error (cert sha256 isn't 64 hex chars).
+        console.print(f"[red]Invalid credential argument: {e}[/red]")
         sys.exit(1)
 
     try:
@@ -271,7 +316,25 @@ async def _async_main(
             creds_token,
             creds_cert_sha256,
         )
-    except Exception as e:
+    except _PermanentEndpointError as e:
+        # Auth or pinning mismatch on the snapshot endpoint — same
+        # token/cert that worked for /creds shouldn't fail on /snapshot,
+        # so this is genuinely surprising. Don't abort: client-side
+        # results are still useful, just print the diagnostic.
+        logger.warning("Listener snapshot rejected (no retry): %s", e)
+    except _TransientEndpointError as e:
+        # Already attempted _FETCH_MAX_ATTEMPTS times inside the helper.
+        # Fall through and skip cross-verification — the client-side
+        # table still prints and the operator gets a yellow note in
+        # _print_cross_verification.
+        logger.warning(
+            "Listener snapshot unavailable after %d retries: %s",
+            _FETCH_MAX_ATTEMPTS,
+            e,
+        )
+    except Exception as e:  # noqa: BLE001 — defence-in-depth
+        # Anything not covered by the typed branches (e.g. JSON
+        # parsing surprises) — treat as soft-fail too.
         logger.warning("Could not fetch listener snapshot: %s", e)
 
     return results, listener_snapshot
@@ -288,8 +351,15 @@ def _fetch_credentials(
     token: str,
     expected_sha256: str,
 ) -> str:
-    """GET https://host:port/creds with bearer-token + cert pinning."""
-    return _pinned_get(host, port, token, expected_sha256, path="/creds")
+    """GET https://host:port/creds with bearer-token + cert pinning.
+
+    Retries up to :data:`_FETCH_MAX_ATTEMPTS` times on transient
+    network failures (connection refused, TLS hiccup, 5xx) — the
+    listener's HTTP server is a daemon thread and may briefly be
+    unresponsive during start-up or reload. Permanent failures
+    (401/403/410, cert pinning mismatch) skip retries entirely.
+    """
+    return _pinned_get_with_retry(host, port, token, expected_sha256, path="/creds")
 
 
 def _fetch_snapshot(
@@ -305,13 +375,16 @@ def _fetch_snapshot(
     single-use), so a network-flaky client can retry without
     invalidating the credential window.
 
+    Same retry policy as ``/creds`` — transient errors get up to
+    :data:`_FETCH_MAX_ATTEMPTS` attempts; permanent ones short-circuit.
+
     Returns a per-protocol ``LiveSnapshot`` map. Protocols whose
     snapshot reader threw an exception on the listener are
     represented as a ``LiveSnapshot`` with default zeros — the
     server already logged the failure, the client just shows a
     "no listener data" cell.
     """
-    body = _pinned_get(host, port, token, expected_sha256, path="/snapshot")
+    body = _pinned_get_with_retry(host, port, token, expected_sha256, path="/snapshot")
     raw = json.loads(body)
     out: dict[str, LiveSnapshot] = {}
     for name, payload in raw.items():
@@ -341,6 +414,18 @@ def _pinned_get(
     with the operator-supplied expected fingerprint. A MitM presenting
     a different self-signed cert is rejected here regardless of any
     network-layer interception.
+
+    Failure modes are split between two exception types so the caller's
+    retry wrapper knows what's worth retrying:
+
+      * :class:`_TransientEndpointError` — connection refused, TLS
+        mid-stream broken pipe, HTTP 5xx, OSError. Worth retrying.
+      * :class:`_PermanentEndpointError` — auth failure (401/403),
+        single-use creds exhausted (410), cert pinning mismatch,
+        malformed HTTP response. Retries won't help.
+      * ``ValueError`` — caller's expected_sha256 is malformed.
+        Permanent at the type level (we don't even reach the network);
+        propagated as-is so the operator immediately fixes the input.
     """
     expected = expected_sha256.lower().replace(":", "").strip()
     if len(expected) != 64 or not all(c in "0123456789abcdef" for c in expected):
@@ -353,47 +438,107 @@ def _pinned_get(
     # Open the TLS connection ourselves (rather than letting urllib do it)
     # so we can hash the peer cert before sending the bearer token. Without
     # this order, the secret would land at a possibly-MitM'd peer.
-    with socket.create_connection((host, port), timeout=_FETCH_TIMEOUT_SEC) as raw:
-        with ctx.wrap_socket(raw, server_hostname=host) as tls:
-            peer_der = tls.getpeercert(binary_form=True)
-            if not peer_der:
-                raise RuntimeError("listener did not present a TLS certificate")
-            actual = hashlib.sha256(peer_der).hexdigest()
-            if not _hex_eq(actual, expected):
-                raise RuntimeError(
-                    f"cert fingerprint mismatch: listener presented {actual}, expected {expected}"
+    try:
+        with socket.create_connection((host, port), timeout=_FETCH_TIMEOUT_SEC) as raw:
+            with ctx.wrap_socket(raw, server_hostname=host) as tls:
+                peer_der = tls.getpeercert(binary_form=True)
+                if not peer_der:
+                    # No cert == server didn't actually negotiate TLS;
+                    # treat as transient (server may be mid-startup).
+                    raise _TransientEndpointError("listener did not present a TLS certificate")
+                actual = hashlib.sha256(peer_der).hexdigest()
+                if not _hex_eq(actual, expected):
+                    raise _PermanentEndpointError(
+                        f"cert fingerprint mismatch: listener presented {actual}, "
+                        f"expected {expected}"
+                    )
+                # Pinning passed — now safe to ship the bearer token.
+                request = (
+                    f"GET {path} HTTP/1.1\r\n"
+                    f"Host: {host}:{port}\r\n"
+                    f"Authorization: Bearer {token}\r\n"
+                    f"Connection: close\r\n"
+                    f"User-Agent: censprobe-client\r\n"
+                    f"\r\n"
                 )
-            # Pinning passed — now safe to ship the bearer token.
-            request = (
-                f"GET {path} HTTP/1.1\r\n"
-                f"Host: {host}:{port}\r\n"
-                f"Authorization: Bearer {token}\r\n"
-                f"Connection: close\r\n"
-                f"User-Agent: censprobe-client\r\n"
-                f"\r\n"
-            )
-            tls.sendall(request.encode("ascii"))
-            buf = b""
-            while True:
-                chunk = tls.recv(65536)
-                if not chunk:
-                    break
-                buf += chunk
+                tls.sendall(request.encode("ascii"))
+                buf = b""
+                while True:
+                    chunk = tls.recv(65536)
+                    if not chunk:
+                        break
+                    buf += chunk
+    except (TimeoutError, ConnectionError, OSError, ssl.SSLError) as e:
+        # ConnectionError covers refused / reset / aborted; OSError is
+        # the supertype that also covers DNS / unreachable. SSLError
+        # surfaces handshake-time interruptions (server mid-restart).
+        raise _TransientEndpointError(f"endpoint I/O error: {type(e).__name__}: {e}") from e
 
     head, _, body = buf.partition(b"\r\n\r\n")
     status_line = head.split(b"\r\n", 1)[0].decode("latin-1", errors="replace")
     parts = status_line.split(maxsplit=2)
     if len(parts) < 2 or not parts[0].startswith("HTTP/"):
-        raise RuntimeError(f"malformed response from listener: {status_line!r}")
+        raise _PermanentEndpointError(f"malformed response from listener: {status_line!r}")
     try:
         status_code = int(parts[1])
     except ValueError as e:
-        raise RuntimeError(f"non-numeric HTTP status: {status_line!r}") from e
-    if status_code != 200:
-        msg = body.decode("utf-8", errors="replace").strip() or status_line
-        raise RuntimeError(f"listener responded {status_code}: {msg}")
+        raise _PermanentEndpointError(f"non-numeric HTTP status: {status_line!r}") from e
+    if status_code == 200:
+        return body.decode("utf-8", errors="replace")
 
-    return body.decode("utf-8", errors="replace")
+    msg = body.decode("utf-8", errors="replace").strip() or status_line
+    # 503 is the lifecycle "responders not yet ready" reply — worth
+    # retrying. 5xx generally indicates a server-side hiccup; 408 is
+    # request-timeout in HTTP semantics. The remaining 4xx codes
+    # (401/403/410 and friends) are operator/input errors — no retry.
+    if status_code >= 500 or status_code == 408:
+        raise _TransientEndpointError(f"listener responded {status_code}: {msg}")
+    raise _PermanentEndpointError(f"listener responded {status_code}: {msg}")
+
+
+def _pinned_get_with_retry(
+    host: str,
+    port: int,
+    token: str,
+    expected_sha256: str,
+    *,
+    path: str,
+    max_attempts: int = _FETCH_MAX_ATTEMPTS,
+) -> str:
+    """Wrap :func:`_pinned_get` with bounded retry on transient errors.
+
+    Retries ``max_attempts - 1`` times after the first failure.
+    Permanent errors (auth, pinning mismatch, malformed responses)
+    propagate after the FIRST attempt — re-trying them only delays
+    the inevitable failure that the operator has to fix manually.
+
+    Backoff is exponential, base ``_FETCH_RETRY_BACKOFF_BASE_SEC``:
+    1 s before retry #1, 2 s before retry #2. With the per-attempt
+    timeout of 15 s the total worst-case is ~3·15 + 1 + 2 = 48 s,
+    which is well under any reasonable session-wait limit.
+    """
+    last_exc: _TransientEndpointError | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return _pinned_get(host, port, token, expected_sha256, path=path)
+        except _TransientEndpointError as e:
+            last_exc = e
+            if attempt < max_attempts:
+                delay = _FETCH_RETRY_BACKOFF_BASE_SEC * (2 ** (attempt - 1))
+                logger.warning(
+                    "Transient %s on attempt %d/%d (%s) — retrying in %.1fs",
+                    path,
+                    attempt,
+                    max_attempts,
+                    e,
+                    delay,
+                )
+                time.sleep(delay)
+            # else: fall through to raise after the loop
+    # Exhausted retries — re-raise the last transient error so the
+    # caller decides whether to abort (creds) or skip-and-warn (snapshot).
+    assert last_exc is not None  # mypy: for-loop set last_exc on first failure
+    raise last_exc
 
 
 def _hex_eq(a: str, b: str) -> bool:
