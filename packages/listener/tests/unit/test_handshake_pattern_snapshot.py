@@ -98,6 +98,32 @@ def test_mtg_responder_handshake_marker() -> None:
     )
 
 
+def test_mtg_responder_uses_iptables_psh_ack_counter_for_data_transfer() -> None:
+    """``MTProxyResponder`` derives ``data_transfer_ok`` from a kernel-
+    level PSH+ACK counter so the listener finally has an independent
+    cross-check against the client's faketls + resPQ verdict.
+
+    Pinning the OUTPUT chain + PSH,ACK match + per-port comment so a
+    refactor can't silently revert to ``data_transfer_ok = False``
+    (which left the listener stuck at HANDSHAKE_ONLY for mtg even on
+    a clean path).
+    """
+    import inspect
+
+    src = inspect.getsource(MTProxyResponder)
+    assert '"--tcp-flags"' in src and '"PSH,ACK"' in src, (
+        "MTProxyResponder lost the PSH,ACK match — counter would tick "
+        "on bare ACK / SYN-ACK / FIN, inflating data_transfer_ok with "
+        "control segments that aren't proof of relayed data plane."
+    )
+    assert '"OUTPUT"' in src, (
+        "MTProxyResponder counter must live on OUTPUT — INPUT would "
+        "count incoming SYNs from port scanners and falsely credit them "
+        "as 'mtg responded with data'."
+    )
+    assert "censprobe-mtg" in src
+
+
 def test_mtproto_orig_responder_uses_iptables_psh_ack_counter() -> None:
     """``MTProxyOrigResponder`` no longer parses C-binary stdout for
     handshake markers because the upstream TelegramMessenger/MTProxy

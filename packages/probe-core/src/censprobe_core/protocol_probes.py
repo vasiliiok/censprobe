@@ -1415,6 +1415,41 @@ def _validate_welcome_packet(
 
 
 async def probe_mtproto_proxy(host: str, port: int, secret_hex: str) -> ProbeResult:
+    """Three-signal probe of mtg (faketls + obfuscated2 + relayed MTProto).
+
+    Sequence:
+        1. Open TCP, send fake-TLS ClientHello with HMAC-derived random.
+        2. Receive WelcomePacket (3 TLS records), validate the HMAC over
+           the entire concatenation — proves the peer holds the same
+           ee-secret. A captive-portal / domain-fronting MitM cannot
+           reproduce this HMAC because the secret never leaves the
+           listener-issued credentials channel.
+        3. **Send obfuscated2 init + encrypted req_pq_multi as a TLS
+           ApplicationData record** (mtg unwraps records on read; see
+           ``_exchange_obfuscated2_respq`` docstring) and validate the
+           encrypted resPQ that comes back from the upstream Telegram DC
+           via mtg's relay. This third stage is what raised the
+           cryptographic bar from "WelcomePacket HMAC valid" to "full
+           MTProto handshake completed end-to-end through mtg → DC".
+
+    Why three signals: stage 2 alone proved the *responder* holds the
+    secret, but did not exercise mtg's relay or the DC reachability.
+    Stage 3 closes that gap — a censor that allows the faketls handshake
+    but blocks subsequent mtproto traffic (the realistic ТСПУ pattern of
+    "let TLS through, drop everything else") gets caught at stage 3,
+    not at stage 2.
+
+    Verdicts:
+        OK              — all three stages succeeded; full data-plane
+                          path through mtg → Telegram DC verified.
+        HANDSHAKE_ONLY  — WelcomePacket HMAC OK but resPQ length-read
+                          timed out: mtg accepted our obfuscated2 init,
+                          DC-side blackholed (or DPI severed mid-stream
+                          before the DC could reply).
+        BLOCKED         — anything tearing the TCP / failing structural
+                          checks. Each preserves the strict
+                          "BLOCKED implies confirmed block" invariant.
+    """
     parsed = _parse_mtproto_secret(secret_hex)
     if isinstance(parsed, ProbeResult):
         return parsed
@@ -1445,14 +1480,24 @@ async def probe_mtproto_proxy(host: str, port: int, secret_hex: str) -> ProbeRes
 
         # WelcomePacket HMAC validated → peer holds the same ee-secret
         # (real mtg, not a domain-fronting fallback or captive-portal
-        # MitM). For mtg there is no further data-plane probe possible
-        # without dialing a real Telegram DC, which censprobe does not
-        # do. WelcomePacket success is the deepest reachability signal
-        # available for this protocol, so the verdict is OK. The
-        # ``data_ok`` flag stays False — it tracks whether a sustained
-        # data exchange was observed, which mtg never produces in our
-        # vantage; the verdict is upgraded by protocol semantic, not by
-        # synthesizing data-plane evidence.
+        # MitM). Continue with the obfuscated2 + req_pq_multi exchange
+        # to also prove that mtg's upstream relay to a real Telegram DC
+        # is alive — otherwise a DPI box that allows the faketls
+        # handshake (which looks like a real TLS 1.3 session) but blocks
+        # subsequent obfuscated bytes would still report OK.
+        respq_err = await _exchange_obfuscated2_respq(
+            reader, writer, secret_key, wrap_inner_in_tls_record=True
+        )
+        if respq_err is not None:
+            if respq_err.rtt_ms is None:
+                respq_err.rtt_ms = rtt_ms
+            return respq_err
+
+        # All three stages passed: TCP + faketls (HMAC-secret proof) +
+        # full MTProto resPQ via the relayed DC connection. End-to-end
+        # data-plane reachability cryptographically proven. ``data_ok``
+        # stays False to keep the same convention as mtproto_orig — the
+        # one-shot resPQ is not a sustained data exchange.
         result = ProbeResult()
         result.handshake_ok = True
         result.data_ok = False
@@ -1717,39 +1762,239 @@ def _validate_res_pq(body_pt: bytes, expected_nonce: bytes) -> ProbeResult | Non
     return None
 
 
-async def probe_mtproto_orig(host: str, port: int, secret_hex: str) -> ProbeResult:
-    """Two-signal probe of the original Telegram MTProxy (C, obfuscated2).
+class _TlsRecordReader:
+    """Streaming demuxer for mtg's faketls server→client direction.
 
-    Sequence:
-        1. Open TCP.
-        2. Build obfuscated2 init + AES-CTR pair from the secret.
-        3. Build encrypted req_pq_multi padded-intermediate frame.
-        4. Send (init || encrypted_req_pq) in one drain.
-        5. Read 4-byte LE encrypted length, decrypt, sanity-check.
-        6. Read ``length`` encrypted body bytes, decrypt.
-        7. Validate decrypted body matches resPQ with our nonce.
+    mtg wraps the proxy's outbound bytes in TLS application_data records
+    via ``mtglib/internal/doppel/conn.go::Conn.start``: doppelGanger's
+    ``Write`` buffers bytes from the upstream relay, then a goroutine
+    chunks them into ApplicationData records with size/delay drawn from
+    measured cert-chain noise distribution and writes via
+    ``tls.WriteRecordInPlace``. So we can NOT just ``readexactly(N)`` on
+    the raw socket and feed it to ``recv_cipher`` — the first 5 bytes
+    are the TLS record header, the next ``record_len`` are payload, then
+    the next 5 are another header, and so on.
 
-    Verdicts:
-        OK signal:        not produced — censprobe never exercises the
-                          full MTProto auth-key flow.
-        HANDSHAKE_ONLY:   resPQ validated end-to-end. Proves both
-                          "obfuscated2 survives the path" AND "proxy +
-                          its upstream Telegram DC are reachable".
-        BLOCKED:          any TCP RST / timeout / decrypted-frame
-                          mismatch. The error string distinguishes
-                          init-side failures (TCP layer) from
-                          resPQ-side failures (TL parsing) for triage.
+    Verified empirically by pcap capture of an mtg session on 2026-05-10:
+    the resPQ response landed as a single 182-byte segment whose first
+    five bytes were ``17 03 03 00 b1`` — an ApplicationData record of
+    length 0xb1=177, followed by 177 bytes of obfuscated2 ciphertext.
+
+    This reader strips the record framing and exposes a flat inner-byte
+    interface to the caller. Records that aren't ApplicationData are
+    treated as a protocol error (mtg never sends Handshake/Alert
+    records post-WelcomePacket).
+    """
+
+    _RECORD_HDR_LEN = 5
+    _APP_DATA_TYPE = 0x17
+
+    def __init__(self, reader: asyncio.StreamReader) -> None:
+        self._reader = reader
+        self._buf = bytearray()
+
+    async def read_inner(self, n: int, timeout: float) -> bytes | ProbeResult:
+        """Read exactly ``n`` inner-stream bytes across as many TLS records
+        as needed.
+
+        Returns the requested bytes on success, or a populated
+        :class:`ProbeResult` describing the failure mode. The error
+        string and verdict mirror the raw-read failure modes of the
+        non-faketls path so the caller doesn't need to distinguish
+        "record framing broke" from "underlying socket broke" — both
+        surface as the same probe-layer outcome.
+        """
+        while len(self._buf) < n:
+            try:
+                hdr = await asyncio.wait_for(
+                    self._reader.readexactly(self._RECORD_HDR_LEN), timeout=timeout
+                )
+            except asyncio.IncompleteReadError:
+                return _mtg_error_result("orig_resPQ_truncated_len", Verdict.BLOCKED)
+            except TimeoutError:
+                # Empty buffer + record-header timeout = mtg accepted our
+                # obfuscated2 init but DC-side never relayed anything back.
+                # Treat as HANDSHAKE_ONLY rather than BLOCKED to preserve
+                # the strict "BLOCKED implies confirmed block" invariant.
+                # Body-read timeout (buf already has bytes) is the
+                # ambiguous mid-stream-stall ERROR case.
+                if not self._buf:
+                    result = ProbeResult()
+                    result.handshake_ok = True
+                    result.data_ok = False
+                    result.verdict = Verdict.HANDSHAKE_ONLY
+                    result.error = "orig_resPQ_len_timeout_post_init"
+                    return result
+                return _mtg_error_result("orig_resPQ_body_timeout", Verdict.ERROR)
+            if hdr[0] != self._APP_DATA_TYPE:
+                return _mtg_error_result(
+                    f"orig_resPQ_unexpected_tls_record_type=0x{hdr[0]:02x}",
+                    Verdict.BLOCKED,
+                )
+            record_len = int.from_bytes(hdr[3:5], "big")
+            # Bound the per-record allocation so a misbehaving peer (or
+            # DPI injection of a fake header advertising 64 KiB) can't
+            # wedge the probe forever.
+            if record_len <= 0 or record_len > 16384:
+                return _mtg_error_result(
+                    f"orig_resPQ_bad_tls_record_len={record_len}", Verdict.BLOCKED
+                )
+            try:
+                body = await asyncio.wait_for(self._reader.readexactly(record_len), timeout=timeout)
+            except asyncio.IncompleteReadError:
+                return _mtg_error_result(
+                    f"orig_resPQ_truncated_record_body_expected={record_len}",
+                    Verdict.BLOCKED,
+                )
+            except TimeoutError:
+                return _mtg_error_result("orig_resPQ_body_timeout", Verdict.ERROR)
+            self._buf.extend(body)
+        out = bytes(self._buf[:n])
+        del self._buf[:n]
+        return out
+
+
+async def _exchange_obfuscated2_respq(
+    reader: asyncio.StreamReader,
+    writer: asyncio.StreamWriter,
+    secret_key: bytes,
+    *,
+    wrap_inner_in_tls_record: bool,
+) -> ProbeResult | None:
+    """Send obfuscated2 init + req_pq_multi over an open TCP stream and
+    validate the encrypted resPQ that comes back from the upstream Telegram
+    DC, hop-relayed by the proxy.
+
+    Shared by ``probe_mtproto_orig`` (raw obfuscated2 stream — pass
+    ``wrap_inner_in_tls_record=False``) and ``probe_mtproto_proxy``
+    (post-WelcomePacket — pass ``wrap_inner_in_tls_record=True``).
+
+    The ``wrap_inner_in_tls_record`` flag applies to BOTH directions on
+    an mtg connection. Verified against
+    ``github.com/9seconds/mtg/mtglib/proxy.go::doFakeTLSHandshake`` (commit
+    269852a4):
+
+      * client→server: ``tls.New(ctx.clientConn, true, false)`` — read
+        side ON, write side OFF. mtg unwraps TLS application_data
+        records sent by the client.
+      * server→client: doppelGanger wraps every relayed write in a TLS
+        application_data record (see
+        ``mtglib/internal/doppel/conn.go``: ``Conn.start`` calls
+        ``tls.WriteRecordInPlace`` on every drained chunk). The
+        doppelGanger layer is chained AFTER ``tls.New`` and adds its
+        own framing, so the bytes on wire from server→client ARE
+        TLS-framed even though the ``tls.New`` write side wouldn't
+        have added them.
+
+    Returns ``None`` on a fully-validated resPQ exchange. Returns a
+    populated :class:`ProbeResult` with verdict already set on any
+    failure mode:
+
+      * ``BLOCKED`` for a TCP-layer slam (write fail / FIN-before-len /
+        body truncation after a valid length prefix). Each of these
+        means a third party severed the connection AFTER we wrote the
+        obfuscated init — i.e. observed the L7 content and acted on it.
+      * ``HANDSHAKE_ONLY`` for length-read timeout while TCP stays open
+        — proxy accepted our init bytes (a wrong-secret frame would
+        have RST'd immediately) but the upstream DC never replied.
+      * ``ERROR`` for a body-read timeout after we already got a valid
+        length — ambiguous mid-stream stall, neither confirmed BLOCK
+        nor confirmed reachability. Preserves the strict
+        "BLOCKED implies confirmed block" invariant.
     """
     import secrets as _secrets
-
-    parsed = _parse_mtproxy_orig_secret(secret_hex)
-    if isinstance(parsed, ProbeResult):
-        return parsed
-    secret_key = parsed
 
     init_bytes, send_cipher, recv_cipher = _build_obfuscated2_init(secret_key)
     nonce = _secrets.token_bytes(16)
     req_pq_encrypted = _build_req_pq_frame(nonce, send_cipher)
+
+    inner = init_bytes + req_pq_encrypted
+    if wrap_inner_in_tls_record:
+        # ApplicationData(0x17) || TLS1.2 version(0x0303) || 2-byte BE length
+        # || payload. The init+req_pq is < 200 B in practice, well under
+        # the 16 KiB TLS record limit, so a single record fits.
+        on_wire = b"\x17\x03\x03" + len(inner).to_bytes(2, "big") + inner
+    else:
+        on_wire = inner
+
+    writer.write(on_wire)
+    try:
+        await asyncio.wait_for(writer.drain(), timeout=5.0)
+    except (TimeoutError, ConnectionResetError, BrokenPipeError) as e:
+        return _mtg_error_result(f"orig_write_failed:{type(e).__name__}", Verdict.BLOCKED)
+
+    # Read 4 inner bytes (encrypted length prefix). For mtg this requires
+    # demuxing TLS records (see ``_TlsRecordReader``); for the original
+    # C mtproto-proxy it's a flat ``readexactly(4)`` because there is no
+    # faketls layer.
+    if wrap_inner_in_tls_record:
+        tls_reader: _TlsRecordReader | None = _TlsRecordReader(reader)
+        length_or_err = await tls_reader.read_inner(4, timeout=PROBE_TIMEOUT)
+        if isinstance(length_or_err, ProbeResult):
+            return length_or_err
+        length_ct = length_or_err
+    else:
+        tls_reader = None
+        try:
+            length_ct = await asyncio.wait_for(reader.readexactly(4), timeout=PROBE_TIMEOUT)
+        except asyncio.IncompleteReadError:
+            return _mtg_error_result("orig_resPQ_truncated_len", Verdict.BLOCKED)
+        except TimeoutError:
+            result = ProbeResult()
+            result.handshake_ok = True
+            result.data_ok = False
+            result.verdict = Verdict.HANDSHAKE_ONLY
+            result.error = "orig_resPQ_len_timeout_post_init"
+            return result
+
+    length_pt = recv_cipher.update(length_ct)
+    length = int.from_bytes(length_pt, "little")
+    # Sanity bounds: a real resPQ frame is ~92-160 bytes plus 0..15
+    # padding; upper bound generously to 4 KiB so a slightly bigger
+    # Telegram-side variant doesn't trip false-blocked.
+    if length < 24 or length > 4096:
+        return _mtg_error_result(f"orig_resPQ_bad_outer_len={length}", Verdict.BLOCKED)
+
+    if tls_reader is not None:
+        body_or_err = await tls_reader.read_inner(length, timeout=PROBE_TIMEOUT)
+        if isinstance(body_or_err, ProbeResult):
+            return body_or_err
+        body_ct = body_or_err
+    else:
+        try:
+            body_ct = await asyncio.wait_for(reader.readexactly(length), timeout=PROBE_TIMEOUT)
+        except asyncio.IncompleteReadError:
+            return _mtg_error_result(
+                f"orig_resPQ_truncated_body_expected={length}", Verdict.BLOCKED
+            )
+        except TimeoutError:
+            return _mtg_error_result("orig_resPQ_body_timeout", Verdict.ERROR)
+
+    body_pt = recv_cipher.update(body_ct)
+    return _validate_res_pq(body_pt, nonce)
+
+
+async def probe_mtproto_orig(host: str, port: int, secret_hex: str) -> ProbeResult:
+    """Two-signal probe of the original Telegram MTProxy (C, obfuscated2).
+
+    Sequence: open TCP → send obfuscated2 init + encrypted req_pq_multi
+    in one drain → read encrypted resPQ → validate decrypted body has
+    our nonce.
+
+    Verdict semantics (see ``_exchange_obfuscated2_respq`` for full
+    failure-mode rationale):
+        OK              — resPQ validated end-to-end. Proves both
+                          "obfuscated2 survives the path" AND "proxy +
+                          its upstream Telegram DC are reachable".
+        HANDSHAKE_ONLY  — TCP/init accepted, length-read timed out:
+                          peer alive, DC-side silent.
+        BLOCKED         — any TCP RST / decrypted-frame mismatch.
+        ERROR           — body-read timed out mid-stream (ambiguous).
+    """
+    parsed = _parse_mtproxy_orig_secret(secret_hex)
+    if isinstance(parsed, ProbeResult):
+        return parsed
+    secret_key = parsed
 
     opened = await _open_mtproto_tcp(host, port)
     if isinstance(opened, ProbeResult):
@@ -1757,80 +2002,20 @@ async def probe_mtproto_orig(host: str, port: int, secret_hex: str) -> ProbeResu
     reader, writer, rtt_ms = opened
 
     try:
-        writer.write(init_bytes + req_pq_encrypted)
-        try:
-            await asyncio.wait_for(writer.drain(), timeout=5.0)
-        except (TimeoutError, ConnectionResetError, BrokenPipeError) as e:
-            # Write failed = TCP-level slam during send. That's a real
-            # network-side block (RST mid-stream / FIN), not a server-side
-            # ambiguity, so BLOCKED stands.
-            return _mtg_error_result(f"orig_write_failed:{type(e).__name__}", Verdict.BLOCKED)
-
-        # Length prefix (4 bytes encrypted).
-        try:
-            length_ct = await asyncio.wait_for(reader.readexactly(4), timeout=PROBE_TIMEOUT)
-        except asyncio.IncompleteReadError:
-            # FIN/RST after write = peer accepted our bytes then severed.
-            # Could be DPI cutting after L7 inspection or the proxy
-            # rejecting init silently — both look like blocking.
-            return _mtg_error_result("orig_resPQ_truncated_len", Verdict.BLOCKED)
-        except TimeoutError:
-            # TCP is still open at PROBE_TIMEOUT (a peer-side close would
-            # have surfaced as IncompleteReadError, not TimeoutError),
-            # which means mtproto-proxy accepted our 64-byte obfuscated2
-            # init *without* tearing the connection — anti-probing would
-            # have closed immediately on a wrong-secret frame. Silence
-            # past that point reflects upstream Telegram DC anti-abuse
-            # (datacenter egress to 149.154.x.x is typically
-            # blackholed), not a client-side block. Reachability to the
-            # listener is still confirmed → HANDSHAKE_ONLY (counts as
-            # reached in summary, but not full OK because resPQ wasn't
-            # echoed back end-to-end).
-            result = ProbeResult()
-            result.handshake_ok = True
-            result.data_ok = False
-            result.rtt_ms = rtt_ms
-            result.verdict = Verdict.HANDSHAKE_ONLY
-            result.error = "orig_resPQ_len_timeout_post_init"
-            return result
-
-        length_pt = recv_cipher.update(length_ct)
-        length = int.from_bytes(length_pt, "little")
-        # Sanity bounds: a real resPQ frame is ~92-160 bytes plus 0..15
-        # padding; pad upper bound generously to ~4 KiB so a slightly
-        # bigger Telegram-side variant doesn't trip false-blocked.
-        if length < 24 or length > 4096:
-            return _mtg_error_result(f"orig_resPQ_bad_outer_len={length}", Verdict.BLOCKED)
-
-        try:
-            body_ct = await asyncio.wait_for(reader.readexactly(length), timeout=PROBE_TIMEOUT)
-        except asyncio.IncompleteReadError:
-            # Body truncation after we already received a valid 4-byte
-            # length prefix means the server WAS responding then severed.
-            # That's a real block.
-            return _mtg_error_result(
-                f"orig_resPQ_truncated_body_expected={length}", Verdict.BLOCKED
-            )
-        except TimeoutError:
-            # Same ambiguity reasoning as the length-read timeout above —
-            # we already saw a length prefix, but if the body never
-            # arrives the silence could be DPI mid-stream OR a stalled
-            # upstream DC. ERROR rather than BLOCKED preserves the
-            # "BLOCKED implies confirmed block" invariant.
-            return _mtg_error_result("orig_resPQ_body_timeout", Verdict.ERROR)
-
-        body_pt = recv_cipher.update(body_ct)
-
-        validation_err = _validate_res_pq(body_pt, nonce)
-        if validation_err is not None:
-            return validation_err
+        err = await _exchange_obfuscated2_respq(
+            reader, writer, secret_key, wrap_inner_in_tls_record=False
+        )
+        if err is not None:
+            if err.rtt_ms is None:
+                err.rtt_ms = rtt_ms
+            return err
 
         # Full resPQ echoed back with our nonce: listener accepted the
         # obfuscated2 init AND its upstream Telegram DC responded with a
         # structurally-valid resPQ keyed to our session. End-to-end
         # MTProto reachability proven — verdict is OK by protocol
-        # semantic. Like the mtg case above, ``data_ok`` stays False
-        # because there is no sustained data exchange beyond resPQ.
+        # semantic. ``data_ok`` stays False because there is no sustained
+        # data exchange beyond the one-shot resPQ.
         result = ProbeResult()
         result.handshake_ok = True
         result.data_ok = False

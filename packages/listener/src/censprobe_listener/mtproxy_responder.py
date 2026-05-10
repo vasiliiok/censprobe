@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import shutil
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,12 @@ class MTProxyResponder:
         # the SubprocessResponder template so _finalize_protocol_result
         # picks it up without a special case.
         self.connection_count: int = 0
+        # Kernel-level "mtg actually emitted data bytes" counter — see
+        # ``_counter_install`` for rationale. Per-port comment so multiple
+        # mtg instances on the same host (mtproto_proxy on TCP/443 +
+        # mtproto_proxy_alt on TCP/8888) don't collide.
+        self._counter_comment = f"censprobe-mtg-{self.port}"
+        self._final_data_packets: int = 0
 
     async def start(self) -> None:
         # ``-t`` is mtg's network-timeout knob (default 10s). 30s gives
@@ -87,8 +94,15 @@ class MTProxyResponder:
             raise RuntimeError(f"mtg failed to start: {tail.decode(errors='replace')}")
 
         self._log_task = asyncio.create_task(self._monitor_output())
+        await self._counter_install()
 
     async def stop(self) -> None:
+        # Read the iptables counter BEFORE we tear down — the rule's
+        # counters are zeroed when ``_counter_remove`` deletes it.
+        observed = await self._counter_read()
+        self._final_data_packets = observed
+        await self._counter_remove()
+
         if self._log_task is not None:
             self._log_task.cancel()
             # We cancelled the inner task ourselves; suppress its
@@ -116,8 +130,9 @@ class MTProxyResponder:
             self._proc = None
 
         logger.info(
-            "mtproto_proxy responder stopped (connections: %d)",
+            "mtproto_proxy responder stopped (connections: %d, data_pkts: %d)",
             self.connection_count,
+            self._final_data_packets,
         )
 
     async def _monitor_output(self) -> None:
@@ -180,21 +195,130 @@ class MTProxyResponder:
         except Exception as e:
             logger.debug("mtg monitor ended: %s", e)
 
+    async def _counter_install(self) -> None:
+        """Install an iptables OUTPUT rule that counts PSH+ACK packets
+        emitted from sport=<self.port>.
+
+        Each TCP segment mtg writes back to a client carrying user-
+        plane bytes (WelcomePacket, then post-WelcomePacket relayed
+        DC traffic) is sent with PSH+ACK by the kernel. Bare ACK /
+        SYN-ACK / FIN / RST control segments don't have PSH set and
+        are skipped — so port scanners that only complete TCP can't
+        tick the counter.
+
+        Why: censprobe's ``probe_mtproto_proxy`` now actively
+        exchanges obfuscated2 init + req_pq with the upstream DC via
+        mtg (see ``protocol_probes._exchange_obfuscated2_respq``), so
+        the listener can finally observe whether mtg responded with
+        wire-level data. Before this change ``data_transfer_ok``
+        returned False unconditionally and the listener verdict was
+        always HANDSHAKE_ONLY — the iptables counter is the
+        independent kernel-level signal that turns it into CONNECTED.
+
+        No ``-j`` target — counter-only match falls through to other
+        OUTPUT rules a host firewall may have. ``shutil.which``
+        short-circuits the install on hosts without iptables; the
+        property then returns ``False`` and the listener reports
+        HANDSHAKE_ONLY (the pre-change behaviour, equivalent to a
+        regression-safe fallback).
+        """
+        if shutil.which("iptables") is None:
+            return
+        rule_args = self._counter_rule_args()
+        check = await asyncio.create_subprocess_exec(
+            "iptables",
+            "-C",
+            "OUTPUT",
+            *rule_args,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        if await check.wait() == 0:
+            return
+        add = await asyncio.create_subprocess_exec(
+            "iptables",
+            "-A",
+            "OUTPUT",
+            *rule_args,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        rc = await add.wait()
+        if rc != 0:
+            logger.warning(
+                "mtproto_proxy: iptables counter rule failed (rc=%d) — "
+                "data_transfer_ok will fall back to False; raise CAP_NET_ADMIN",
+                rc,
+            )
+
+    async def _counter_read(self) -> int:
+        if shutil.which("iptables") is None:
+            return 0
+        proc = await asyncio.create_subprocess_exec(
+            "iptables",
+            "-L",
+            "OUTPUT",
+            "-v",
+            "-n",
+            "-x",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        out_b, _ = await proc.communicate()
+        for ln in out_b.decode(errors="replace").splitlines():
+            if self._counter_comment not in ln:
+                continue
+            parts = ln.split()
+            if not parts:
+                continue
+            try:
+                return int(parts[0])
+            except ValueError:
+                return 0
+        return 0
+
+    async def _counter_remove(self) -> None:
+        if shutil.which("iptables") is None:
+            return
+        rule_args = self._counter_rule_args()
+        proc = await asyncio.create_subprocess_exec(
+            "iptables",
+            "-D",
+            "OUTPUT",
+            *rule_args,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.wait()
+
+    def _counter_rule_args(self) -> list[str]:
+        return [
+            "-p",
+            "tcp",
+            "--sport",
+            str(self.port),
+            "--tcp-flags",
+            "PSH,ACK",
+            "PSH,ACK",
+            "-m",
+            "comment",
+            "--comment",
+            self._counter_comment,
+        ]
+
     @property
     def is_running(self) -> bool:
         return self._proc is not None and self._proc.returncode is None
 
     @property
     def data_transfer_ok(self) -> bool:
-        # Censprobe's mtproto_proxy probe validates the faketls
-        # WelcomePacket HMAC and then closes — it never opens an
-        # upstream Telegram DC stream. So from the listener's
-        # perspective there is NO sustained data plane to observe:
-        # everything we see is at the handshake layer. Keep this
-        # ``False`` so the listener report does NOT claim data-plane
-        # evidence it cannot have. The client-side verdict for mtg
-        # was upgraded (HANDSHAKE_ONLY → OK) by protocol semantic in
-        # ``protocol_probes.probe_mtproto_proxy`` — that decision
-        # belongs at the probe layer, not here, because the listener
-        # genuinely doesn't observe data-plane bytes.
-        return False
+        # Set when iptables counter saw at least one PSH+ACK packet
+        # emitted by mtg from ``self.port``. That's "mtg actually
+        # sent wire bytes back to the client" — independent kernel
+        # confirmation that complements the probe's faketls + resPQ
+        # cryptographic signal. On hosts without iptables /
+        # CAP_NET_ADMIN the install is skipped, the counter stays at
+        # 0, and this property returns ``False`` — equivalent to the
+        # pre-change behaviour, so listener verdict on those hosts
+        # falls back to HANDSHAKE_ONLY rather than regressing.
+        return self._final_data_packets > 0
