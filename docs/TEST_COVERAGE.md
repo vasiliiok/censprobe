@@ -4,10 +4,10 @@
 
 Цифры:
 
-- **55 тест-файлов** в 6 деревьях.
-- **738 collected test** (после расширения `parametrize`); из них 736 default + 2 deselected (e2e, `e2e-dashboard` job).
+- **58 тест-файлов** в 7 деревьях.
+- **765 collected test** (после расширения `parametrize`); из них 763 default + 2 deselected (e2e, `e2e-dashboard` job).
 - **Coverage on new code: ~40%** (общая coverage растёт по плану — см. раздел «Roadmap»; точное число — в SonarCloud отчёте последнего PR).
-- **8 required CI gates** (`lint`, `validate-config`, `test × 5-package matrix`, `cross-package-tests`, `network-tests`, `e2e-dashboard`, `security-fast`, `sonar`) + image gates в `build.yml` (size + non-root) + 1 informational (weekly CodeQL).
+- **8 required CI gates** (`lint`, `validate-config`, `test × 6-package matrix`, `cross-package-tests`, `network-tests`, `e2e-dashboard`, `security-fast`, `sonar`) + image gates в `build.yml` (size + non-root) + 1 informational (weekly CodeQL).
 
 ---
 
@@ -101,6 +101,18 @@
 
 ---
 
+### `packages/sync/`
+
+| Src-модуль | Тест-файл | Тестов | Что покрыто |
+|------------|-----------|-------:|-------------|
+| `censprobe_sync` (whole pkg) | `unit/test_smoke_imports.py` | 1 | `pkgutil.walk_packages` обход — каждый submodule импортится без ошибок |
+| `censprobe_sync.main._normalise_fingerprint` + `_fetch_and_verify_peer_cert` + `_generate_self_signed_cert` + `_detect_external_ip` | `unit/test_pinning.py` | 22 | fingerprint normalisation (canonical/uppercase/colon-separated/whitespace + 6 malformed-input rejections); pinned TLS-fetch с моками `socket.create_connection` + `ssl.SSLContext.wrap_socket` (matching FP → PEM round-trip; mismatching FP → ValueError; missing peer cert → ValueError; malformed FP → short-circuit БЕЗ network call); self-signed cert generation (PEM/PEM/64-char-hex + DER fingerprint match + SAN covers loopback + each call returns fresh fingerprint); external IP detection (routable local→returned, RFC1918→falls through to echo, CGNAT 100.64/10→falls through, no outbound→None) |
+| `censprobe_sync.main` CLI (click groups) | `unit/test_cli.py` | 4 | `--help` shows both `serve` and `pull` subcommands; `serve --help` surfaces default port 8444; `pull` без options → click missing-option error; `pull` с malformed fingerprint → exit 1 + execvp NOT called (tripwire-mocked, asserts network not touched) |
+
+**Sync total: 3 файла, 27 тестов.** Network I/O (rclone subprocess execution, real TLS handshake to a serving rclone) покрывается via the manual end-to-end Vultr→GCP verification — there's no rclone-bin in CI runners. The pure-Python pinning/normalisation/cert-generation paths get full unit coverage.
+
+---
+
 ### `packages/dashboard/sync-api/`
 
 #### Unit (`tests/unit/`, 5 файлов, 70 тестов)
@@ -160,9 +172,10 @@
 | `packages/solo/tests` | 1 | 1 | smoke-only |
 | `packages/listener/tests` | 9 | 224 | credentials + AWG invariants (parametrize-heavy), preflight checks, openvpn AND-gate + auth-bytes latch, mtproto-orig responder, cred_server `/snapshot` endpoint |
 | `packages/client/tests` | 3 | 31 | smoke + cross-verification helpers + retry policy (transient/permanent classification) |
+| `packages/sync/tests` | 3 | 27 | smoke + cert pinning (FP normalisation, pinned TLS fetch, DER→PEM round-trip, fresh-fingerprint per session) + click CLI shape |
 | `packages/dashboard/sync-api/tests` | 8 | 99 | parser + endpoints + DB schema |
 | `tests/` (workspace) | 6 | 16 | contracts + snapshots + e2e (`e2e-dashboard` job, 2 deselected по дефолту) |
-| **Total** | **55** | **738** (после parametrize, из них 736 default + 2 deselected e2e) | — |
+| **Total** | **58** | **765** (после parametrize, из них 763 default + 2 deselected e2e) | — |
 
 ---
 
@@ -216,7 +229,7 @@
 
 | Job | Бюджет | Что запускает |
 |-----|--------|---------------|
-| `lint` | ~30 с | `ruff check .` + `ruff format --check .` (E/F/W/B/I/UP/S правила, ignore S101/S404/S603/S607); `yamllint` (`.github/`, `targets/`, `censprobe.yaml`, `docker-compose.yml`); `actionlint` (workflow YAML); `hadolint` рекурсивно (`failure-threshold: warning`, ignore DL3008/DL3003); `mypy strict` для всего `packages/*/src` (51 файл) |
+| `lint` | ~30 с | `ruff check .` + `ruff format --check .` (E/F/W/B/I/UP/S правила, ignore S101/S404/S603/S607); `yamllint` (`.github/`, `targets/`, `censprobe.yaml`, `docker-compose.yml`); `actionlint` (workflow YAML); `hadolint` рекурсивно (`failure-threshold: warning`, ignore DL3008/DL3003); `mypy strict` для всего `packages/*/src` (53 файл) |
 | `validate-config` | ~25 с | inline Python — `load_config(Path("."))` + `load_targets(Path("targets"))` с capture WARNING-уровня логов и promotion в errors |
 | `test (probe-core)` `test (solo)` `test (listener)` `test (client)` `test (sync-api)` | matrix, ~25–60 с per entry | `pytest <pkg>/tests --cov --cov-report=xml --junitxml=junit.xml -v` с реальным `services: postgres:16-alpine`. Артефакты `coverage-${slug}.xml` + `junit-${slug}.xml` загружаются для SonarCloud |
 | `cross-package-tests` | ~30 с | `pytest tests/contracts tests/snapshots --cov=censprobe_core` — Grafana ↔ subcategories contract, censprobe.yaml round-trip, targets/*.yaml validate, JSON Schema + wire-format byte snapshots. Coverage загружается под `coverage-cross.xml` для Sonar |
@@ -274,7 +287,7 @@
   - `censprobe_listener.{ss_responder, _responder_dispatch, vless_reality_wrapper, hysteria_wrapper, openvpn_responder, mtproxy_responder, wg_responder, echo_server, credentials, cred_server, _responder_base, main}`.
   - `censprobe_client.{_probe_dispatch, main}`.
   - `censprobe_solo.main`.
-- CI один раз: `mypy packages/probe-core/src packages/solo/src packages/listener/src packages/client/src packages/dashboard/sync-api/src` — 51 файл всё strict.
+- CI один раз: `mypy packages/probe-core/src packages/solo/src packages/listener/src packages/client/src packages/dashboard/sync-api/src` — 53 файл всё strict.
 
 ### `pyproject.toml [tool.bandit]`
 

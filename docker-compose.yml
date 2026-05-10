@@ -113,7 +113,37 @@ services:
     restart: "no"
 
   # ─────────────────────────────────────────────────────────────────
-  # 4. DASHBOARD — Grafana + Postgres + sync-api
+  # 4. SYNC — incremental reports/ transfer between operator machines
+  # Usage on source machine (where reports/ lives):
+  #   docker compose --profile sync run --rm sync serve
+  # The serve side prints the one-liner the operator copies onto the
+  # destination machine; that one-liner runs:
+  #   docker compose --profile sync run --rm sync pull --server-host ...
+  # Read-only: the serve side never accepts writes, so a leaked token
+  # cannot be used to alter reports on the source. Direction is
+  # source→destination only — destination only needs outbound HTTPS.
+  # ─────────────────────────────────────────────────────────────────
+  sync:
+    profiles: [sync]
+    image: ${DOCKERHUB_USERNAME}/censprobe-sync:${DOCKERHUB_TAG}
+    pull_policy: missing
+    build:
+      context: .
+      dockerfile: packages/sync/Dockerfile
+    # network_mode: host — the serve side has to bind ${SYNC_PORT} on
+    # the host's external interface so the puller can reach it; the
+    # pull side only initiates outbound HTTPS, so host-mode is benign
+    # for it too. Same rationale as listener.
+    network_mode: host
+    environment:
+      SYNC_PORT: ${SYNC_PORT}
+    volumes:
+      - ./:/workspace
+    working_dir: /workspace
+    restart: "no"
+
+  # ─────────────────────────────────────────────────────────────────
+  # 5. DASHBOARD — Grafana + Postgres + sync-api
   # Usage: docker compose --profile dashboard up -d
   # Open: http://localhost:3000 (admin/admin)
   # ─────────────────────────────────────────────────────────────────

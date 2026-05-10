@@ -73,6 +73,22 @@ jobs:
             path: client
             allow_root: true
             size_budget_mb: 400
+          - name: sync
+            dockerfile: packages/sync/Dockerfile
+            path: sync
+            # sync runs rclone serve http on the source side and rclone
+            # copy on the destination side — neither needs raw sockets,
+            # tun/tap, or iptables. Could be non-root in principle, but
+            # the workspace bind-mount writes back to the operator's
+            # repo (rclone copy creates files in /workspace/reports);
+            # honouring host file ownership without --user gymnastics
+            # keeps the image trivially compatible with any host UID.
+            allow_root: true
+            # python:slim base (~130 MB) + rclone Go binary (~64 MB) +
+            # pip install (cryptography + pydantic + rich + click → ~70
+            # MB). 400 MB envelope is comparable to the listener/client
+            # images and leaves slack for a future probe-core dep bump.
+            size_budget_mb: 400
           - name: sync-api
             dockerfile: packages/dashboard/sync-api/Dockerfile
             path: dashboard/sync-api

@@ -1,0 +1,62 @@
+# Censprobe Docker build context exclusions
+#
+# Without this, every COPY of packages/<name> drags in the developer's
+# local virtualenv (~38MB), pytest/hypothesis caches, build artifacts,
+# and reports/ data. Layer sizes balloon and CI cache hits get rarer
+# (any change to .venv invalidates the COPY layer).
+#
+# Each per-image Dockerfile uses ``COPY packages/<name>`` — the patterns
+# below apply uniformly to every build.
+
+# ── Python build / venv artifacts ────────────────────────────────────────────
+**/.venv
+**/.venv/
+**/__pycache__
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.mypy_cache
+**/.ruff_cache
+**/.pytest_cache
+**/.hypothesis
+**/.coverage
+**/.coverage.*
+**/coverage.xml
+**/junit.xml
+**/htmlcov
+**/dist
+**/build
+**/*.egg-info
+
+# ── Reports + logs (operator-side data, never relevant to image build) ───────
+reports/
+logs.txt
+
+# ── Editor / VCS noise ───────────────────────────────────────────────────────
+.git
+.git/
+.gitignore
+.github/
+.vscode/
+.idea/
+**/*.swp
+**/*~
+
+# ── Tooling configs not consumed by Docker build ─────────────────────────────
+.pre-commit-config.yaml
+.gitleaks.toml
+.yamllint.yaml
+.hadolint.yaml
+.sonarcloud.properties
+sonar-project.properties
+
+# ── Docs (not needed at runtime) ─────────────────────────────────────────────
+docs/
+README.md
+LICENSE
+*.md
+
+# ── Tests trees (not needed at runtime; keep source-only inside images) ──────
+**/tests/
+tests/

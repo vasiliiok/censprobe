@@ -83,6 +83,7 @@ jobs:
                       -e packages/solo \
                       -e packages/listener \
                       -e packages/client \
+                      -e packages/sync \
                       -e packages/dashboard/sync-api \
                       "mypy>=1.10" "pydantic>=2.7" "types-PyYAML"
 
@@ -93,6 +94,7 @@ jobs:
             packages/solo/src \
             packages/listener/src \
             packages/client/src \
+            packages/sync/src \
             packages/dashboard/sync-api/src
 
   # ────────────────────────────────────────────────────────────────────
@@ -168,6 +170,9 @@ jobs:
           - package: client
             path: packages/client
             slug: client
+          - package: sync
+            path: packages/sync
+            slug: sync
           - package: sync-api
             path: packages/dashboard/sync-api
             slug: sync-api

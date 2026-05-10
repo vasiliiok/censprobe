@@ -25,6 +25,7 @@
 - [Восемь модулей измерения](#восемь-модулей-измерения)
 - [Скоринг](#скоринг)
 - [Дашборд (Grafana)](#дашборд-grafana)
+- [Sync (передача `reports/` между машинами)](#шаг-5-sync-опционально--забрать-reports-на-машину-с-git-доступом)
 - [Переменные окружения (`.env`)](#переменные-окружения-env)
 - [Структура отчётов](#структура-отчётов)
 - [CI/CD и quality gates](#cicd-и-quality-gates)
@@ -38,16 +39,17 @@
 
 ## Архитектура развёртывания
 
-Система состоит из 4 независимых компонентов (Docker-профилей), запускаемых на разных машинах:
+Система состоит из 5 независимых компонентов (Docker-профилей), запускаемых на разных машинах:
 
 | Профиль | Где запускается | Назначение |
 |---------|-----------------|------------|
 | `solo` | RU-сервер | Прогон всех восьми модулей измерения с перспективы аплинка тестируемого сервера |
 | `listener` | RU-сервер | Поднимает dummy-respondery всех включённых VPN-протоколов + одноразовый HTTPS-эндпоинт credentials |
 | `client` | Клиентское устройство | Подключается к listener'у по всем включённым протоколам, проверяет handshake + throughput |
+| `sync` | Любая пара машин | Инкрементальная передача `reports/` между двумя локальными копиями репо (TLS-pinned bearer-token, rclone) — для случаев когда `git push` с тестируемой машины недоступен |
 | `dashboard` | Любая машина | Локальная аналитика: PostgreSQL + sync-api + Grafana |
 
-Все 4 компонента — отдельные Docker-образы (`censprobe-solo`, `censprobe-listener`, `censprobe-client`, `censprobe-sync-api`), публикуются на Docker Hub под namespace `${DOCKERHUB_USERNAME}` (по умолчанию `outtakes`).
+Все 5 компонентов — отдельные Docker-образы (`censprobe-solo`, `censprobe-listener`, `censprobe-client`, `censprobe-sync`, `censprobe-sync-api`), публикуются на Docker Hub под namespace `${DOCKERHUB_USERNAME}` (по умолчанию `outtakes`).
 
 ---
 
@@ -165,6 +167,33 @@ Client тянет credentials с listener'а через TLS-pinning (cert про
 
 Просто перезапустите listener с новым `SESSION_ID` — он напечатает свежую команду с новыми credentials/cert/token.
 
+### Шаг 5. Sync (опционально) — забрать `reports/` на машину с git-доступом
+
+Когда `git push` с тестируемого сервера невозможен (бывает в RU-сетях, где GitHub блокируется ТСПУ), отдельный профиль `sync` инкрементально перетаскивает `reports/` на любую другую машину с публичным интернетом по тому же TLS-pinned-bearer-token паттерну что и listener.
+
+**Source-сторона** (сервер где лежат свежие отчёты):
+
+```bash
+docker compose --profile sync run --rm sync serve
+```
+
+`serve` генерирует ephemeral cert + token, печатает однострочную команду pull-а, exec-ит `rclone serve http --read-only` на 8444/tcp. Файлы раздаются в режиме read-only — утёкший токен не даст подменить отчёты на сервере.
+
+**Destination-сторона** (любая машина с outbound-HTTPS — лаптоп, мобильная сеть, NAT/CGNAT — без публичного IP):
+
+```bash
+# Скопируйте напечатанную serve-стороной команду:
+docker compose --profile sync run --rm sync pull \
+  --server-host 1.2.3.4 \
+  --port 8444 \
+  --token <one-time-token> \
+  --cert-fingerprint <sha256-fingerprint>
+```
+
+Pull валидирует cert по SHA-256 ДО отправки токена, затем `rclone copy --ignore-existing --immutable` забирает только файлы, которых ещё нет локально (`reports/<TEST_ID>/*.json` — write-once immutable, никогда не перезаписываются). Повторный pull = нулевой трафик, `Skipped (already exists)`. После успешного pull-а: `git add reports/ && git commit && git push` как обычно.
+
+**Direction:** только source→destination. По дизайну censprobe `reports/` всегда живут на сервере с публичным IP (там где запускался listener/solo), pull-сторона имеет outbound-HTTPS — этого достаточно для NAT/CGNAT/мобильных сетей. Если у вас две NAT-машины без публичного IP — используйте промежуточный VPS либо `scp` через известный bastion.
+
 ---
 
 ## CLI-параметры
@@ -218,6 +247,30 @@ docker compose --profile client run --rm client [OPTIONS]
 ```
 
 `SERVER_HOST` принимается как IPv4/IPv6 — client **не делает DNS-резолва** (anti-correlation: имя сервера никогда не пересекает client-side resolver).
+
+### `sync`
+
+```
+docker compose --profile sync run --rm sync serve [OPTIONS]
+
+  --port INTEGER          HTTPS port to bind for the read-only rclone endpoint
+                          [env: SYNC_PORT, default: 8444]
+```
+
+```
+docker compose --profile sync run --rm sync pull [OPTIONS]
+
+  --server-host TEXT          Source machine address (IPv4/IPv6) [required]
+                              [env: SYNC_SERVER_HOST]
+  --port INTEGER              Source machine SYNC_PORT          [required]
+                              [env: SYNC_PORT]
+  --token TEXT                One-shot bearer token (printed by serve) [required]
+                              [env: SYNC_TOKEN]
+  --cert-fingerprint TEXT     64-char hex SHA-256 of source cert [required]
+                              [env: SYNC_CERT_FINGERPRINT]
+```
+
+Серверная сторона (`serve`) валидирует cert по SHA-256 при handshake — fingerprint mismatch (опечатка / устаревший token из старого serve-сеанса) обрывает с понятной ошибкой ДО отправки токена.
 
 ---
 
@@ -498,6 +551,7 @@ Schema создаётся при первом старте через SQLAlchemy
 | `DOCKERHUB_USERNAME` | все | `outtakes` | Docker Hub аккаунт, из которого pull-ятся образы. Поменяйте на свой при fork'е. |
 | `DOCKERHUB_TAG` | все | `main` | Тег образа. |
 | `CREDS_PORT` | listener, client | `8443` | Порт credentials-эндпоинта на listener'е. |
+| `SYNC_PORT` | sync | `8444` | Порт TLS-эндпоинта `sync serve`. Per-session token + cert fingerprint генерируются на каждом старте и печатаются в pull-команде. |
 | `DB_PASSWORD` | dashboard | (случайный 32-hex) | Postgres password. Loopback-only сервис; перегенерируйте при удалённом доступе. |
 | `GRAFANA_PASSWORD` | dashboard | `admin` | `GF_SECURITY_ADMIN_PASSWORD` для admin Grafana. Перегенерируйте при удалённом доступе. |
 | `DATABASE_URL` | dashboard | (закомментирован) | Опциональный override `sync-api → postgres` URL для external DB. |
@@ -546,9 +600,9 @@ JSON Schema снимки (regen-able через `CENSPROBE_REGENERATE_SCHEMAS=1 
 
 | Job | Что делает |
 |-----|-----------|
-| `lint` | ruff (E/F/W/B/I/UP/S), ruff format, yamllint, actionlint, hadolint, mypy strict over `packages/*/src` (51 файл) |
+| `lint` | ruff (E/F/W/B/I/UP/S), ruff format, yamllint, actionlint, hadolint, mypy strict over `packages/*/src` (53 файл) |
 | `validate-config` | inline `load_config()` + `load_targets()` с promotion warning'ов в errors |
-| `test (probe-core)` `test (solo)` `test (listener)` `test (client)` `test (sync-api)` | matrix pytest с `services: postgres:16-alpine` |
+| `test (probe-core)` `test (solo)` `test (listener)` `test (client)` `test (sync)` `test (sync-api)` | matrix pytest с `services: postgres:16-alpine` |
 | `cross-package-tests` | `pytest tests/contracts tests/snapshots` (Grafana ↔ subcategories, yaml round-trip, wire-format snapshots) |
 | `network-tests` | `pytest -m network`, exit 5 → pass (placeholder под live-сети) |
 | `e2e-dashboard` | локальный билд sync-api + `docker compose up postgres + sync-api` + `pytest -m e2e` |
@@ -557,7 +611,7 @@ JSON Schema снимки (regen-able через `CENSPROBE_REGENERATE_SCHEMAS=1 
 
 ### Required (`build.yml`, post-CI)
 
-`workflow_run` от CI on main + tag pushes. PR builds с `push: false`. Per-image: paths-filter (rebuild только если затронуты `packages/${path}/**`, `probe-core/**`, или `build.yml`); `docker/build-push-action` с buildkit cache. **Post-build gates**: image size (`solo` ≤ 600 MB, `listener`/`client` ≤ 400 MB, `sync-api` ≤ 250 MB), non-root verification (`sync-api` only).
+`workflow_run` от CI on main + tag pushes. PR builds с `push: false`. Per-image: paths-filter (rebuild только если затронуты `packages/${path}/**`, `probe-core/**`, или `build.yml`); `docker/build-push-action` с buildkit cache. **Post-build gates**: image size (`solo` ≤ 600 MB, `listener`/`client`/`sync` ≤ 400 MB, `sync-api` ≤ 250 MB), non-root verification (`sync-api` only).
 
 > **Push разрешён и при sonar-only failure CI.** Перед билдом шаг `Check CI jobs status` через `gh run view --json jobs` проверяет, что единственный упавший job — `SonarCloud`. Любая другая red job блокирует push. Это обход coverage Quality Gate (`new_coverage ≥ 80`), который на free-плане SonarCloud не отключаемая. Подробности — TESTING.md preamble.
 
@@ -586,7 +640,11 @@ git commit -m "reports: <TEST_ID> ..."
 git push
 ```
 
-Если GitHub недоступен с тестируемой машины (бывает в RU-сетях), скопируйте каталог отчёта на любой хост с доступом:
+Если GitHub недоступен с тестируемой машины (бывает в RU-сетях), есть два пути:
+
+**Вариант 1: профиль `sync`** (см. [Шаг 5. Sync](#шаг-5-sync-опционально--забрать-reports-на-машину-с-git-доступом)). На сервере с reports запустить `docker compose --profile sync run --rm sync serve`, на машине с git-доступом выполнить напечатанную pull-команду — `rclone copy --ignore-existing` инкрементально перетащит только новые файлы. После — обычный `git add/commit/push`.
+
+**Вариант 2: ручной `scp`** (если sync по какой-то причине неудобен — обе машины за NAT, или хочется минимум зависимостей):
 
 ```bash
 # С тестового сервера:
@@ -674,6 +732,7 @@ censprobe/
 │   ├── solo/                         # censprobe-solo: server-side probe runner
 │   ├── listener/                     # censprobe-listener: VPN respondery + cred-server
 │   ├── client/                       # censprobe-client: handshake probes
+│   ├── sync/                         # censprobe-sync: incremental reports/ transfer (rclone)
 │   └── dashboard/
 │       ├── grafana/                  # provisioning + dashboards/*.json
 │       └── sync-api/                 # censprobe-sync-api: FastAPI + SQLAlchemy

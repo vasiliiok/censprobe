@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+[project]
+name = "censprobe-sync"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = ["censprobe-core", "click>=8.1", "rich>=13.7", "cryptography>=42"]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8",
+    "pytest-mock>=3",
+    "pytest-cov>=5",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/censprobe_sync"]

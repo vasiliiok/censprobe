@@ -163,12 +163,17 @@ strict = true
 module = "censprobe_solo.main"
 strict = true
 
+[[tool.mypy.overrides]]
+module = "censprobe_sync.main"
+strict = true
+
 [tool.pytest.ini_options]
 testpaths = [
     "packages/probe-core/tests",
     "packages/solo/tests",
     "packages/listener/tests",
     "packages/client/tests",
+    "packages/sync/tests",
     "packages/dashboard/sync-api/tests",
     "tests",
 ]
