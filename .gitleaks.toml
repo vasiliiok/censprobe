@@ -21,4 +21,13 @@ regexes = [
     # returns four small ints — see
     # packages/listener/src/censprobe_listener/credentials.py.
     '''_awg_magic_headers\(\)''',
+
+    # ``_exchange_obfuscated2_respq`` keyword arg. The ``generic-api-key``
+    # rule fires on lines like
+    #   reader, writer, secret_key, wrap_inner_in_tls_record=True
+    # because ``secret_key, wrap_inner_in_tls_record`` together pass the
+    # high-entropy heuristic. The kwarg controls whether to wrap the inner
+    # stream in TLS application_data records — public protocol framing,
+    # not a secret. See protocol_probes._exchange_obfuscated2_respq.
+    '''wrap_inner_in_tls_record\s*=''',
 ]

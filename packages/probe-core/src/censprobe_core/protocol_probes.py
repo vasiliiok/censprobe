@@ -1926,15 +1926,17 @@ async def _exchange_obfuscated2_respq(
     # Read 4 inner bytes (encrypted length prefix). For mtg this requires
     # demuxing TLS records (see ``_TlsRecordReader``); for the original
     # C mtproto-proxy it's a flat ``readexactly(4)`` because there is no
-    # faketls layer.
+    # faketls layer. Declared above the if so mypy carries the
+    # ``_TlsRecordReader | None`` type through to the body-read branch
+    # below where ``is not None`` narrows it back.
+    tls_reader: _TlsRecordReader | None = None
     if wrap_inner_in_tls_record:
-        tls_reader: _TlsRecordReader | None = _TlsRecordReader(reader)
+        tls_reader = _TlsRecordReader(reader)
         length_or_err = await tls_reader.read_inner(4, timeout=PROBE_TIMEOUT)
         if isinstance(length_or_err, ProbeResult):
             return length_or_err
         length_ct = length_or_err
     else:
-        tls_reader = None
         try:
             length_ct = await asyncio.wait_for(reader.readexactly(4), timeout=PROBE_TIMEOUT)
         except asyncio.IncompleteReadError:
