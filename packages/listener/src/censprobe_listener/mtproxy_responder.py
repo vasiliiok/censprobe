@@ -186,8 +186,16 @@ class MTProxyResponder:
 
     @property
     def data_transfer_ok(self) -> bool:
-        # mtg routes traffic upstream to Telegram DCs as a real proxy;
-        # censprobe doesn't attempt the upstream tunnel during a probe,
-        # so there is no separate "data plane" signal — handshake_count
-        # is the source of truth.
-        return self.connection_count > 0
+        # Censprobe's mtproto_proxy probe validates the faketls
+        # WelcomePacket HMAC and then closes — it never opens an
+        # upstream Telegram DC stream. So from the listener's
+        # perspective there is NO data-plane evidence to observe:
+        # everything we see is at the handshake layer. Returning
+        # ``False`` here makes the verdict aggregator consistently
+        # produce HANDSHAKE_ONLY (matching the client, which uses
+        # exactly the same HMAC-only criterion). Returning ``True``
+        # on connection_count > 0 — as the previous version did —
+        # produced false-OK verdicts at the listener while the
+        # client correctly reported HANDSHAKE_ONLY, splitting the
+        # dashboard's reachability matrix without informational gain.
+        return False
