@@ -84,9 +84,10 @@
 | `censprobe_listener.openvpn_responder` | `unit/test_openvpn_status_parsing.py` | 18 | scanner-noise + tun-noise rejection (only `Auth read bytes` is unforgeable), 1500-byte fallback for hosts without iptables, **iptables INPUT counter AND-gated against `handshake_count > 0`** (Bug B regression: `data_pkts=8 + Auth=0 → not data_transfer_ok`), **`_max_auth_bytes_seen` latch** (real handshake captured before peer aged out via `keepalive 60` → counter zeroed → latched value still surfaces handshake) |
 | `censprobe_listener.mtproto_orig_responder` | `unit/test_mtproto_orig_responder.py` | 5 | secret parsing (dd-prefix stripped for `-S` argv), iptables OUTPUT PSH+ACK rule shape, idempotent re-install path |
 | `censprobe_listener` handshake-pattern snapshot | `unit/test_handshake_pattern_snapshot.py` | 6 | regression: each responder uses the documented kernel-counter shape (mtproto-orig PSH+ACK iptables rule, openvpn UDP length filter, mtg PSH+ACK on OUTPUT) — guards against silent regression on rule semantics |
+| `censprobe_listener.main._generate_session_id` | `unit/test_session_id_generation.py` | 8 | prefix encoding for `--mobile`/`--white` flag combos (`plain-`, `mob-`, `white-`, `mob-white-`), 4-uppercase-hex suffix shape, distinct IDs across calls, SAFE_ID_RE contract for filesystem + FastAPI path |
 | `censprobe_listener.credentials._awg_magic_headers` | `property/test_credentials_property.py` | 4 | Hypothesis @settings(derandomize=True, max_examples=500) на AWG header invariants + S-сравнение |
 
-**Listener total: 9 файлов, 224 collected test.** Большая часть — `parametrize`-расширения в `test_credentials_constraints.py`. Subprocess-respondery (ss/vless/hysteria/openvpn/wg) verifyются via `e2e-dashboard` или ручной запуск. `cred_server.CredServer` POW покрывает только snapshot endpoint; `_serve_creds` остаётся покрытым только E2E.
+**Listener total: 10 файлов, 236 collected tests.** Большая часть — `parametrize`-расширения в `test_credentials_constraints.py`. Subprocess-respondery (ss/vless/hysteria/openvpn/wg) verifyются via `e2e-dashboard` или ручной запуск. `cred_server.CredServer` POW покрывает только snapshot endpoint; `_serve_creds` остаётся покрытым только E2E.
 
 ---
 
@@ -171,12 +172,12 @@
 |------|-------:|-------:|----------|
 | `packages/probe-core/tests` | 28 | 373 | плотное (config, scoring, subcategories, runner, все 8 модулей измерений, credentials_reader, protocol_probes helpers + ping_echo + mtproto BLOCKED-on-timeout, ProtocolResult.finalize truth table) |
 | `packages/solo/tests` | 1 | 1 | smoke-only |
-| `packages/listener/tests` | 9 | 228 | credentials + AWG invariants (parametrize-heavy), preflight checks, openvpn AND-gate + auth-bytes latch, mtproto-orig responder, cred_server `/snapshot` endpoint |
+| `packages/listener/tests` | 10 | 236 | credentials + AWG invariants (parametrize-heavy), preflight checks, openvpn AND-gate + auth-bytes latch, mtproto-orig responder, cred_server `/snapshot` endpoint, `_generate_session_id` prefix encoding + SAFE_ID contract |
 | `packages/client/tests` | 3 | 31 | smoke + cross-verification helpers + retry policy (transient/permanent classification) |
 | `packages/sync/tests` | 3 | 33 | smoke + cert pinning (FP normalisation, pinned TLS fetch, DER→PEM round-trip, fresh-fingerprint per session) + click CLI shape |
 | `packages/dashboard/sync-api/tests` | 8 | 105 | parser + endpoints + DB schema |
 | `tests/` (workspace) | 6 | 14 | contracts + snapshots + e2e (`e2e-dashboard` job, 2 deselected по дефолту) |
-| **Total** | **58** | **787** (после parametrize, из них 785 default + 2 deselected e2e) | — |
+| **Total** | **59** | **795** (после parametrize, из них 793 default + 2 deselected e2e) | — |
 
 ---
 

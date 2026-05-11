@@ -115,6 +115,38 @@
         "multi": true,
         "includeAll": true,
         "allValue": "ALL"
+      },
+      {
+        "name": "var_client_network",
+        "label": "Client Network",
+        "type": "custom",
+        "query": "Mobile : Mobile, Whitelist : Whitelist, Regular : Regular",
+        "options": [
+          {
+            "text": "Mobile",
+            "value": "Mobile",
+            "selected": false
+          },
+          {
+            "text": "Whitelist",
+            "value": "Whitelist",
+            "selected": false
+          },
+          {
+            "text": "Regular",
+            "value": "Regular",
+            "selected": false
+          }
+        ],
+        "current": {
+          "text": "All",
+          "value": [
+            "$__all"
+          ]
+        },
+        "multi": true,
+        "includeAll": true,
+        "allValue": "ALL"
       }
     ]
   },
@@ -131,7 +163,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "**Jump to:** [01 Overview](/d/censprobe-01) · [02 Blocking Matrix](/d/censprobe-02) · [03 Telegram](/d/censprobe-03) · [04 Protocol Reachability](/d/censprobe-04) · [05 Technique Attribution](/d/censprobe-05) · [06 Analytics & Compare](/d/censprobe-06) · [07 Cloudflare & WARP](/d/censprobe-07) · [08 QUIC & ECH](/d/censprobe-08) · [09 DNS](/d/censprobe-09) · [10 TLS](/d/censprobe-10)"
+        "content": "**Jump to:** [01 Overview](/d/censprobe-01) · [02 Blocking Matrix](/d/censprobe-02) · [03 Telegram](/d/censprobe-03) · [04 Protocol Reachability](/d/censprobe-04) · [05 Technique Attribution](/d/censprobe-05) · [06 Analytics & Compare](/d/censprobe-06) · [07 Cloudflare & WARP](/d/censprobe-07) · [08 QUIC & ECH](/d/censprobe-08) · [09 DNS](/d/censprobe-09) · [10 TLS](/d/censprobe-10) · [11 Matrix Heatmap](/d/censprobe-11-matrix-heatmap)"
       }
     },
     {
@@ -150,7 +182,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT ${group_by:raw} AS group_name, AVG(test_runs.overall_score) AS overall, AVG(test_runs.entry_score) AS entry, AVG(test_runs.exit_score) AS exit, AVG(test_runs.relay_score) AS relay FROM test_runs \nWHERE \n    ('ALL' IN (${var_company:singlequote}) OR test_runs.server_meta->'asn'->>'org' IN (${var_company:singlequote}))\n    AND ('ALL' IN (${var_asn:singlequote}) OR 'AS' || (test_runs.server_meta->'asn'->>'asn') IN (${var_asn:singlequote}))\n    AND ('ALL' IN (${var_datacenter:singlequote}) OR COALESCE(test_runs.server_meta->'datacenter'->>'name', 'No DC') IN (${var_datacenter:singlequote}))\n    AND ('ALL' IN (${var_country:singlequote}) OR test_runs.server_meta->'location'->>'country_code' IN (${var_country:singlequote}))\n    AND ('ALL' IN (${var_test_id:singlequote}) OR test_runs.test_id IN (${var_test_id:singlequote}))\n GROUP BY 1 ORDER BY overall DESC",
+          "rawSql": "SELECT ${group_by:raw} AS group_name, AVG(test_runs.overall_score) AS overall, AVG(test_runs.entry_score) AS entry, AVG(test_runs.exit_score) AS exit, AVG(test_runs.relay_score) AS relay FROM test_runs \nWHERE \n    ('ALL' IN (${var_company:singlequote}) OR test_runs.server_meta->'asn'->>'org' IN (${var_company:singlequote}))\n    AND ('ALL' IN (${var_asn:singlequote}) OR 'AS' || (test_runs.server_meta->'asn'->>'asn') IN (${var_asn:singlequote}))\n    AND ('ALL' IN (${var_datacenter:singlequote}) OR COALESCE(test_runs.server_meta->'datacenter'->>'name', 'No DC') IN (${var_datacenter:singlequote}))\n    AND ('ALL' IN (${var_country:singlequote}) OR test_runs.server_meta->'location'->>'country_code' IN (${var_country:singlequote}))\n    AND ('ALL' IN (${var_test_id:singlequote}) OR test_runs.test_id IN (${var_test_id:singlequote}))\n    AND ('ALL' IN (${var_client_network:singlequote}) OR test_runs.id IN (SELECT DISTINCT test_run_id FROM listener_sessions ls WHERE ('Mobile' IN (${var_client_network:singlequote}) AND ls.is_mobile) OR ('Whitelist' IN (${var_client_network:singlequote}) AND ls.is_whitelist) OR ('Regular' IN (${var_client_network:singlequote}) AND NOT ls.is_mobile AND NOT ls.is_whitelist)))\n GROUP BY 1 ORDER BY overall DESC",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -181,7 +213,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT COUNT(DISTINCT test_runs.test_id) AS matched FROM test_runs \nWHERE \n    ('ALL' IN (${var_company:singlequote}) OR test_runs.server_meta->'asn'->>'org' IN (${var_company:singlequote}))\n    AND ('ALL' IN (${var_asn:singlequote}) OR 'AS' || (test_runs.server_meta->'asn'->>'asn') IN (${var_asn:singlequote}))\n    AND ('ALL' IN (${var_datacenter:singlequote}) OR COALESCE(test_runs.server_meta->'datacenter'->>'name', 'No DC') IN (${var_datacenter:singlequote}))\n    AND ('ALL' IN (${var_country:singlequote}) OR test_runs.server_meta->'location'->>'country_code' IN (${var_country:singlequote}))\n    AND ('ALL' IN (${var_test_id:singlequote}) OR test_runs.test_id IN (${var_test_id:singlequote}))\n",
+          "rawSql": "SELECT COUNT(DISTINCT test_runs.test_id) AS matched FROM test_runs \nWHERE \n    ('ALL' IN (${var_company:singlequote}) OR test_runs.server_meta->'asn'->>'org' IN (${var_company:singlequote}))\n    AND ('ALL' IN (${var_asn:singlequote}) OR 'AS' || (test_runs.server_meta->'asn'->>'asn') IN (${var_asn:singlequote}))\n    AND ('ALL' IN (${var_datacenter:singlequote}) OR COALESCE(test_runs.server_meta->'datacenter'->>'name', 'No DC') IN (${var_datacenter:singlequote}))\n    AND ('ALL' IN (${var_country:singlequote}) OR test_runs.server_meta->'location'->>'country_code' IN (${var_country:singlequote}))\n    AND ('ALL' IN (${var_test_id:singlequote}) OR test_runs.test_id IN (${var_test_id:singlequote}))\n    AND ('ALL' IN (${var_client_network:singlequote}) OR test_runs.id IN (SELECT DISTINCT test_run_id FROM listener_sessions ls WHERE ('Mobile' IN (${var_client_network:singlequote}) AND ls.is_mobile) OR ('Whitelist' IN (${var_client_network:singlequote}) AND ls.is_whitelist) OR ('Regular' IN (${var_client_network:singlequote}) AND NOT ls.is_mobile AND NOT ls.is_whitelist)))\n",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -209,7 +241,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT test_runs.created_at AS \"time\", ${group_by:raw} AS metric, AVG(test_runs.overall_score) AS value FROM test_runs \nWHERE \n    ('ALL' IN (${var_company:singlequote}) OR test_runs.server_meta->'asn'->>'org' IN (${var_company:singlequote}))\n    AND ('ALL' IN (${var_asn:singlequote}) OR 'AS' || (test_runs.server_meta->'asn'->>'asn') IN (${var_asn:singlequote}))\n    AND ('ALL' IN (${var_datacenter:singlequote}) OR COALESCE(test_runs.server_meta->'datacenter'->>'name', 'No DC') IN (${var_datacenter:singlequote}))\n    AND ('ALL' IN (${var_country:singlequote}) OR test_runs.server_meta->'location'->>'country_code' IN (${var_country:singlequote}))\n    AND ('ALL' IN (${var_test_id:singlequote}) OR test_runs.test_id IN (${var_test_id:singlequote}))\n GROUP BY 1, 2 ORDER BY 1",
+          "rawSql": "SELECT test_runs.created_at AS \"time\", ${group_by:raw} AS metric, AVG(test_runs.overall_score) AS value FROM test_runs \nWHERE \n    ('ALL' IN (${var_company:singlequote}) OR test_runs.server_meta->'asn'->>'org' IN (${var_company:singlequote}))\n    AND ('ALL' IN (${var_asn:singlequote}) OR 'AS' || (test_runs.server_meta->'asn'->>'asn') IN (${var_asn:singlequote}))\n    AND ('ALL' IN (${var_datacenter:singlequote}) OR COALESCE(test_runs.server_meta->'datacenter'->>'name', 'No DC') IN (${var_datacenter:singlequote}))\n    AND ('ALL' IN (${var_country:singlequote}) OR test_runs.server_meta->'location'->>'country_code' IN (${var_country:singlequote}))\n    AND ('ALL' IN (${var_test_id:singlequote}) OR test_runs.test_id IN (${var_test_id:singlequote}))\n    AND ('ALL' IN (${var_client_network:singlequote}) OR test_runs.id IN (SELECT DISTINCT test_run_id FROM listener_sessions ls WHERE ('Mobile' IN (${var_client_network:singlequote}) AND ls.is_mobile) OR ('Whitelist' IN (${var_client_network:singlequote}) AND ls.is_whitelist) OR ('Regular' IN (${var_client_network:singlequote}) AND NOT ls.is_mobile AND NOT ls.is_whitelist)))\n GROUP BY 1, 2 ORDER BY 1",
           "format": "time_series",
           "refId": "A",
           "editorMode": "code",
@@ -237,7 +269,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT ${group_by:raw} AS group_name, tr.method, COUNT(*) AS detections FROM test_results tr JOIN test_runs ON test_runs.id = tr.test_run_id \nWHERE \n    ('ALL' IN (${var_company:singlequote}) OR test_runs.server_meta->'asn'->>'org' IN (${var_company:singlequote}))\n    AND ('ALL' IN (${var_asn:singlequote}) OR 'AS' || (test_runs.server_meta->'asn'->>'asn') IN (${var_asn:singlequote}))\n    AND ('ALL' IN (${var_datacenter:singlequote}) OR COALESCE(test_runs.server_meta->'datacenter'->>'name', 'No DC') IN (${var_datacenter:singlequote}))\n    AND ('ALL' IN (${var_country:singlequote}) OR test_runs.server_meta->'location'->>'country_code' IN (${var_country:singlequote}))\n    AND ('ALL' IN (${var_test_id:singlequote}) OR test_runs.test_id IN (${var_test_id:singlequote}))\n AND tr.method IS NOT NULL AND tr.verdict = 'BLOCKED' GROUP BY 1, 2 ORDER BY 1, 3 DESC",
+          "rawSql": "SELECT ${group_by:raw} AS group_name, tr.method, COUNT(*) AS detections FROM test_results tr JOIN test_runs ON test_runs.id = tr.test_run_id \nWHERE \n    ('ALL' IN (${var_company:singlequote}) OR test_runs.server_meta->'asn'->>'org' IN (${var_company:singlequote}))\n    AND ('ALL' IN (${var_asn:singlequote}) OR 'AS' || (test_runs.server_meta->'asn'->>'asn') IN (${var_asn:singlequote}))\n    AND ('ALL' IN (${var_datacenter:singlequote}) OR COALESCE(test_runs.server_meta->'datacenter'->>'name', 'No DC') IN (${var_datacenter:singlequote}))\n    AND ('ALL' IN (${var_country:singlequote}) OR test_runs.server_meta->'location'->>'country_code' IN (${var_country:singlequote}))\n    AND ('ALL' IN (${var_test_id:singlequote}) OR test_runs.test_id IN (${var_test_id:singlequote}))\n    AND ('ALL' IN (${var_client_network:singlequote}) OR test_runs.id IN (SELECT DISTINCT test_run_id FROM listener_sessions ls WHERE ('Mobile' IN (${var_client_network:singlequote}) AND ls.is_mobile) OR ('Whitelist' IN (${var_client_network:singlequote}) AND ls.is_whitelist) OR ('Regular' IN (${var_client_network:singlequote}) AND NOT ls.is_mobile AND NOT ls.is_whitelist)))\n AND tr.method IS NOT NULL AND tr.verdict = 'BLOCKED' GROUP BY 1, 2 ORDER BY 1, 3 DESC",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -271,7 +303,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT test_runs.test_id, 'AS' || (test_runs.server_meta->'asn'->>'asn') AS asn, test_runs.server_meta->'asn'->>'org' AS org, COALESCE(test_runs.server_meta->'datacenter'->>'name', 'No DC') AS datacenter, test_runs.server_meta->'location'->>'city' AS city, test_runs.server_meta->'location'->>'country_code' AS country, test_runs.overall_score FROM test_runs \nWHERE \n    ('ALL' IN (${var_company:singlequote}) OR test_runs.server_meta->'asn'->>'org' IN (${var_company:singlequote}))\n    AND ('ALL' IN (${var_asn:singlequote}) OR 'AS' || (test_runs.server_meta->'asn'->>'asn') IN (${var_asn:singlequote}))\n    AND ('ALL' IN (${var_datacenter:singlequote}) OR COALESCE(test_runs.server_meta->'datacenter'->>'name', 'No DC') IN (${var_datacenter:singlequote}))\n    AND ('ALL' IN (${var_country:singlequote}) OR test_runs.server_meta->'location'->>'country_code' IN (${var_country:singlequote}))\n    AND ('ALL' IN (${var_test_id:singlequote}) OR test_runs.test_id IN (${var_test_id:singlequote}))\n ORDER BY test_runs.overall_score ASC",
+          "rawSql": "SELECT test_runs.test_id, 'AS' || (test_runs.server_meta->'asn'->>'asn') AS asn, test_runs.server_meta->'asn'->>'org' AS org, COALESCE(test_runs.server_meta->'datacenter'->>'name', 'No DC') AS datacenter, test_runs.server_meta->'location'->>'city' AS city, test_runs.server_meta->'location'->>'country_code' AS country, test_runs.overall_score FROM test_runs \nWHERE \n    ('ALL' IN (${var_company:singlequote}) OR test_runs.server_meta->'asn'->>'org' IN (${var_company:singlequote}))\n    AND ('ALL' IN (${var_asn:singlequote}) OR 'AS' || (test_runs.server_meta->'asn'->>'asn') IN (${var_asn:singlequote}))\n    AND ('ALL' IN (${var_datacenter:singlequote}) OR COALESCE(test_runs.server_meta->'datacenter'->>'name', 'No DC') IN (${var_datacenter:singlequote}))\n    AND ('ALL' IN (${var_country:singlequote}) OR test_runs.server_meta->'location'->>'country_code' IN (${var_country:singlequote}))\n    AND ('ALL' IN (${var_test_id:singlequote}) OR test_runs.test_id IN (${var_test_id:singlequote}))\n    AND ('ALL' IN (${var_client_network:singlequote}) OR test_runs.id IN (SELECT DISTINCT test_run_id FROM listener_sessions ls WHERE ('Mobile' IN (${var_client_network:singlequote}) AND ls.is_mobile) OR ('Whitelist' IN (${var_client_network:singlequote}) AND ls.is_whitelist) OR ('Regular' IN (${var_client_network:singlequote}) AND NOT ls.is_mobile AND NOT ls.is_whitelist)))\n ORDER BY test_runs.overall_score ASC",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -280,6 +312,210 @@
             "type": "postgres",
             "uid": "DS_CENSPROBE_PG"
           }
+        }
+      ]
+    },
+    {
+      "id": 101,
+      "type": "barchart",
+      "title": "Worst Telegram Health (top-20)",
+      "description": "Top-20 серверов с наихудшим telegram_health. Сортировка ASC: первый бар — самый плохой. Учитывает все активные фильтры (company / ASN / DC / country / client network).",
+      "datasource": {
+        "type": "postgres",
+        "uid": "DS_CENSPROBE_PG"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 42,
+        "w": 8,
+        "h": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.5
+              },
+              {
+                "color": "green",
+                "value": 0.85
+              }
+            ]
+          },
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "xTickLabelRotation": 0,
+        "showValue": "auto",
+        "legend": {
+          "showLegend": false,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "DS_CENSPROBE_PG"
+          },
+          "format": "table",
+          "rawSql": "SELECT test_runs.test_id AS server, test_runs.telegram_health AS telegram_health FROM test_runs WHERE \n    ('ALL' IN (${var_company:singlequote}) OR test_runs.server_meta->'asn'->>'org' IN (${var_company:singlequote}))\n    AND ('ALL' IN (${var_asn:singlequote}) OR 'AS' || (test_runs.server_meta->'asn'->>'asn') IN (${var_asn:singlequote}))\n    AND ('ALL' IN (${var_datacenter:singlequote}) OR COALESCE(test_runs.server_meta->'datacenter'->>'name', 'No DC') IN (${var_datacenter:singlequote}))\n    AND ('ALL' IN (${var_country:singlequote}) OR test_runs.server_meta->'location'->>'country_code' IN (${var_country:singlequote}))\n    AND ('ALL' IN (${var_test_id:singlequote}) OR test_runs.test_id IN (${var_test_id:singlequote}))\n    AND ('ALL' IN (${var_client_network:singlequote}) OR test_runs.id IN (SELECT DISTINCT test_run_id FROM listener_sessions ls WHERE ('Mobile' IN (${var_client_network:singlequote}) AND ls.is_mobile) OR ('Whitelist' IN (${var_client_network:singlequote}) AND ls.is_whitelist) OR ('Regular' IN (${var_client_network:singlequote}) AND NOT ls.is_mobile AND NOT ls.is_whitelist)))\n    AND test_runs.telegram_health IS NOT NULL ORDER BY test_runs.telegram_health ASC LIMIT 20",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 102,
+      "type": "barchart",
+      "title": "Worst DNS Integrity (top-20)",
+      "description": "Top-20 серверов с наихудшим DNS integrity. Сортировка ASC: первый бар — самый плохой. Учитывает все активные фильтры (company / ASN / DC / country / client network).",
+      "datasource": {
+        "type": "postgres",
+        "uid": "DS_CENSPROBE_PG"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 42,
+        "w": 8,
+        "h": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.5
+              },
+              {
+                "color": "green",
+                "value": 0.85
+              }
+            ]
+          },
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "xTickLabelRotation": 0,
+        "showValue": "auto",
+        "legend": {
+          "showLegend": false,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "DS_CENSPROBE_PG"
+          },
+          "format": "table",
+          "rawSql": "SELECT test_runs.test_id AS server, test_runs.dns_integrity AS dns_integrity FROM test_runs WHERE \n    ('ALL' IN (${var_company:singlequote}) OR test_runs.server_meta->'asn'->>'org' IN (${var_company:singlequote}))\n    AND ('ALL' IN (${var_asn:singlequote}) OR 'AS' || (test_runs.server_meta->'asn'->>'asn') IN (${var_asn:singlequote}))\n    AND ('ALL' IN (${var_datacenter:singlequote}) OR COALESCE(test_runs.server_meta->'datacenter'->>'name', 'No DC') IN (${var_datacenter:singlequote}))\n    AND ('ALL' IN (${var_country:singlequote}) OR test_runs.server_meta->'location'->>'country_code' IN (${var_country:singlequote}))\n    AND ('ALL' IN (${var_test_id:singlequote}) OR test_runs.test_id IN (${var_test_id:singlequote}))\n    AND ('ALL' IN (${var_client_network:singlequote}) OR test_runs.id IN (SELECT DISTINCT test_run_id FROM listener_sessions ls WHERE ('Mobile' IN (${var_client_network:singlequote}) AND ls.is_mobile) OR ('Whitelist' IN (${var_client_network:singlequote}) AND ls.is_whitelist) OR ('Regular' IN (${var_client_network:singlequote}) AND NOT ls.is_mobile AND NOT ls.is_whitelist)))\n    AND test_runs.dns_integrity IS NOT NULL ORDER BY test_runs.dns_integrity ASC LIMIT 20",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 103,
+      "type": "barchart",
+      "title": "Worst TLS Integrity (top-20)",
+      "description": "Top-20 серверов с наихудшим TLS integrity. Сортировка ASC: первый бар — самый плохой. Учитывает все активные фильтры (company / ASN / DC / country / client network).",
+      "datasource": {
+        "type": "postgres",
+        "uid": "DS_CENSPROBE_PG"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 42,
+        "w": 8,
+        "h": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.5
+              },
+              {
+                "color": "green",
+                "value": 0.85
+              }
+            ]
+          },
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "xTickLabelRotation": 0,
+        "showValue": "auto",
+        "legend": {
+          "showLegend": false,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "DS_CENSPROBE_PG"
+          },
+          "format": "table",
+          "rawSql": "SELECT test_runs.test_id AS server, test_runs.tls_integrity AS tls_integrity FROM test_runs WHERE \n    ('ALL' IN (${var_company:singlequote}) OR test_runs.server_meta->'asn'->>'org' IN (${var_company:singlequote}))\n    AND ('ALL' IN (${var_asn:singlequote}) OR 'AS' || (test_runs.server_meta->'asn'->>'asn') IN (${var_asn:singlequote}))\n    AND ('ALL' IN (${var_datacenter:singlequote}) OR COALESCE(test_runs.server_meta->'datacenter'->>'name', 'No DC') IN (${var_datacenter:singlequote}))\n    AND ('ALL' IN (${var_country:singlequote}) OR test_runs.server_meta->'location'->>'country_code' IN (${var_country:singlequote}))\n    AND ('ALL' IN (${var_test_id:singlequote}) OR test_runs.test_id IN (${var_test_id:singlequote}))\n    AND ('ALL' IN (${var_client_network:singlequote}) OR test_runs.id IN (SELECT DISTINCT test_run_id FROM listener_sessions ls WHERE ('Mobile' IN (${var_client_network:singlequote}) AND ls.is_mobile) OR ('Whitelist' IN (${var_client_network:singlequote}) AND ls.is_whitelist) OR ('Regular' IN (${var_client_network:singlequote}) AND NOT ls.is_mobile AND NOT ls.is_whitelist)))\n    AND test_runs.tls_integrity IS NOT NULL ORDER BY test_runs.tls_integrity ASC LIMIT 20",
+          "refId": "A"
         }
       ]
     }

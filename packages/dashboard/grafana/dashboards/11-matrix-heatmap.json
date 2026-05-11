@@ -1,0 +1,291 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "id": 100,
+      "type": "text",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 2
+      },
+      "title": "",
+      "options": {
+        "mode": "markdown",
+        "content": "**11 — Matrix Heatmap.** Полная картина 96-теста кампании в одном экране. Верхняя матрица: серверы × протоколы, цвет = вердикт. Нижняя: серверы × тип клиентской сети, цвет = overall_score. Фильтры в верхнем баре сужают набор; пусто = всё."
+      }
+    },
+    {
+      "id": 1,
+      "type": "table",
+      "title": "Protocol verdicts per server (worst-blocked first)",
+      "description": "Каждая строка — один test_id, каждая колонка — VPN-протокол. Ячейка показывает доминирующий вердикт для всех сессий этого сервера на этом протоколе (если есть и OK и BLOCKED — берётся худший). Серверы отсортированы по убыванию % BLOCKED. Учитывает фильтр client_network ниже.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "DS_CENSPROBE_PG"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 2,
+        "w": 24,
+        "h": 18
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "center",
+            "cellOptions": {
+              "type": "color-background",
+              "mode": "basic"
+            },
+            "filterable": true
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "OK": {
+                  "color": "green",
+                  "index": 0,
+                  "text": "OK"
+                },
+                "HANDSHAKE_ONLY": {
+                  "color": "yellow",
+                  "index": 1,
+                  "text": "HS"
+                },
+                "BLOCKED": {
+                  "color": "red",
+                  "index": 2,
+                  "text": "BL"
+                },
+                "—": {
+                  "color": "transparent",
+                  "index": 3,
+                  "text": "—"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "server"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 220
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "blocked_count"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "auto"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 70
+              },
+              {
+                "id": "displayName",
+                "value": "BL"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "fields": ""
+        },
+        "sortBy": [
+          {
+            "displayName": "BL",
+            "desc": true
+          }
+        ]
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "DS_CENSPROBE_PG"
+          },
+          "format": "table",
+          "rawSql": "SELECT tr.test_id AS server,\n  SUM(CASE WHEN pr.verdict='BLOCKED' THEN 1 ELSE 0 END) AS blocked_count,\n  MAX(CASE WHEN pr.protocol='openvpn' THEN pr.verdict END) AS openvpn,\n  MAX(CASE WHEN pr.protocol='wireguard' THEN pr.verdict END) AS wireguard,\n  MAX(CASE WHEN pr.protocol='amneziawg' THEN pr.verdict END) AS amneziawg,\n  MAX(CASE WHEN pr.protocol='shadowsocks' THEN pr.verdict END) AS shadowsocks,\n  MAX(CASE WHEN pr.protocol='vless_reality' THEN pr.verdict END) AS vless_reality,\n  MAX(CASE WHEN pr.protocol='hysteria2' THEN pr.verdict END) AS hysteria2,\n  MAX(CASE WHEN pr.protocol='mtproto_proxy' THEN pr.verdict END) AS mtproto_proxy,\n  MAX(CASE WHEN pr.protocol='mtproto_proxy_alt' THEN pr.verdict END) AS mtproto_proxy_alt,\n  MAX(CASE WHEN pr.protocol='mtproto_orig' THEN pr.verdict END) AS mtproto_orig\nFROM test_runs tr\nJOIN listener_sessions ls ON ls.test_run_id = tr.id\nJOIN protocol_results pr ON pr.session_id = ls.id\nWHERE\n    ('ALL' IN (${var_client_network:singlequote})\n     OR ('Mobile' IN (${var_client_network:singlequote}) AND ls.is_mobile)\n     OR ('Whitelist' IN (${var_client_network:singlequote}) AND ls.is_whitelist)\n     OR ('Regular' IN (${var_client_network:singlequote}) AND NOT ls.is_mobile AND NOT ls.is_whitelist))\n    AND ('ALL' IN (${var_company:singlequote}) OR tr.server_meta->'asn'->>'org' IN (${var_company:singlequote}))\nGROUP BY tr.test_id\nORDER BY blocked_count DESC, tr.test_id",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "table",
+      "title": "Overall score per server × client network",
+      "description": "Same server tested from different client networks. Если одни и те же 8 серверов прогнаны через все 3 типа сети — видно где обходные сети помогают, а где блок системный. NULL ячейка = этой комбинации нет в данных (ещё не прогнал).",
+      "datasource": {
+        "type": "postgres",
+        "uid": "DS_CENSPROBE_PG"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 20,
+        "w": 24,
+        "h": 14
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "center",
+            "cellOptions": {
+              "type": "color-background",
+              "mode": "continuous-RdYlGr"
+            },
+            "filterable": true
+          },
+          "min": 0,
+          "max": 100,
+          "decimals": 1
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "server"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 220
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "server",
+            "desc": false
+          }
+        ]
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "DS_CENSPROBE_PG"
+          },
+          "format": "table",
+          "rawSql": "SELECT tr.test_id AS server,\n  AVG(CASE WHEN ls.is_mobile THEN tr.overall_score END) AS \"Mobile\",\n  AVG(CASE WHEN ls.is_whitelist THEN tr.overall_score END) AS \"Whitelist\",\n  AVG(CASE WHEN NOT ls.is_mobile AND NOT ls.is_whitelist THEN tr.overall_score END) AS \"Regular\"\nFROM test_runs tr\nJOIN listener_sessions ls ON ls.test_run_id = tr.id\nWHERE ('ALL' IN (${var_company:singlequote}) OR tr.server_meta->'asn'->>'org' IN (${var_company:singlequote}))\nGROUP BY tr.test_id\nORDER BY tr.test_id",
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "refresh": "",
+  "schemaVersion": 39,
+  "tags": [
+    "censprobe",
+    "matrix"
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "var_company",
+        "label": "Company",
+        "type": "query",
+        "datasource": {
+          "type": "postgres",
+          "uid": "DS_CENSPROBE_PG"
+        },
+        "query": "SELECT DISTINCT server_meta->'asn'->>'org' FROM test_runs WHERE server_meta->'asn'->>'org' IS NOT NULL",
+        "multi": true,
+        "includeAll": true,
+        "allValue": "ALL"
+      },
+      {
+        "name": "var_client_network",
+        "label": "Client Network",
+        "type": "custom",
+        "query": "Mobile : Mobile, Whitelist : Whitelist, Regular : Regular",
+        "options": [
+          {
+            "text": "Mobile",
+            "value": "Mobile",
+            "selected": false
+          },
+          {
+            "text": "Whitelist",
+            "value": "Whitelist",
+            "selected": false
+          },
+          {
+            "text": "Regular",
+            "value": "Regular",
+            "selected": false
+          }
+        ],
+        "current": {
+          "text": "All",
+          "value": [
+            "$__all"
+          ]
+        },
+        "multi": true,
+        "includeAll": true,
+        "allValue": "ALL"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "11 — Matrix Heatmap",
+  "uid": "censprobe-11-matrix-heatmap",
+  "version": 1,
+  "weekStart": ""
+}

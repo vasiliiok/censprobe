@@ -41,7 +41,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "**Jump to:** [01 Overview](/d/censprobe-01) · [02 Blocking Matrix](/d/censprobe-02) · [03 Telegram](/d/censprobe-03) · [04 Protocol Reachability](/d/censprobe-04) · [05 Technique Attribution](/d/censprobe-05) · [06 Compare Tests](/d/censprobe-06) · [07 Cloudflare & WARP](/d/censprobe-07) · [08 QUIC & ECH](/d/censprobe-08) · [09 DNS](/d/censprobe-09) · [10 TLS](/d/censprobe-10)"
+        "content": "**Jump to:** [01 Overview](/d/censprobe-01) · [02 Blocking Matrix](/d/censprobe-02) · [03 Telegram](/d/censprobe-03) · [04 Protocol Reachability](/d/censprobe-04) · [05 Technique Attribution](/d/censprobe-05) · [06 Compare Tests](/d/censprobe-06) · [07 Cloudflare & WARP](/d/censprobe-07) · [08 QUIC & ECH](/d/censprobe-08) · [09 DNS](/d/censprobe-09) · [10 TLS](/d/censprobe-10) · [11 Matrix Heatmap](/d/censprobe-11-matrix-heatmap)"
       }
     },
     {
