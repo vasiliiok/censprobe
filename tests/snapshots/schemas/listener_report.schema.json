@@ -342,6 +342,16 @@
       "default": null,
       "title": "Duration Sec"
     },
+    "is_mobile": {
+      "default": false,
+      "title": "Is Mobile",
+      "type": "boolean"
+    },
+    "is_whitelist": {
+      "default": false,
+      "title": "Is Whitelist",
+      "type": "boolean"
+    },
     "listener_started_at": {
       "format": "date-time",
       "title": "Listener Started At",

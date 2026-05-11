@@ -83,10 +83,6 @@ class TestRun(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     test_id: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
-    description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    purpose: Mapped[str] = mapped_column(
-        String(64), default="vpn-entry"
-    )  # vpn-entry | vpn-exit | vpn-relay
     server_meta: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     ipv6_available: Mapped[bool] = mapped_column(Boolean, default=False)
     kernel: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -210,6 +206,12 @@ class ListenerSession(Base):
     duration_sec: Mapped[float | None] = mapped_column(Float, nullable=True)
     client_connected: Mapped[bool] = mapped_column(Boolean, default=False)
     client_meta: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    # Operator-supplied network-context flags from listener CLI
+    # ``--mobile`` / ``--white``. Indexed so Grafana template variables
+    # populate quickly even at thousands of sessions; both flags can be
+    # set together (mobile carrier with whitelisting in effect).
+    is_mobile: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    is_whitelist: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
 
     test_run = relationship("TestRun", back_populates="sessions")
     protocol_results = relationship(

@@ -206,9 +206,7 @@ class ReportMeta(BaseModel):
 
     test_id: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    description: str | None = None
     server: ServerMeta = Field(default_factory=ServerMeta)
-    purpose: str = "vpn-entry"  # vpn-entry | vpn-exit | vpn-relay
     planned_sessions: list[str] = Field(default_factory=list)
     probe_core_version: str = "0.1.0"
 
@@ -329,6 +327,14 @@ class ListenerReport(BaseModel):
     duration_sec: float | None = None
     client_connected: bool = False
     client: EndpointMeta | None = None
+    # Operator-supplied network-context flags (listener CLI ``--mobile``
+    # / ``--white``). Surfaced as first-class Grafana filter dimensions
+    # so a 96-test campaign across multiple companies × zones × client
+    # networks can be sliced by network type without parsing session_id
+    # strings. Default False keeps older reports (and tests that don't
+    # pass the flag) on the "regular" axis.
+    is_mobile: bool = False
+    is_whitelist: bool = False
     results: dict[str, ProtocolResult] = Field(default_factory=dict)
 
 

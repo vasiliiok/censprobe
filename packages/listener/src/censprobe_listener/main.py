@@ -33,6 +33,7 @@ import contextlib
 import json
 import logging
 import os
+import secrets
 import signal
 import sys
 from datetime import UTC, datetime
@@ -107,14 +108,35 @@ _STOP_TIMEOUT_SEC = 20.0
 _SNAPSHOT_DRAIN_TIMEOUT_SEC = 30.0
 
 
+def _generate_session_id(*, is_mobile: bool, is_whitelist: bool) -> str:
+    """Auto-generate a per-run SESSION_ID with a human-eyeballable prefix.
+
+    Operators previously had to invent ``client-<type>-<provider>-<city>``
+    strings by hand and pass them via ``--session-id``. The convention
+    drifted (typos, abbreviations) and the resulting strings weren't
+    machine-parseable for dashboards anyway — the real signal is "what
+    kind of network was the client on", which is now captured by the
+    two boolean flags ``--mobile`` and ``--white``.
+
+    Prefix encodes the flags so ``ls reports/<test_id>/`` is readable
+    at a glance: ``mob-A8F1``, ``white-K9p2``, ``mob-white-X3R5``,
+    ``plain-L4M8``. The 4-hex-char suffix (~16 bits of entropy) keeps
+    multiple sessions within a single test_id distinguishable; collision
+    probability inside a 96-test campaign is negligible.
+    """
+    if is_mobile and is_whitelist:
+        prefix = "mob-white"
+    elif is_mobile:
+        prefix = "mob"
+    elif is_whitelist:
+        prefix = "white"
+    else:
+        prefix = "plain"
+    return f"{prefix}-{secrets.token_hex(2).upper()}"
+
+
 @click.command()
 @click.option("--test-id", envvar="TEST_ID", required=True, help="Test identifier")
-@click.option(
-    "--session-id",
-    envvar="SESSION_ID",
-    required=True,
-    help="Client network session identifier, e.g. client-home-rt-spb",
-)
 # CREDS_PORT lives in .env (default 8443 there). 8443 is the highest
 # MASQUE-fallback port real Cloudflare WARP binds, so it's unlikely to be
 # blocked outbound by an ISP; VLESS+Reality and Hysteria 2 already
@@ -126,34 +148,69 @@ _SNAPSHOT_DRAIN_TIMEOUT_SEC = 30.0
     type=int,
     help="Port for the credentials HTTPS endpoint",
 )
+@click.option(
+    "--mobile",
+    "is_mobile",
+    is_flag=True,
+    default=False,
+    help="Mark this session as conducted from a mobile-carrier network (used as a "
+    "first-class filter dimension in Grafana). Combinable with --white.",
+)
+@click.option(
+    "--white",
+    "is_whitelist",
+    is_flag=True,
+    default=False,
+    help="Mark this session as conducted from a network with carrier-side allow-"
+    "lists / whitelisting in effect. Combinable with --mobile.",
+)
 @click.option("--verbose", "-v", is_flag=True, default=False)
-def main(test_id: str, session_id: str, creds_port: int, verbose: bool) -> None:
+def main(
+    test_id: str,
+    creds_port: int,
+    is_mobile: bool,
+    is_whitelist: bool,
+    verbose: bool,
+) -> None:
     """
     Censprobe Listener — expose VPN handshake endpoints, record what clients can reach.
 
     Run:
         docker compose --profile listener run --rm listener \\
-            --test-id selectel-spb-001 --session-id client-home-rt-spb
+            --test-id selectel-spb-001
+        docker compose --profile listener run --rm listener \\
+            --test-id selectel-spb-001 --mobile        # this run is from mobile
+        docker compose --profile listener run --rm listener \\
+            --test-id selectel-spb-001 --mobile --white # mobile + carrier whitelist
+
     Stop: Ctrl+C → results saved to reports/<TEST_ID>/.
     """
     if verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
     test_id = _click_validate_id("--test-id", test_id)
-    session_id = _click_validate_id("--session-id", session_id)
+    # session_id is auto-generated so the operator never has to invent
+    # one — the network-type prefix makes it eyeballable in `ls` output
+    # and the two booleans become first-class Grafana filter dimensions.
+    session_id = _generate_session_id(is_mobile=is_mobile, is_whitelist=is_whitelist)
 
+    network_label = (
+        ", ".join(label for label, on in (("mobile", is_mobile), ("whitelist", is_whitelist)) if on)
+        or "regular"
+    )
     console.print(
         Panel.fit(
             f"[bold cyan]Censprobe Listener[/bold cyan]\n"
             f"Test ID: [yellow]{test_id}[/yellow]\n"
-            f"Session ID: [yellow]{session_id}[/yellow]\n"
+            f"Session ID: [yellow]{session_id}[/yellow] (auto-generated)\n"
+            f"Network: [yellow]{network_label}[/yellow]\n"
             f"Workspace: {WORKSPACE}\n\n"
             "[dim]Press Ctrl+C to stop and save results.[/dim]",
             title="Starting listener",
         )
     )
 
-    asyncio.run(_async_main(test_id, session_id, creds_port))
+    asyncio.run(_async_main(test_id, session_id, creds_port, is_mobile, is_whitelist))
 
 
 def _load_config_or_exit() -> None:
@@ -308,7 +365,13 @@ async def _wait_for_shutdown_signal(remote_stop: asyncio.Event | None = None) ->
                 loop.remove_signal_handler(sig)
 
 
-async def _async_main(test_id: str, session_id: str, creds_port: int) -> None:
+async def _async_main(
+    test_id: str,
+    session_id: str,
+    creds_port: int,
+    is_mobile: bool,
+    is_whitelist: bool,
+) -> None:
     # ── Step 0: Load top-level config (protocols.enabled, vantage list, …) ───
     _load_config_or_exit()
 
@@ -464,6 +527,8 @@ async def _async_main(test_id: str, session_id: str, creds_port: int) -> None:
         duration_sec=round(duration, 1),
         client_connected=client_ip is not None,
         client=client_meta,
+        is_mobile=is_mobile,
+        is_whitelist=is_whitelist,
         results=results,
     )
     report_path = _save_listener_report(report, test_id, session_id)

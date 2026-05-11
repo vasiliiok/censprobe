@@ -506,8 +506,6 @@ async def _get_or_create_test_run(
 
     run = TestRun(
         test_id=test_id,
-        description=meta_data.get("description"),
-        purpose=meta_data.get("purpose", "vpn-entry"),
         server_meta=endpoint,
         ipv6_available=bool(server.get("ipv6_available", False))
         if isinstance(server, dict)
@@ -603,6 +601,8 @@ async def _import_listener_report(session: AsyncSession, run: TestRun, path: Pat
         duration_sec=sess_meta.get("duration_sec"),
         client_connected=bool(sess_meta.get("client_connected", False)),
         client_meta=sess_meta.get("client_meta"),
+        is_mobile=bool(sess_meta.get("is_mobile", False)),
+        is_whitelist=bool(sess_meta.get("is_whitelist", False)),
     )
     session.add(listener_sess)
     await session.flush()
@@ -626,8 +626,6 @@ async def _fetch_run(session: AsyncSession, test_id: str) -> TestRun:
 def _run_to_dict(run: TestRun) -> dict[str, Any]:
     return {
         "test_id": run.test_id,
-        "description": run.description,
-        "purpose": run.purpose,
         "server_meta": run.server_meta,
         "ipv6_available": run.ipv6_available,
         "kernel": run.kernel,

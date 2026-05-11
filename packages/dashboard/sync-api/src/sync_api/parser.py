@@ -128,6 +128,11 @@ def parse_listener_report(
         "duration_sec": _to_float(raw.get("duration_sec"), default=None),
         "client_connected": client_connected,
         "client_meta": client_meta,
+        # Listener writes these as top-level booleans from its CLI flags.
+        # Older reports predate the field — default False keeps them on
+        # the "regular network" axis.
+        "is_mobile": bool(raw.get("is_mobile", False)),
+        "is_whitelist": bool(raw.get("is_whitelist", False)),
     }
 
     protocol_results: list[dict[str, Any]] = []

@@ -20,15 +20,11 @@ async def _seed_run(
     db_session: Any,
     *,
     test_id: str,
-    description: str | None = None,
-    purpose: str = "vpn-entry",
 ) -> Any:
     from sync_api.db import TestRun
 
     run = TestRun(
         test_id=test_id,
-        description=description,
-        purpose=purpose,
         created_at=datetime.now(UTC),
         entry_score=80.0,
         exit_score=70.0,
@@ -99,8 +95,8 @@ class TestListTestRuns:
         assert resp.json() == []
 
     async def test_list_returns_seeded_runs(self, db_session: Any, app_client: Any) -> None:
-        await _seed_run(db_session, test_id="run-a", description="A")
-        await _seed_run(db_session, test_id="run-b", description="B")
+        await _seed_run(db_session, test_id="run-a")
+        await _seed_run(db_session, test_id="run-b")
 
         resp = await app_client.get("/test-runs")
         assert resp.status_code == 200
@@ -116,12 +112,11 @@ class TestListTestRuns:
 @pytest.mark.integration
 class TestGetTestRun:
     async def test_existing_run(self, db_session: Any, app_client: Any) -> None:
-        await _seed_run(db_session, test_id="vu-fra", description="Vultr FRA")
+        await _seed_run(db_session, test_id="vu-fra")
         resp = await app_client.get("/test-runs/vu-fra")
         assert resp.status_code == 200
         body = resp.json()
         assert body["test_id"] == "vu-fra"
-        assert body["description"] == "Vultr FRA"
         assert body["scores"]["entry"] == pytest.approx(80.0)
         # Default listener_session_count from _seed_run is the column's
         # server default (0) — confirms it round-trips through the API.

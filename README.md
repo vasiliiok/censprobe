@@ -123,21 +123,32 @@ docker compose --profile solo run --rm solo --test-id selectel-spb-001
 > **Только Linux-host.** Listener использует `network_mode: host` + raw sockets + iptables-счётчики для kernel-level cross-validation вердиктов. Docker Desktop на macOS / Windows не пускает контейнер в реальный host-netns, поэтому listener там работать не будет. Запускай на Linux: облачная VM, bare metal, WSL2 с systemd. **Client side** этого ограничения не имеет — пробу из Mac/Windows запускать можно.
 
 ```bash
-docker compose --profile listener run --rm listener \
-  --test-id selectel-spb-001 \
-  --session-id client-home-rt-spb
+# Базовый запуск (обычная сеть):
+docker compose --profile listener run --rm listener --test-id selectel-spb-001
+
+# Тест с мобильной сети:
+docker compose --profile listener run --rm listener --test-id selectel-spb-001 --mobile
+
+# Тест с сети с включёнными белыми списками (carrier whitelist):
+docker compose --profile listener run --rm listener --test-id selectel-spb-001 --white
+
+# Комбинируется:
+docker compose --profile listener run --rm listener --test-id selectel-spb-001 --mobile --white
 ```
 
-Listener генерирует одноразовые credentials в памяти, поднимает все respondery (OpenVPN UDP, WireGuard UDP, AmneziaWG UDP, Shadowsocks 2022 TCP, VLESS+Reality TCP, Hysteria 2 UDP, MTProto-proxy mtg на TCP/443 и alt-TCP/8888 для A/B port-vs-L7 DPI, оригинальный MTProto-proxy C на TCP/2080), запускает HTTPS-сервер на `CREDS_PORT` (по умолчанию 8443/tcp) с двумя endpoint'ами (`/creds` — single-use bearer-pinned выдача credentials YAML; `/snapshot` — multi-serve live counter snapshot для cross-verification клиентом) и **печатает готовую команду для запуска client'а**. Скопируйте её — она содержит TEST_ID, SESSION_ID, SERVER_HOST, CREDS_TOKEN и CREDS_CERT_SHA256.
+Listener генерирует одноразовые credentials в памяти, поднимает все respondery (OpenVPN UDP, WireGuard UDP, AmneziaWG UDP, Shadowsocks 2022 TCP, VLESS+Reality TCP, Hysteria 2 UDP, MTProto-proxy mtg на TCP/443 и alt-TCP/8888 для A/B port-vs-L7 DPI, оригинальный MTProto-proxy C на TCP/2080), запускает HTTPS-сервер на `CREDS_PORT` (по умолчанию 8443/tcp) с двумя endpoint'ами (`/creds` — single-use bearer-pinned выдача credentials YAML; `/snapshot` — multi-serve live counter snapshot для cross-verification клиентом) и **печатает готовую команду для запуска client'а**. Скопируйте её — она содержит TEST_ID, SESSION_ID (автогенерация), SERVER_HOST, CREDS_TOKEN и CREDS_CERT_SHA256.
 
 > Открытый порт **8443/tcp** должен быть доступен с клиентской сети. Credentials живут только в памяти процесса, на диск не пишутся.
 
 **Pre-flight checks.** При старте listener печатает результаты быстрых проверок окружения (есть ли CAP_NET_ADMIN, чистоту conntrack, достижимы ли Telegram DC из его egress'а, не висят ли осиротевшие iptables-правила от предыдущего падения). Жёлтая панель `Pre-flight warnings` появится ДО `Listener is ready` если что-то требует вмешательства оператора — каждый WARN содержит конкретную команду исправления.
 
-`SESSION_ID`: формат `client-<тип>-<провайдер>-<город>`:
-- `client-home-rt-spb` — домашний Ростелеком, СПб
-- `client-mob-mts-msk` — мобильный МТС, Москва
-- `client-wifi-cafe-msk` — публичный Wi-Fi
+`SESSION_ID` присваивается автоматически — оператор его больше не вводит. Префикс отражает выставленные флаги для удобного eyeball'а отчётов в `reports/<TEST_ID>/`:
+- `plain-A8F1` — ни `--mobile`, ни `--white` не выставлены (обычная сеть)
+- `mob-K9p2` — `--mobile`
+- `white-X3R5` — `--white`
+- `mob-white-L4M8` — оба флага
+
+Флаги — first-class фильтры в Grafana (`var_client_network` на дашборде Analytics & Compare): можно отобрать "только мобильные сессии всех 8 провайдеров" в один клик. Старая convention `client-<тип>-<провайдер>-<город>` больше не нужна и не валидируется — `--mobile` / `--white` дают то же измерение машинно-парсируемо.
 
 ### Шаг 3. Client (клиентская машина)
 
@@ -165,7 +176,7 @@ Client тянет credentials с listener'а через TLS-pinning (cert про
 
 ### Шаг 4. Дополнительные клиентские сети
 
-Просто перезапустите listener с новым `SESSION_ID` — он напечатает свежую команду с новыми credentials/cert/token.
+Просто перезапустите listener (опционально с другим набором `--mobile` / `--white`) — он сгенерирует новый `SESSION_ID` с актуальным префиксом и напечатает свежую команду с новыми credentials/cert/token.
 
 ### Шаг 5. Sync (опционально) — забрать `reports/` на машину с git-доступом
 

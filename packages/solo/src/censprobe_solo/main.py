@@ -111,7 +111,7 @@ async def _detect_or_load_server_meta(test_id: str, meta_path: Path) -> ServerMe
                 "Network may be unreachable. Continuing with empty metadata.[/yellow]"
             )
             server_meta = ServerMeta()
-        meta = ReportMeta(test_id=test_id, server=server_meta, purpose="vpn-entry")
+        meta = ReportMeta(test_id=test_id, server=server_meta)
         meta_path.parent.mkdir(parents=True, exist_ok=True)
         meta_path.write_text(yaml.dump(meta.model_dump(mode="json"), allow_unicode=True))
         console.print(f"[green]Created meta.yaml for {test_id}[/green]")
