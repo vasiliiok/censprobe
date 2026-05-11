@@ -88,7 +88,6 @@ logger = logging.getLogger(__name__)
 console = Console()
 
 WORKSPACE_REPORTS = Path("/workspace/reports")
-DEFAULT_PORT = 8444
 RCLONE_BASIC_AUTH_USER = "op"
 
 # Cert lifetime: 24 hours matches cred_server. A serve session that
@@ -367,12 +366,15 @@ def cli() -> None:
 
 
 @cli.command()
+# ``--port`` is ``required=True`` to mirror listener's ``--creds-port`` —
+# .env (committed) is the single source of truth for SYNC_PORT, and any
+# missing/typo'd value should surface as an explicit CLI error rather than
+# a silent bind on a port the operator never declared.
 @click.option(
     "--port",
     type=int,
-    default=DEFAULT_PORT,
+    required=True,
     envvar="SYNC_PORT",
-    show_default=True,
     help="HTTPS port to bind for the read-only rclone endpoint",
 )
 def serve(port: int) -> None:

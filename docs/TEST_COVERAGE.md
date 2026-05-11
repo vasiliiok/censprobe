@@ -15,7 +15,7 @@
 
 ### `packages/probe-core/`
 
-#### Pure-unit (`tests/unit/`, 14 файлов, 256 тестов)
+#### Pure-unit (`tests/unit/`, 15 файлов, 261 тест)
 
 | Src-модуль | Тест-файл(ы) | Тестов | Что покрыто |
 |------------|--------------|-------:|-------------|
@@ -33,6 +33,7 @@
 | `censprobe_core.modules.dns._cert_san_covers_domain_family` | `test_dns_cert_san.py` | 18 | wildcard-apex relaxation, single-label match, RFC 6125 |
 | `censprobe_core.modules.tls._pick_neutral_sni` | `test_tls_neutral_sni.py` | 17 | per-IP-family neutral SNI selection (Cloudflare/Akamai/AWS prefixes) |
 | `censprobe_core.modules.http._verdict_from_response` (basic) | `test_http_classify.py` | 7 | 200/expected_status, 403/451 + valid_tls → `GEOBLOCK_NOT_CENSORSHIP` |
+| `censprobe_core.models.ProtocolResult.finalize` | `test_protocol_result_finalize.py` | 6 | truth-table `(handshake_count, data_transfer_ok) → Verdict`; load-bearing case `(0, True) → OK` guards SOCKS-routed / mtproto_proxy log-parse drift from collapsing to false BLOCKED |
 
 #### Mocked-unit modules (`tests/modules/`, 10 файлов, 99 тестов)
 
@@ -57,7 +58,7 @@
 | `censprobe_core.subcategories.derive` | `test_subcategories_property.py` | 4 | для любого test_name результат непуст и принадлежит замкнутому множеству |
 | `censprobe_core.utils.validate_id` | `test_validate_id_property.py` | 4 | accept-set / reject-set дискриминируются |
 
-**Probe-core total: 27 файлов, 367 тестов.**
+**Probe-core total: 28 файлов, 373 теста.**
 
 ---
 
@@ -94,7 +95,7 @@
 | Src-модуль | Тест-файл | Тестов | Что покрыто |
 |------------|-----------|-------:|-------------|
 | `censprobe_client` (whole pkg) | `unit/test_smoke_imports.py` | 1 | submodule import |
-| `censprobe_client.main` (cross-verification helpers) | `unit/test_cross_verification.py` | 10 | `_listener_verdict` mirrors `ProtocolResult.finalize` (handshake+data ⇒ OK, handshake-only ⇒ HANDSHAKE_ONLY, no handshake ⇒ BLOCKED, scanner-pattern data without handshake ⇒ still BLOCKED); `_agreed_verdict` listener-wins matrix — both-OK no note, client-overconfident → "client overread", listener-OK + client-not → "listener saw data", other disagreements → `client=X` note |
+| `censprobe_client.main` (cross-verification helpers) | `unit/test_cross_verification.py` | 10 | `_listener_verdict` mirrors `ProtocolResult.finalize` — `data_transfer_ok=True ⇒ OK` (cryptographic ground truth wins over log-parsed handshake counter), handshake-only-no-data ⇒ HANDSHAKE_ONLY, neither signal ⇒ BLOCKED; `_agreed_verdict` listener-wins matrix — both-OK no note, client-overconfident → "client overread", listener-OK + client-not → "listener saw data", other disagreements → `client=X` note |
 | `censprobe_client.main` (retry policy) | `unit/test_retry.py` | 20 | `_pinned_get_with_retry`: first-attempt success no retry, transient-then-success, exhausted retries propagate `_TransientEndpointError`, permanent (`_PermanentEndpointError`) short-circuits on first attempt, `ValueError` (cert-format input error) propagates without retry; HTTP status classification matrix (5xx + 408 → transient; 4xx → permanent; malformed status line → permanent; non-numeric → permanent) |
 
 **Client total: 3 файла, 31 тест.** Probe-dispatch и main CLI orchestration domain-тестами не покрыты — verifycaция via end-to-end run.
@@ -133,7 +134,7 @@
 | `sync_api.main._import_once`, `parser`, `db` | `test_import_pipeline.py` | 8 | disk reports → DB rows + UPSERT-by-session, path-traversal/symlink guards |
 | `sync_api.db` (engine, ORM models) | `test_schema_round_trip.py` | 7 | `init_db()` создаёт все 4 таблицы, unique constraints (`uq_test_results_run_file_test_target`, `uq_listener_sessions_run_file`), индексы (`ix_test_results_run_file`), cascade delete `TestRun` → `TestResult`/`ListenerSession`/`ProtocolResult` |
 
-**Sync-api total: 8 файлов, 99 тестов.** Самое плотное покрытие после probe-core.
+**Sync-api total: 8 файлов, 105 тестов.** Самое плотное покрытие после probe-core.
 
 ---
 
@@ -168,14 +169,14 @@
 
 | Tree | Файлы | Тестов (collected) | Покрытие |
 |------|-------:|-------:|----------|
-| `packages/probe-core/tests` | 27 | 367 | плотное (config, scoring, subcategories, runner, все 8 модулей измерений, credentials_reader, protocol_probes helpers + ping_echo + mtproto BLOCKED-on-timeout) |
+| `packages/probe-core/tests` | 28 | 373 | плотное (config, scoring, subcategories, runner, все 8 модулей измерений, credentials_reader, protocol_probes helpers + ping_echo + mtproto BLOCKED-on-timeout, ProtocolResult.finalize truth table) |
 | `packages/solo/tests` | 1 | 1 | smoke-only |
-| `packages/listener/tests` | 9 | 224 | credentials + AWG invariants (parametrize-heavy), preflight checks, openvpn AND-gate + auth-bytes latch, mtproto-orig responder, cred_server `/snapshot` endpoint |
+| `packages/listener/tests` | 9 | 228 | credentials + AWG invariants (parametrize-heavy), preflight checks, openvpn AND-gate + auth-bytes latch, mtproto-orig responder, cred_server `/snapshot` endpoint |
 | `packages/client/tests` | 3 | 31 | smoke + cross-verification helpers + retry policy (transient/permanent classification) |
-| `packages/sync/tests` | 3 | 27 | smoke + cert pinning (FP normalisation, pinned TLS fetch, DER→PEM round-trip, fresh-fingerprint per session) + click CLI shape |
-| `packages/dashboard/sync-api/tests` | 8 | 99 | parser + endpoints + DB schema |
-| `tests/` (workspace) | 6 | 16 | contracts + snapshots + e2e (`e2e-dashboard` job, 2 deselected по дефолту) |
-| **Total** | **58** | **765** (после parametrize, из них 763 default + 2 deselected e2e) | — |
+| `packages/sync/tests` | 3 | 33 | smoke + cert pinning (FP normalisation, pinned TLS fetch, DER→PEM round-trip, fresh-fingerprint per session) + click CLI shape |
+| `packages/dashboard/sync-api/tests` | 8 | 105 | parser + endpoints + DB schema |
+| `tests/` (workspace) | 6 | 14 | contracts + snapshots + e2e (`e2e-dashboard` job, 2 deselected по дефолту) |
+| **Total** | **58** | **787** (после parametrize, из них 785 default + 2 deselected e2e) | — |
 
 ---
 

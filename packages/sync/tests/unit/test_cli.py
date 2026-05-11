@@ -26,11 +26,15 @@ class TestCliShape:
         assert "serve" in result.output
         assert "pull" in result.output
 
-    def test_serve_help_shows_port_default(self, runner: CliRunner) -> None:
-        result = runner.invoke(sync_main.cli, ["serve", "--help"])
-        assert result.exit_code == 0
-        # default port surfaces in --help (click ``show_default=True``).
-        assert "8444" in result.output
+    def test_serve_port_is_required(self, runner: CliRunner) -> None:
+        # ``--port`` is required (mirrors listener's ``--creds-port``):
+        # invoking ``sync serve`` without it (and with SYNC_PORT unset)
+        # must exit with click's missing-option error before any
+        # network/cert/exec work runs.
+        result = runner.invoke(sync_main.cli, ["serve"], env={"SYNC_PORT": ""})
+        assert result.exit_code != 0
+        assert "Missing option" in result.output
+        assert "--port" in result.output
 
     def test_pull_requires_all_four_options(self, runner: CliRunner) -> None:
         # No options → click should fail with a missing-option error

@@ -20,11 +20,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import hmac
 import logging
 import os
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -38,9 +37,8 @@ from censprobe_core.models import (
 )
 from censprobe_core.scoring import compute_scores
 from censprobe_core.utils import SAFE_ID_RE
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi import Path as PathParam
-from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import delete, distinct, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -91,15 +89,15 @@ WORKSPACE = Path("/workspace")
 # at startup rather than a silent "60s by accident" deployment.
 IMPORT_INTERVAL_SEC = float(os.environ["CENSPROBE_IMPORT_INTERVAL_SEC"])
 
-# Bearer token for the data endpoints. Empty string ⇒ auth disabled,
-# matches single-tenant dev defaults. The service binds 127.0.0.1
-# only so this is defence-in-depth against same-host scraping rather
-# than the only line of defence. ``/health`` stays open for the
-# docker healthcheck so it doesn't need to thread credentials.
-_SYNC_API_TOKEN = os.environ.get("SYNC_API_TOKEN", "")
-# Paths that bypass auth even when the token is set. Keep this list
-# tight — anything that returns data must be authenticated.
-_AUTH_BYPASS_PATHS = frozenset({"/health"})
+# No HTTP-level authentication. sync-api is bound to 127.0.0.1:8080
+# inside ``docker-compose.yml`` (loopback only — external network
+# cannot reach it), the only in-cluster Grafana consumer reads via
+# the Postgres datasource (NOT this HTTP API), and the data exposed
+# is read-only network-measurement results with no credentials or
+# PII. The single-tenant deployment model assumes the operator owns
+# the host. If you ever need to expose port 8080 beyond loopback,
+# put a reverse proxy with auth in front of it — the API itself
+# is not designed to face the internet.
 
 
 @asynccontextmanager
@@ -125,47 +123,12 @@ app = FastAPI(
     description="Sync censprobe git reports into Postgres for Grafana",
     lifespan=lifespan,
 )
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
-    allow_methods=["GET"],
-    allow_headers=["*"],
-)
-
-
-@app.middleware("http")
-async def _require_bearer_token(
-    request: Request,
-    call_next: Callable[[Request], Awaitable[Response]],
-) -> Response:
-    """Reject unauthenticated requests when SYNC_API_TOKEN is set.
-
-    Empty token disables auth entirely (single-tenant dev default).
-    /health bypasses the check so the docker healthcheck stays
-    credential-free. All other paths require
-    ``Authorization: Bearer <SYNC_API_TOKEN>`` — hmac.compare_digest
-    keeps the comparison constant-time so a probing attacker can't
-    learn the prefix bytes from response timing.
-    """
-    if not _SYNC_API_TOKEN:
-        return await call_next(request)
-    if request.url.path in _AUTH_BYPASS_PATHS:
-        return await call_next(request)
-    auth = request.headers.get("authorization", "")
-    if not auth.startswith("Bearer "):
-        return Response(
-            content='{"detail":"missing bearer token"}',
-            status_code=401,
-            media_type="application/json",
-        )
-    presented = auth[len("Bearer ") :]
-    if not hmac.compare_digest(presented, _SYNC_API_TOKEN):
-        return Response(
-            content='{"detail":"invalid token"}',
-            status_code=403,
-            media_type="application/json",
-        )
-    return await call_next(request)
+# No CORS middleware: sync-api isn't called from a browser. Grafana
+# reaches censprobe data via its Postgres datasource (back-end → DB,
+# no browser involvement), and the HTTP endpoints below are for the
+# same-host operator's ``curl`` / future tooling. Adding ``Access-
+# Control-Allow-Origin`` headers for a non-existent cross-origin
+# consumer would only obscure the real access pattern.
 
 
 # Health

@@ -36,13 +36,23 @@ class TestListenerVerdict:
         snap = LiveSnapshot(handshake_count=0, data_transfer_ok=False)
         assert _listener_verdict(snap) == Verdict.BLOCKED
 
-    def test_zero_handshake_with_data_pkts_still_blocked(self) -> None:
-        # Defence in depth against the openvpn scanner pattern: even
-        # if data_transfer_ok somehow flipped True without a handshake
-        # (which the listener-side AND-gate prevents in the first
-        # place), the listener verdict still requires handshake_count > 0.
+    def test_data_transfer_ok_overrides_zero_handshake(self) -> None:
+        # ``data_transfer_ok=True`` is the cryptographic / kernel ground
+        # truth — bytes don't arrive at the echo server, the WG rx_bytes
+        # counter, or the OpenVPN/mtg iptables PSH+ACK counter without a
+        # successful handshake. ``handshake_count`` for SOCKS-routed
+        # responders and mtproto_proxy comes from substring-matching the
+        # foreign binary's stdout, which silently drifts with xray /
+        # sing-box / hysteria / mtg releases. If the log parser missed
+        # the marker but data actually flowed, the verdict must follow
+        # the data signal — the old "still BLOCKED" branch turned every
+        # log-format drift into a false negative on the listener side.
+        # OpenVPN-side scanner-resistance is enforced upstream by an
+        # AND-gate on ``data_transfer_ok`` itself (see openvpn_responder
+        # ``data_transfer_ok`` docstring), so the responders that need
+        # the strict gate already provide it.
         snap = LiveSnapshot(handshake_count=0, data_transfer_ok=True, data_packets=8)
-        assert _listener_verdict(snap) == Verdict.BLOCKED
+        assert _listener_verdict(snap) == Verdict.OK
 
 
 class TestAgreedVerdict:

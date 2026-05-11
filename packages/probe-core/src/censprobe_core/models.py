@@ -272,10 +272,31 @@ class ProtocolResult(BaseModel):
     note: str | None = None
 
     def finalize(self) -> None:
-        """Set verdict based on counts."""
-        if self.handshake_count > 0 and self.data_transfer_ok:
+        """Derive verdict from the two responder signals.
+
+        ``data_transfer_ok`` wins over ``handshake_count`` because it is the
+        cryptographically/kernel-verified evidence — bytes only arrive at the
+        listener's echo-server, only show up in the ``wg show transfer``
+        rx_bytes counter, and only tick the OpenVPN/mtg iptables PSH+ACK
+        counter once a successful handshake has completed. ``handshake_count``,
+        on the other hand, is derived for the SOCKS-routed family
+        (shadowsocks/vless_reality/hysteria2) and for ``mtproto_proxy`` from
+        substring matches against the foreign binary's stdout, which drifts
+        across xray/sing-box/hysteria/mtg releases. When the log-line
+        marker is missed but real data flowed, treating data as the source
+        of truth keeps the verdict aligned with the client's experience
+        instead of collapsing to a false ``BLOCKED``.
+
+        WG/AWG read both signals off the same ``wg show`` snapshot, OpenVPN
+        AND-gates ``data_transfer_ok`` against ``handshake_count > 0`` for
+        scanner-resistance, and ``mtproto_orig`` derives ``data_transfer_ok``
+        from ``connection_count > 0`` outright — so for those protocols the
+        ``data_transfer_ok=True, handshake_count=0`` case is by construction
+        impossible and this change is a no-op.
+        """
+        if self.data_transfer_ok:
             self.verdict = Verdict.OK
-        elif self.handshake_count > 0 and not self.data_transfer_ok:
+        elif self.handshake_count > 0:
             self.verdict = Verdict.HANDSHAKE_ONLY
         else:
             self.verdict = Verdict.BLOCKED

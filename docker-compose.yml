@@ -186,14 +186,14 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://censprobe:${DB_PASSWORD}@postgres/censprobe
       CENSPROBE_IMPORT_INTERVAL_SEC: ${CENSPROBE_IMPORT_INTERVAL_SEC}
-      # Empty SYNC_API_TOKEN disables auth (intentional for dev). When
-      # set, /test-runs, /results, /protocols all require
-      # ``Authorization: Bearer ${SYNC_API_TOKEN}``. /health stays open.
-      SYNC_API_TOKEN: ${SYNC_API_TOKEN:-}
     volumes:
       - ./:/workspace
-    # Bind to loopback only — the API has no authentication, and the only
-    # in-cluster consumer is Grafana (read-only via Postgres anyway).
+    # Bind to loopback only — the API has no built-in authentication.
+    # Grafana consumes data via the Postgres datasource (not this
+    # HTTP API), so the only reachable consumer is the host operator's
+    # own curl. Expose 8080 externally only behind a reverse proxy
+    # that adds auth; the FastAPI service itself isn't designed for
+    # internet-facing operation.
     ports:
       - "127.0.0.1:8080:8080"
     healthcheck:

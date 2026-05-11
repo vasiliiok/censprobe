@@ -738,7 +738,7 @@ def _listener_verdict(snap: LiveSnapshot) -> Verdict:
     report at session end, so the cross-verification table reflects
     what the operator will see in reports/.
     """
-    if snap.handshake_count > 0 and snap.data_transfer_ok:
+    if snap.data_transfer_ok:
         return Verdict.OK
     if snap.handshake_count > 0:
         return Verdict.HANDSHAKE_ONLY
