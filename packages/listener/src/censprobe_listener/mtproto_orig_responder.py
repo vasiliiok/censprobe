@@ -249,14 +249,24 @@ class MTProxyOrigResponder:
         return self.connection_count > 0
 
     def live_snapshot(self) -> LiveSnapshot:
-        """Live snapshot for the cred-server /snapshot endpoint.
+        """Counter snapshot for the cred-server /snapshot endpoint.
 
-        ``mtproto-proxy`` (C) emits no per-connection stdout marker at
-        default verbosity, so the iptables PSH-ACK counter is the
-        ONLY ground-truth signal. The handshake_count we surface here
-        is the live counter value — same source the post-stop verdict
-        uses, just sampled mid-session.
+        Post-``stop()`` (``self._proc is None``) returns the cached
+        ``connection_count`` — iptables rules are removed by stop(),
+        so a live read would return 0. The cached value is the
+        canonical post-stop reading (stop() updates it from
+        ``read_counter`` BEFORE removing the rule).
+
+        ``mtproto-proxy`` (C) emits no per-connection stdout marker
+        at default verbosity, so the iptables PSH-ACK counter is the
+        ONLY ground-truth signal — pre-stop we read it sync.
         """
+        if self._proc is None:
+            return LiveSnapshot(
+                handshake_count=self.connection_count,
+                data_transfer_ok=self.connection_count > 0,
+                data_packets=self.connection_count,
+            )
         live_packets = read_counter_sync("OUTPUT", self._counter_comment)
         return LiveSnapshot(
             handshake_count=live_packets,

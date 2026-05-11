@@ -301,15 +301,48 @@ async def _async_main(
             logger.error("Probe %s failed with exception: %s", name, e)
             results[name] = ProbeResult(verdict=Verdict.ERROR, error=str(e))
 
-    # ── Step 3: Fetch listener-side counter snapshot ─────────────────────────
+    # ── Step 3: Ask listener to stop, then fetch the final snapshot ──────────
     # The listener IS the ground truth: kernel-level counters, post-
     # handshake auth-validated bytes, iptables packet counts. Whatever
-    # the client sees can be spoofed by the OS/networking layer (the
-    # canonical Windows Docker Desktop fake-ICMP-replies case), so the
-    # cross-verification step asks the listener "what did YOU see?" and
-    # surfaces both verdicts side-by-side. Soft-fail on fetch errors:
-    # if the snapshot fetch fails we still print the client-side table.
+    # the client sees can be spoofed by the OS/networking layer.
+    #
+    # Two-step protocol (2026-05): first POST /stop so the listener
+    # tears down responders and freezes per-protocol counters into a
+    # final snapshot. Then poll GET /snapshot — it 503s until the
+    # listener has committed, then returns the same dict the JSON
+    # report contains. No more live-vs-final drift (which was the
+    # AWG cross-verify discrepancy that surfaced in RU runs).
     listener_snapshot: dict[str, LiveSnapshot] | None = None
+    try:
+        await asyncio.to_thread(
+            _post_stop,
+            server_host,
+            creds_port,
+            creds_token,
+            creds_cert_sha256,
+        )
+    except _PermanentEndpointError as e:
+        # /stop refused at auth/pinning level. The operator can still
+        # Ctrl+C on the server manually; we don't abort the client,
+        # we just skip cross-verification.
+        logger.warning("Listener /stop rejected: %s", e)
+    except _TransientEndpointError as e:
+        logger.warning(
+            "Listener /stop unreachable after %d retries: %s — "
+            "falling back to operator Ctrl+C on the server",
+            _FETCH_MAX_ATTEMPTS,
+            e,
+        )
+    except Exception as e:  # noqa: BLE001 — defence in depth
+        logger.warning("Could not POST /stop: %s", e)
+
+    # /snapshot now polls — it returns 503 until main.py finishes
+    # _stop_responders and calls commit_final_snapshots. responder
+    # teardown can take 30+s (openvpn graceful-terminate, mtg SIGTERM
+    # grace), so we give it ample retry headroom — five attempts at
+    # the existing exponential backoff (1s → 2s → 4s → 8s → 16s,
+    # capped by _FETCH_TIMEOUT_SEC per attempt) cleanly covers the
+    # _STOP_TIMEOUT_SEC window without hard-waiting.
     try:
         listener_snapshot = await asyncio.to_thread(
             _fetch_snapshot,
@@ -370,15 +403,14 @@ def _fetch_snapshot(
     token: str,
     expected_sha256: str,
 ) -> dict[str, LiveSnapshot]:
-    """GET https://host:port/snapshot — listener-side live counters.
+    """GET https://host:port/snapshot — listener-side final counters.
 
-    Reuses the same bearer token and pinned cert as ``/creds``. The
-    listener allows multiple snapshot fetches (unlike /creds which is
-    single-use), so a network-flaky client can retry without
-    invalidating the credential window.
-
-    Same retry policy as ``/creds`` — transient errors get up to
-    :data:`_FETCH_MAX_ATTEMPTS` attempts; permanent ones short-circuit.
+    Polls (with retry) until the listener has committed its post-stop
+    snapshot. Returns 503 while responders are still tearing down;
+    the retry wrapper treats those as transient. Once the server
+    finishes ``_stop_responders`` + ``commit_final_snapshots``, the
+    endpoint flips to 200 and serves the same per-protocol dict that
+    landed in the JSON report.
 
     Returns a per-protocol ``LiveSnapshot`` map. Protocols whose
     snapshot reader threw an exception on the listener are
@@ -386,7 +418,20 @@ def _fetch_snapshot(
     server already logged the failure, the client just shows a
     "no listener data" cell.
     """
-    body = _pinned_get_with_retry(host, port, token, expected_sha256, path="/snapshot")
+    # max_attempts is bumped here vs the default 3: openvpn graceful
+    # terminate alone can take 30s, plus wg-quick down + iptables
+    # teardown + ipapi.is enrichment can push the listener's
+    # commit_final_snapshots past a minute. Five attempts at
+    # exponential backoff (1+2+4+8+16 ≈ 31s of sleep + per-attempt
+    # _FETCH_TIMEOUT_SEC=15) covers the 30-60s window cleanly.
+    body = _pinned_get_with_retry(
+        host,
+        port,
+        token,
+        expected_sha256,
+        path="/snapshot",
+        max_attempts=5,
+    )
     raw = json.loads(body)
     out: dict[str, LiveSnapshot] = {}
     for name, payload in raw.items():
@@ -401,6 +446,30 @@ def _fetch_snapshot(
     return out
 
 
+def _post_stop(
+    host: str,
+    port: int,
+    token: str,
+    expected_sha256: str,
+) -> None:
+    """POST https://host:port/stop — ask listener to stop.
+
+    Same TLS-pinned bearer-auth as /creds and /snapshot. The listener
+    returns 202 Accepted with a tiny JSON ack and asynchronously
+    tears down responders. We treat both 200 and 202 as success
+    (POST-helpers in the retry wrapper accept 2xx broadly). Retries
+    on transient errors.
+    """
+    _pinned_get_with_retry(
+        host,
+        port,
+        token,
+        expected_sha256,
+        path="/stop",
+        method="POST",
+    )
+
+
 def _pinned_get(
     host: str,
     port: int,
@@ -408,8 +477,9 @@ def _pinned_get(
     expected_sha256: str,
     *,
     path: str,
+    method: str = "GET",
 ) -> str:
-    """Pinned-TLS bearer-auth GET. Shared by /creds and /snapshot.
+    """Pinned-TLS bearer-auth request. Shared by /creds, /snapshot, /stop.
 
     Self-signed cert from the listener: ``verify_mode=CERT_NONE`` and
     ``check_hostname=False``, then DER hash the peer cert and compare
@@ -455,10 +525,15 @@ def _pinned_get(
                         f"expected {expected}"
                     )
                 # Pinning passed — now safe to ship the bearer token.
+                # POST has Content-Length: 0 (no body) — /stop is the
+                # only POST endpoint right now and its payload is the
+                # bearer token, nothing else.
+                content_length_header = "Content-Length: 0\r\n" if method == "POST" else ""
                 request = (
-                    f"GET {path} HTTP/1.1\r\n"
+                    f"{method} {path} HTTP/1.1\r\n"
                     f"Host: {host}:{port}\r\n"
                     f"Authorization: Bearer {token}\r\n"
+                    f"{content_length_header}"
                     f"Connection: close\r\n"
                     f"User-Agent: censprobe-client\r\n"
                     f"\r\n"
@@ -485,7 +560,8 @@ def _pinned_get(
         status_code = int(parts[1])
     except ValueError as e:
         raise _PermanentEndpointError(f"non-numeric HTTP status: {status_line!r}") from e
-    if status_code == 200:
+    # Accept 200 (GET / POST OK) and 202 Accepted (POST /stop ack).
+    if status_code in (200, 202):
         return body.decode("utf-8", errors="replace")
 
     msg = body.decode("utf-8", errors="replace").strip() or status_line
@@ -505,6 +581,7 @@ def _pinned_get_with_retry(
     expected_sha256: str,
     *,
     path: str,
+    method: str = "GET",
     max_attempts: int = _FETCH_MAX_ATTEMPTS,
 ) -> str:
     """Wrap :func:`_pinned_get` with bounded retry on transient errors.
@@ -522,7 +599,7 @@ def _pinned_get_with_retry(
     last_exc: _TransientEndpointError | None = None
     for attempt in range(1, max_attempts + 1):
         try:
-            return _pinned_get(host, port, token, expected_sha256, path=path)
+            return _pinned_get(host, port, token, expected_sha256, path=path, method=method)
         except _TransientEndpointError as e:
             last_exc = e
             if attempt < max_attempts:

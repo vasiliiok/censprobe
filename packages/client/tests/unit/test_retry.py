@@ -29,7 +29,15 @@ class TestRetryPolicy:
         _zero_backoff(monkeypatch)
         calls: list[str] = []
 
-        def _fake(host: str, port: int, token: str, sha: str, *, path: str) -> str:
+        def _fake(
+            host: str,
+            port: int,
+            token: str,
+            sha: str,
+            *,
+            path: str,
+            method: str = "GET",
+        ) -> str:
             calls.append(path)
             return "OK"
 

@@ -346,20 +346,21 @@ verb 1
         return 1 if auth > 0 else 0
 
     def live_snapshot(self) -> LiveSnapshot:
-        """Live-read sibling of the post-stop snapshot.
+        """Counter snapshot for the cred-server's /snapshot endpoint.
 
-        Reads the OpenVPN status file directly + the iptables INPUT
-        counter via the sync iptables helper (no event loop required —
-        this runs in the cred-server's HTTP thread).
-
-        Uses ``max(latched, current Auth-read)`` so a probe that
-        completed > 60 s ago (and whose peer state openvpn has since
-        aged out, zeroing the live counter) still appears as a real
-        handshake. ``data_transfer_ok`` applies the SAME AND-gate as
-        the post-stop property (handshake AND data packets), so a
-        snapshot taken mid-session and the listener's eventual JSON
-        verdict use the same predicate.
+        Post-``stop()`` returns the SAME values that went into the
+        JSON report — cross-verify and report can never disagree.
+        Pre-stop falls back to a live read (used only in unit
+        tests; the production flow always finalises before the
+        client polls).
         """
+        if self._snapshot_taken:
+            return LiveSnapshot(
+                handshake_count=self._final_handshake_count,
+                data_transfer_ok=self.data_transfer_ok,
+                data_packets=self._final_data_packets,
+                bytes_received=self._final_bytes_received,
+            )
         _, live_auth = self._read_status()
         auth_bytes = max(self._max_auth_bytes_seen, live_auth)
         hs = 1 if auth_bytes > 0 else 0

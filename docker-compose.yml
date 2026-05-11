@@ -77,10 +77,16 @@ services:
     volumes:
       - ./:/workspace
     working_dir: /workspace
-    # 30s covers responder shutdown (parallel, ~1s each) + the synchronous
-    # JSON write that follows. Auto-push is gone, so we no longer need
-    # the wider window earlier deployments allowed for git operations.
-    stop_grace_period: 30s
+    # 75s budget for the client-driven stop flow:
+    #   * _STOP_TIMEOUT_SEC=20  — responder teardown (parallel)
+    #   * _SNAPSHOT_DRAIN_TIMEOUT_SEC=30 — wait for the client's
+    #     polling /snapshot to land at least once before tearing the
+    #     cred-server down (cleanly resolves the AWG cross-verify race)
+    #   * ~10s slack for the synchronous JSON write + cred-server stop
+    #     + listener report enrichment via ipapi.is
+    # 75 > sum so a docker-compose-driven SIGTERM doesn't truncate
+    # the drain window if a remote stop arrives mid-Ctrl+C.
+    stop_grace_period: 75s
     restart: "no"
 
   # ─────────────────────────────────────────────────────────────────

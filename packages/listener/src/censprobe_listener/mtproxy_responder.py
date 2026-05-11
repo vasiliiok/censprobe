@@ -263,14 +263,21 @@ class MTProxyResponder:
         return self._final_data_packets > 0
 
     def live_snapshot(self) -> LiveSnapshot:
-        """Live snapshot for the cred-server /snapshot endpoint.
+        """Counter snapshot for the cred-server /snapshot endpoint.
 
-        ``connection_count`` is updated mid-session by ``_monitor_output``
-        (each ``Stream has been started`` line increments, each
-        listed faketls failure decrements with floor 0). The data
-        counter must be sync-read from iptables since
-        ``_final_data_packets`` only crystalises in ``stop()``.
+        Post-``stop()`` returns ``_final_data_packets`` — the iptables
+        rules have already been removed, so a live read would return
+        0. Pre-stop reads iptables sync-helper (used only in tests;
+        production flow finalises before client polls).
         """
+        if self._proc is None:
+            # stop() has been called: rules deleted, counter frozen
+            # at ``_final_data_packets``.
+            return LiveSnapshot(
+                handshake_count=self.connection_count,
+                data_transfer_ok=self._final_data_packets > 0,
+                data_packets=self._final_data_packets,
+            )
         live_packets = read_counter_sync("OUTPUT", self._counter_comment)
         return LiveSnapshot(
             handshake_count=self.connection_count,

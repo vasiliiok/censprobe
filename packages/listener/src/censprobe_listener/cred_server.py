@@ -24,6 +24,7 @@ Lifecycle:
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import hmac
 import http.server
@@ -162,6 +163,30 @@ class CredServer:
         # read live counter state. ``None`` while responders are still
         # spinning up — /snapshot returns 503 until then.
         self._responders: dict[str, Responder] | None = None
+        # Finalised post-stop snapshots — populated by main.py AFTER
+        # _stop_responders has captured each responder's final state.
+        # Until then ``/snapshot`` (which is now post-stop only) replies
+        # 503 — the client polls with retries.
+        self._final_snapshots: dict[str, dict[str, Any]] | None = None
+        # Set by the snapshot handler once the client has successfully
+        # GET /snapshot at least once AFTER commit_final_snapshots — so
+        # main.py can wait_for(snapshot_drained, timeout=N) before
+        # tearing the cred-server down. Without this the listener
+        # would close the HTTPS port mid-polling, the client would
+        # see ConnectionRefused after the 503-then-200 transition.
+        self._snapshot_drained = threading.Event()
+        # Set by an authenticated POST to /stop. main.py's
+        # _wait_for_shutdown_signal awaits this in addition to
+        # SIGINT/SIGTERM, so the client can ask the listener to
+        # tear down as soon as probes finish (instead of relying on
+        # the operator hitting Ctrl+C on the server terminal).
+        self._stop_requested = threading.Event()
+        # Asyncio Event mirror — set from inside the http.server thread
+        # via loop.call_soon_threadsafe in main.py. The threading
+        # Event above is the source of truth for the HTTP handler;
+        # the asyncio mirror is what _wait_for_shutdown_signal awaits.
+        self._stop_asyncio_event: asyncio.Event | None = None
+        self._stop_event_loop: asyncio.AbstractEventLoop | None = None
 
     def start(self) -> None:
         handler_cls = self._make_handler()
@@ -216,6 +241,47 @@ class CredServer:
         """
         with self._lock:
             self._responders = None
+
+    def bind_stop_event(self, ev: asyncio.Event, loop: asyncio.AbstractEventLoop) -> None:
+        """Wire the asyncio Event ``_wait_for_shutdown_signal`` is
+        awaiting into the cred-server, so the HTTP /stop handler can
+        flip it via ``loop.call_soon_threadsafe`` from the daemon
+        thread. Called once from main.py right after the responders
+        are attached.
+        """
+        with self._lock:
+            self._stop_asyncio_event = ev
+            self._stop_event_loop = loop
+            already_set = self._stop_requested.is_set()
+        # If a client already POSTed /stop before main.py bound the
+        # event (could happen if the client races past attach_responders
+        # — unlikely but possible on a slow VM), set it now so the
+        # listener doesn't hang waiting for a second signal.
+        if already_set:
+            loop.call_soon_threadsafe(ev.set)
+
+    def wait_snapshot_drained(self, timeout: float) -> bool:
+        """Block (in a worker thread) until /snapshot has served the
+        committed dict at least once, or ``timeout`` elapses. Returns
+        ``True`` if drained, ``False`` on timeout. Used by main.py to
+        keep the cred-server up just long enough for the client's
+        polling pull to land — but no longer than ``timeout`` so an
+        operator who Ctrl+C'd manually (no client to wait for) still
+        gets a bounded shutdown.
+        """
+        return self._snapshot_drained.wait(timeout=timeout)
+
+    def commit_final_snapshots(self, snapshots: dict[str, dict[str, Any]]) -> None:
+        """Publish the post-``stop()`` per-protocol LiveSnapshot dicts.
+
+        Called from main.py AFTER ``_stop_responders`` has captured
+        each responder's final counter state. Until this call,
+        ``/snapshot`` replies 503; once committed, clients can
+        retrieve the authoritative final view and assemble the
+        cross-verification table.
+        """
+        with self._lock:
+            self._final_snapshots = snapshots
 
     @property
     def client_ip(self) -> str | None:
@@ -308,45 +374,92 @@ class CredServer:
                 self.wfile.write(srv.creds_bytes)
 
             def _serve_snapshot(self) -> None:
-                """Per-protocol live counter snapshot for cross-verification.
+                """Per-protocol counter snapshot for cross-verification.
 
                 Authenticates with the same bearer token as ``/creds`` —
                 anyone who fetched credentials already knows it, and
                 snapshots are read-only state, so we don't need a
-                separate auth scope. Unlike /creds this endpoint
-                allows MULTIPLE serves (no exhaustion counter): the
-                client polls it once per probe run, but it's also
-                useful for ad-hoc operator debugging during a session.
+                separate auth scope.
+
+                Semantics change (2026-05): the snapshot is no longer a
+                live read of running responders. The client first POSTs
+                ``/stop`` to ask the listener to tear down, then polls
+                ``/snapshot`` (with retries) until ``commit_final_snapshots``
+                has been called — at which point this endpoint returns
+                the SAME per-protocol counters that ``stop()`` captured
+                for the JSON report. That eliminates the race seen with
+                amneziawg-go where a live read mid-session could see
+                rx_bytes>0 while ``stop()`` minutes later saw rx=0 once
+                the userspace daemon GC'd the unhandshaked peer.
                 """
                 if not self._check_bearer():
                     return
                 with srv._lock:
-                    responders = srv._responders
-                if responders is None:
-                    self._reject(503, "responders not yet ready")
+                    final = srv._final_snapshots
+                if final is None:
+                    self._reject(
+                        503,
+                        "session not finalized — POST /stop first, then retry",
+                    )
                     return
 
-                snapshots: dict[str, dict[str, Any]] = {}
-                for name, responder in responders.items():
-                    try:
-                        snap = responder.live_snapshot()
-                        snapshots[name] = snap.model_dump(mode="json")
-                    except Exception as e:
-                        # A buggy snapshot reader must not 500 the whole
-                        # endpoint — surface the per-protocol error in
-                        # the JSON so the client sees which one failed.
-                        snapshots[name] = {"error": f"{type(e).__name__}: {e}"}
-
-                payload = json.dumps(snapshots, separators=(",", ":")).encode("utf-8")
+                payload = json.dumps(final, separators=(",", ":")).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.send_header("Content-Length", str(len(payload)))
                 self.send_header("Cache-Control", "no-store")
                 self.end_headers()
                 self.wfile.write(payload)
+                # Tell main.py the client has its data — it can now safely
+                # shut down the cred-server without truncating a polling
+                # client. Idempotent: ``Event.set()`` is no-op after first.
+                srv._snapshot_drained.set()
 
             def do_POST(self) -> None:  # noqa: N802
+                if self.path == "/stop":
+                    self._serve_stop()
+                    return
                 self._reject(405, "method not allowed")
+
+            def _serve_stop(self) -> None:
+                """Client-driven shutdown trigger.
+
+                Authenticated POST that flips an asyncio Event main.py
+                is awaiting alongside SIGINT/SIGTERM, so the listener
+                can stop on a client request as soon as probes finish
+                instead of relying on the operator hitting Ctrl+C on
+                the server terminal. Multi-serve and idempotent — the
+                Event is set once; further calls return 200 cheaply.
+
+                We respond BEFORE flipping the event so the client
+                doesn't hold the TCP connection open while the
+                listener tears down (responder.stop() can take 30+s
+                for openvpn/wg).
+                """
+                if not self._check_bearer():
+                    return
+                with srv._lock:
+                    ev = srv._stop_asyncio_event
+                    loop = srv._stop_event_loop
+
+                self.send_response(202)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                body = b'{"status":"stop_requested"}'
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(body)
+
+                # Flip the asyncio Event from inside the http.server
+                # thread via call_soon_threadsafe — the event is owned
+                # by main.py's loop, which is on a different thread.
+                # No-op if main.py hasn't bound the event yet (race
+                # against responder startup); the threading mirror
+                # keeps the "client asked to stop" intent recorded so
+                # main.py can pick it up after binding.
+                srv._stop_requested.set()
+                if ev is not None and loop is not None:
+                    loop.call_soon_threadsafe(ev.set)
 
         return _Handler
 

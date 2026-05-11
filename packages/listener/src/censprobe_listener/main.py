@@ -37,6 +37,7 @@ import signal
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import click
 from censprobe_core.config import get_config, load_config
@@ -97,6 +98,13 @@ def _click_validate_id(field: str, value: str) -> str:
 # `stop_grace_period: 30s` before sending SIGKILL, so we leave ~10s of
 # margin for the synchronous JSON write that follows responder shutdown.
 _STOP_TIMEOUT_SEC = 20.0
+# Upper bound for keeping the cred-server up after responder teardown
+# so the client's polling /snapshot can complete its read. Common case
+# resolves in < 1s (client polls aggressively, hits the 200 right after
+# commit_final_snapshots). The 30s ceiling covers a flaky network
+# round-trip without dragging the operator's shell forever when nobody
+# is polling.
+_SNAPSHOT_DRAIN_TIMEOUT_SEC = 30.0
 
 
 @click.command()
@@ -232,24 +240,35 @@ async def _enrich_client_or_none(client_ip: str | None) -> EndpointMeta | None:
         return None
 
 
-async def _wait_for_shutdown_signal() -> None:
-    """Block until SIGINT/SIGTERM arrives; second signal exits immediately.
+async def _wait_for_shutdown_signal(remote_stop: asyncio.Event | None = None) -> None:
+    """Block until SIGINT/SIGTERM arrives, OR ``remote_stop`` is set
+    (client-driven stop via ``cred_server`` ``/stop`` endpoint).
+    Second signal exits immediately.
 
     Extracted out of ``_async_main`` so the parent's cognitive complexity
     stays under Sonar's S3776 threshold — the nested handler plus the
     setup/teardown loops add five branches by themselves.
+
+    The remote-stop path is the normal case in 2026-05+: the client
+    POSTs ``/stop`` after probes finish, the cred-server sets
+    ``remote_stop``, this function returns, ``_async_main`` proceeds
+    to ``_stop_responders`` BEFORE the client polls ``/snapshot``.
+    That sequencing eliminates the race where AWG userspace counters
+    could drift between live-snapshot and stop() reads. ``Ctrl+C`` is
+    kept as the fallback when the cred-server endpoint is unreachable
+    (e.g. operator wants to abort early).
     """
-    stop_event = asyncio.Event()
+    signal_event = asyncio.Event()
     loop = asyncio.get_running_loop()
 
     def _handle_signal() -> None:
-        if not stop_event.is_set():
+        if not signal_event.is_set():
             # First signal: ask responders to stop gracefully. Use logger
             # rather than `console.print` so the message is not interleaved
             # with the live Rich table renderer (which is itself doing
             # writes from a background thread).
             logger.info("signal received, stopping listener…")
-            stop_event.set()
+            signal_event.set()
             return
         # Second signal while we're already shutting down — bypass the
         # graceful path and exit immediately. Without this, a stuck
@@ -262,7 +281,24 @@ async def _wait_for_shutdown_signal() -> None:
         loop.add_signal_handler(sig, _handle_signal)
 
     try:
-        await stop_event.wait()
+        # Race between operator Ctrl+C and client-side /stop endpoint.
+        # Whichever fires first wins; the other Event remains set but
+        # ignored (the listener can only stop once).
+        signal_task = asyncio.create_task(signal_event.wait())
+        if remote_stop is not None:
+            remote_task = asyncio.create_task(remote_stop.wait())
+            done, pending = await asyncio.wait(
+                {signal_task, remote_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if remote_task in done and signal_task not in done:
+                logger.info("/stop endpoint signalled by client; tearing down")
+            for t in pending:
+                t.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await t
+        else:
+            await signal_task
     finally:
         for sig in (signal.SIGINT, signal.SIGTERM):
             # NotImplementedError derives from RuntimeError, so catching
@@ -325,15 +361,25 @@ async def _async_main(test_id: str, session_id: str, creds_port: int) -> None:
     # started so the snapshot never sees a half-initialised state.
     cred_server.attach_responders(responders)
 
+    # Bind the asyncio Event we'll await in _wait_for_shutdown_signal,
+    # so an authenticated POST /stop on the cred-server can wake the
+    # main loop and trigger graceful teardown. The shutdown wait then
+    # races SIGINT vs /stop and acts on whichever fires first.
+    remote_stop_event = asyncio.Event()
+    cred_server.bind_stop_event(remote_stop_event, asyncio.get_running_loop())
+
     # Print status
     _print_responder_status(responders, start_errors, creds)
     console.print("\n[bold green]Listener is ready. Waiting for clients...[/bold green]")
-    console.print("[dim]Press Ctrl+C to stop and save results.[/dim]\n")
+    console.print(
+        "[dim]Stops automatically when the client finishes "
+        "(POSTs /stop). Ctrl+C is the manual fallback.[/dim]\n"
+    )
 
     started_at = datetime.now(tz=UTC)
 
-    # ── Step 4: Wait for SIGINT ───────────────────────────────────────────────
-    await _wait_for_shutdown_signal()
+    # ── Step 4: Wait for client /stop OR SIGINT ──────────────────────────────
+    await _wait_for_shutdown_signal(remote_stop_event)
 
     stopped_at = datetime.now(tz=UTC)
     duration = (stopped_at - started_at).total_seconds()
@@ -350,6 +396,18 @@ async def _async_main(test_id: str, session_id: str, creds_port: int) -> None:
     # property names. Doing this before _finalize_protocol_result means
     # the report reflects the absolute last bytes that crossed the wire.
     await _stop_responders(responders, timeout=_STOP_TIMEOUT_SEC)
+
+    # Capture POST-stop snapshots and hand them to the cred-server.
+    # /snapshot then flips from 503 → 200 for the client's polling pull.
+    # Doing this AFTER stop() makes the snapshot identical to what's
+    # going into the JSON report — no more live-vs-final drift.
+    final_snapshots: dict[str, dict[str, Any]] = {}
+    for name, responder in responders.items():
+        try:
+            final_snapshots[name] = responder.live_snapshot().model_dump(mode="json")
+        except Exception as e:
+            final_snapshots[name] = {"error": f"{type(e).__name__}: {e}"}
+    cred_server.commit_final_snapshots(final_snapshots)
     if echo_server is not None:
         try:
             await asyncio.wait_for(echo_server.stop(), timeout=5.0)
@@ -362,6 +420,21 @@ async def _async_main(test_id: str, session_id: str, creds_port: int) -> None:
     # successfully fetches credentials; reading it now gives a stable
     # answer even if a late retry races with shutdown.
     client_ip = cred_server.client_ip
+    # Keep the cred-server up just long enough for the client's
+    # polling /snapshot to land at least once. wait_snapshot_drained
+    # returns immediately if the client already GET'd /snapshot after
+    # the commit (the common case — client just POSTed /stop and was
+    # polling /snapshot), times out after ``_SNAPSHOT_DRAIN_TIMEOUT_SEC``
+    # if the operator Ctrl+C'd manually with no client polling.
+    drained = await asyncio.to_thread(
+        cred_server.wait_snapshot_drained, _SNAPSHOT_DRAIN_TIMEOUT_SEC
+    )
+    if not drained:
+        logger.info(
+            "snapshot drain timed out after %.0fs — no client polled /snapshot; "
+            "report still saved to disk",
+            _SNAPSHOT_DRAIN_TIMEOUT_SEC,
+        )
     # Tear down the credentials endpoint last so a slow client retry can
     # still complete during the responder-shutdown window. cred_server.stop
     # is synchronous and doesn't wait for in-flight handlers, so this is
