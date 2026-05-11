@@ -157,12 +157,14 @@ Listener генерирует одноразовые credentials в памяти
 ```
 docker compose --profile client run --rm client \
   --test-id selectel-spb-001 \
-  --session-id client-home-rt-spb \
+  --session-id mob-A8F1 \
   --server-host 1.2.3.4 \
   --creds-port 8443 \
   --creds-token <one-time-token> \
   --creds-cert-sha256 <sha256-fingerprint>
 ```
+
+> ``--session-id`` оператор не печатает руками — значение генерируется listener'ом (с префиксом по флагам `--mobile`/`--white`) и вшивается в paste-команду выше.
 
 > **Рекомендация: запускайте клиент на Linux-хосте** (Ubuntu desktop, WSL2 с systemd, любая Linux VM). Docker Desktop на macOS/Windows работает в синтетическом netns внутри VM, и в редких случаях для UDP-протоколов с обфускацией (особенно AmneziaWG) это даёт client-side false-OK: userspace-демон сообщает rx_bytes>0 даже когда listener не получил ни одного пакета. **Final-вердикт всё равно корректен** — listener-side counters authoritative, и cross-verification таблица в выводе клиента показывает расхождение явно с пометкой `client overread`. Но на Linux-клиенте client/listener-вердикты сходятся напрямую без таких квирков. TCP-протоколы (Shadowsocks, VLESS+Reality, Hysteria 2 over QUIC, mtproto_*) Docker Desktop пропускает прозрачно.
 
@@ -228,12 +230,17 @@ docker compose --profile listener run --rm listener [OPTIONS]
 
   --test-id TEXT          Test identifier (must match solo report) [required]
                           [env: TEST_ID]
-  --session-id TEXT       Client network session ID, e.g. client-home-rt-spb
-                          [required] [env: SESSION_ID]
   --creds-port INTEGER    Port for credentials HTTPS endpoint      [required]
                           [env: CREDS_PORT, default: 8443]
+  --mobile                Mark this session as conducted from a mobile-
+                          carrier network. Combinable with --white.
+  --white                 Mark this session as conducted from a network
+                          with carrier-side whitelisting. Combinable with
+                          --mobile.
   -v, --verbose           Verbose logging
 ```
+
+> ``--session-id`` исчез из CLI — listener генерирует его автоматически (`mob-A8F1` / `white-K9p2` / `mob-white-X3R5` / `plain-L4M8`).
 
 ### `client`
 
@@ -242,7 +249,7 @@ docker compose --profile client run --rm client [OPTIONS]
 
   --test-id TEXT              Test identifier (must match listener) [required]
                               [env: TEST_ID]
-  --session-id TEXT           Your session label                    [required]
+  --session-id TEXT           Session label printed by listener    [required]
                               [env: SESSION_ID]
   --server-host TEXT          IP of the server running listener     [required]
                               [env: SERVER_HOST]
@@ -525,18 +532,23 @@ Postgres + Grafana образы pinned по digest (`postgres:16@sha256:...`, `g
 
 ### Дашборды
 
-| Дашборд | Что показывает |
-|---------|----------------|
-| **01 — Test Overview** | Censorship Resistance Score, DNS/TLS/Telegram, техники цензуры, рекомендуемые протоколы. Точка входа со ссылками на drill-down |
-| **02 — Blocking Matrix** | Полная матрица всех тестов с цветовой раскраской по вердикту |
-| **03 — Telegram Deep Dive** | Детальная досягаемость Telegram DC, health score, RTT-распределение |
-| **04 — Protocol Reachability** | Матрица досягаемости протоколов по клиентским сессиям + ASN сетей клиентов |
-| **05 — Technique Attribution** | Атрибуция техник цензуры (DNS poisoning, RST injection, throttling, middlebox) |
-| **06 — Compare Tests** | Сравнение двух серверов: scores, server info, техники |
-| **07 — Cloudflare & WARP** | WARP control plane (TCP 443), MASQUE и WireGuard UDP fallback-порты, Cloudflare CDN/HTTP |
-| **08 — QUIC & ECH** | QUIC-блокировка (TSPU/UDP 443), ECH-тесты, Hysteria2 досягаемость |
-| **09 — DNS Deep Dive** | DNS integrity, DoH-резолверы, DNS poisoning детектирование |
-| **10 — TLS Deep Dive** | SNI inspection (paired blocked/neutral SNI), TLS-методы цензуры, RTT |
+| Дашборд | Multi-select test_id | Что показывает |
+|---------|:--------------------:|----------------|
+| **01 — Test Overview** | — | Censorship Resistance Score, DNS/TLS/Telegram, техники цензуры, рекомендуемые протоколы. Точка входа со ссылками на drill-down |
+| **02 — Blocking Matrix** | — | Полная матрица всех тестов с цветовой раскраской по вердикту |
+| **03 — Telegram Deep Dive** | ✓ | Telegram-health bar chart по серверам, досягаемость DC, verdict distribution, RTT-гистограмма |
+| **04 — Protocol Reachability** | ✓ | Матрица досягаемости протоколов по клиентским сессиям с колонкой `server` + ASN сетей клиентов |
+| **05 — Technique Attribution** | — | Атрибуция техник цензуры (DNS poisoning, RST injection, throttling, middlebox) |
+| **06 — Analytics & Compare** | ✓ (`var_test_id`) | N-way сравнение по 7 осям: company / ASN / DC / country / city / test_id / **client_network** (mobile/whitelist/regular). Ranked панели «худшие N серверов» для telegram_health / DNS / TLS integrity. Per-protocol ranked: top-N компаний по выбранному протоколу |
+| **07 — Cloudflare & WARP** | — | WARP control plane (TCP 443), MASQUE и WireGuard UDP fallback-порты, Cloudflare CDN/HTTP |
+| **08 — QUIC & ECH** | — | QUIC-блокировка (TSPU/UDP 443), ECH-тесты, Hysteria2 досягаемость |
+| **09 — DNS Deep Dive** | ✓ | DNS-integrity bar chart по серверам, DoH-резолверы, DNS poisoning детектирование |
+| **10 — TLS Deep Dive** | ✓ | TLS-integrity bar chart, paired SNI inspection, методы цензуры, RTT |
+| **11 — Matrix Heatmap** | (по company / client_network) | 96-теста overview в одном экране: server × protocol matrix (worst-wins по сессиям) + % протоколов OK на каждый (server × client network) bucket |
+
+Точка входа для 96-теста кампании — **06 + 11**. Drill-down дашборды (01–05, 07–10) фокусируются на одном или нескольких выбранных test_id; 06 и 11 агрегируют по фильтрам.
+
+**`client_network` фильтр** (только в #06 и #11) принимает три значения, по умолчанию ALL: `Mobile` (сессии с listener-флагом `--mobile`), `Whitelist` (`--white`), `Regular` (ни тот ни другой). Multi-select.
 
 ### sync-api endpoints
 
@@ -555,7 +567,7 @@ Schema создаётся при первом старте через SQLAlchemy
 
 ## Переменные окружения (`.env`)
 
-`.env` — статическая конфигурация (порты, пароли, ключи, тюнинг). Закоммичен в репо с safe defaults для localhost-only сервисов. Per-run параметры (`--test-id`, `--session-id` и т.д.) — CLI-аргументы `docker compose run`, не env.
+`.env` — статическая конфигурация (порты, пароли, ключи, тюнинг). Закоммичен в репо с safe defaults для localhost-only сервисов. Per-run параметры (`--test-id`, `--mobile`, `--white` и т.д.) — CLI-аргументы `docker compose run`, не env. Session_id оператор не вводит — listener генерирует автоматически.
 
 | Переменная | Профили | Дефолт в `.env` | Описание |
 |------------|---------|-----------------|----------|
@@ -681,8 +693,9 @@ cd censprobe
 
 # 2. Прогоните тесты — отчёты появятся в reports/<TEST_ID>/.
 docker compose --profile solo run --rm solo --test-id <provider>-<city>-<NN>
-docker compose --profile listener run --rm listener --test-id <provider>-<city>-<NN> --session-id client-<...>
-# (плюс client на клиентской машине)
+docker compose --profile listener run --rm listener --test-id <provider>-<city>-<NN> \
+  [--mobile] [--white]                # опционально, по типу тестовой сети
+# (плюс client на клиентской машине — paste-команду печатает listener)
 
 # 3. Закоммитьте и откройте PR.
 git add reports/<TEST_ID>/
@@ -691,9 +704,9 @@ git push origin main
 gh pr create  # или через GitHub UI
 ```
 
-Соглашения по `TEST_ID`: `<provider>-<city>-<NN>` (`selectel-spb-001`, `vultr-fra-002`). По `SESSION_ID`: `client-<тип>-<провайдер>-<город>` (`client-home-rt-spb`, `client-mob-mts-msk`).
+Соглашения по `TEST_ID`: `<provider>-<city>-<NN>` (`selectel-spb-001`, `vultr-fra-002`). `SESSION_ID` оператор не задаёт — listener генерирует его сам с префиксом по флагам: `plain-A8F1` (обычная сеть), `mob-K9p2`, `white-X3R5`, `mob-white-L4M8`.
 
-Оба валидируются регуляркой `[A-Za-z0-9_.-]{1,64}` — кириллица, пробелы, `/` отклоняются click'ом до запуска контейнера. Path-traversal через имя отчёта закрыт.
+`TEST_ID` валидируется регуляркой `[A-Za-z0-9_.-]{1,64}` — кириллица, пробелы, `/` отклоняются click'ом до запуска контейнера. Path-traversal через имя отчёта закрыт. Auto-generated session_id by construction укладывается в тот же паттерн.
 
 > **Что review-ится в PR**: путь `reports/<TEST_ID>/` (новые файлы), целостность JSON, разумность `meta.yaml`. Изменения в коде / `targets/` — отдельный PR.
 

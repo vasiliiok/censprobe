@@ -111,7 +111,11 @@ _DISCLAIMER = """
     "--session-id",
     envvar="SESSION_ID",
     required=True,
-    help="Your session label, e.g. client-home-rt-spb",
+    help=(
+        "Session label printed by listener — paste it as-is from the "
+        "listener's setup command. Auto-generated server-side; the operator "
+        "doesn't invent it. Example: mob-A8F1."
+    ),
 )
 @click.option(
     "--server-host",

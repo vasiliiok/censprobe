@@ -54,7 +54,7 @@
         "x": 0,
         "y": 3,
         "w": 24,
-        "h": 10
+        "h": 8
       },
       "datasource": {
         "type": "postgres",
@@ -75,15 +75,15 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "min": 0,
-          "max": 100,
-          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
                 "color": "red",
-                "value": 0
+                "value": null
               },
               {
                 "color": "yellow",
@@ -94,8 +94,12 @@
                 "value": 70
               }
             ]
-          }
-        }
+          },
+          "min": 0,
+          "max": 100,
+          "unit": "short"
+        },
+        "overrides": []
       },
       "options": {
         "orientation": "horizontal",
@@ -117,9 +121,9 @@
       "title": "TLS Verdict Distribution",
       "type": "piechart",
       "gridPos": {
-        "x": 5,
-        "y": 3,
-        "w": 9,
+        "x": 0,
+        "y": 11,
+        "w": 12,
         "h": 8
       },
       "datasource": {
@@ -146,9 +150,9 @@
       "description": "Targets where TLS to a Cloudflare IP with a censored SNI fails, but the same IP with neutral SNI succeeds. Smoking gun for SNI-based DPI.",
       "type": "table",
       "gridPos": {
-        "x": 14,
-        "y": 3,
-        "w": 10,
+        "x": 12,
+        "y": 11,
+        "w": 12,
         "h": 8
       },
       "datasource": {
@@ -229,7 +233,7 @@
       "type": "table",
       "gridPos": {
         "x": 0,
-        "y": 15,
+        "y": 19,
         "w": 24,
         "h": 10
       },
@@ -343,7 +347,7 @@
       "type": "barchart",
       "gridPos": {
         "x": 0,
-        "y": 25,
+        "y": 29,
         "w": 12,
         "h": 8
       },
@@ -375,7 +379,7 @@
       "type": "histogram",
       "gridPos": {
         "x": 12,
-        "y": 25,
+        "y": 29,
         "w": 12,
         "h": 8
       },
