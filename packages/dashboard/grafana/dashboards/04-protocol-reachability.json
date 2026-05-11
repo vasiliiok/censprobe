@@ -22,7 +22,10 @@
           "uid": "DS_CENSPROBE_PG"
         },
         "query": "SELECT test_id FROM test_runs ORDER BY created_at DESC",
-        "refresh": 2
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "allValue": "ALL"
       }
     ]
   },
@@ -59,7 +62,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT ls.session_id, COALESCE(ls.client_meta->'asn'->>'org', '—') AS client_org, pr.protocol, pr.verdict, pr.handshake_count, pr.data_transfer_ok, pr.avg_throughput_mbps, pr.throughput_throttled FROM protocol_results pr JOIN listener_sessions ls ON ls.id = pr.session_id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE tr.test_id = ${test_id:sqlstring} ORDER BY ls.session_id, pr.protocol",
+          "rawSql": "SELECT tr.test_id AS server, ls.session_id, COALESCE(ls.client_meta->'asn'->>'org', '—') AS client_org, pr.protocol, pr.verdict, pr.handshake_count, pr.data_transfer_ok, pr.avg_throughput_mbps, pr.throughput_throttled FROM protocol_results pr JOIN listener_sessions ls ON ls.id = pr.session_id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE (\\'ALL\\' IN (${test_id:singlequote}) OR tr.test_id IN (${test_id:singlequote})) ORDER BY ls.session_id, pr.protocol",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -225,7 +228,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT pr.protocol, COUNT(*) FILTER (WHERE pr.verdict = 'OK') AS connected, COUNT(*) FILTER (WHERE pr.verdict = 'HANDSHAKE_ONLY') AS handshake_only, COUNT(*) FILTER (WHERE pr.verdict = 'BLOCKED') AS blocked FROM protocol_results pr JOIN listener_sessions ls ON ls.id = pr.session_id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE tr.test_id = ${test_id:sqlstring} GROUP BY pr.protocol ORDER BY connected DESC",
+          "rawSql": "SELECT pr.protocol, COUNT(*) FILTER (WHERE pr.verdict = 'OK') AS connected, COUNT(*) FILTER (WHERE pr.verdict = 'HANDSHAKE_ONLY') AS handshake_only, COUNT(*) FILTER (WHERE pr.verdict = 'BLOCKED') AS blocked FROM protocol_results pr JOIN listener_sessions ls ON ls.id = pr.session_id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE (\\'ALL\\' IN (${test_id:singlequote}) OR tr.test_id IN (${test_id:singlequote})) GROUP BY pr.protocol ORDER BY connected DESC",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -259,7 +262,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT ls.session_id, ls.started_at, ls.duration_sec, ls.client_connected, COALESCE(ls.client_meta->'asn'->>'org', '—') AS client_org, COALESCE(ls.client_meta->'location'->>'city', '—') AS city, CASE WHEN ls.client_meta->>'is_mobile' = 'true' THEN 'mobile' WHEN ls.client_meta->>'is_datacenter' = 'true' THEN 'datacenter' ELSE 'residential' END AS client_type, COUNT(pr.id) AS protocols, COUNT(*) FILTER (WHERE pr.verdict='OK') AS ok_protocols FROM listener_sessions ls LEFT JOIN protocol_results pr ON pr.session_id = ls.id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE tr.test_id = ${test_id:sqlstring} GROUP BY ls.id, ls.session_id, ls.started_at, ls.duration_sec, ls.client_connected, ls.client_meta ORDER BY ls.started_at DESC",
+          "rawSql": "SELECT tr.test_id AS server, ls.session_id, ls.started_at, ls.duration_sec, ls.client_connected, COALESCE(ls.client_meta->'asn'->>'org', '—') AS client_org, COALESCE(ls.client_meta->'location'->>'city', '—') AS city, CASE WHEN ls.client_meta->>'is_mobile' = 'true' THEN 'mobile' WHEN ls.client_meta->>'is_datacenter' = 'true' THEN 'datacenter' ELSE 'residential' END AS client_type, COUNT(pr.id) AS protocols, COUNT(*) FILTER (WHERE pr.verdict='OK') AS ok_protocols FROM listener_sessions ls LEFT JOIN protocol_results pr ON pr.session_id = ls.id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE (\\'ALL\\' IN (${test_id:singlequote}) OR tr.test_id IN (${test_id:singlequote})) GROUP BY tr.test_id, ls.id, ls.session_id, ls.started_at, ls.duration_sec, ls.client_connected, ls.client_meta ORDER BY tr.test_id, ls.started_at DESC",
           "format": "table",
           "refId": "A",
           "editorMode": "code",

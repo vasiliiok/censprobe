@@ -23,8 +23,9 @@
         },
         "query": "SELECT test_id FROM test_runs ORDER BY created_at DESC",
         "refresh": 2,
-        "multi": false,
-        "includeAll": false
+        "multi": true,
+        "includeAll": true,
+        "allValue": "ALL"
       }
     ]
   },
@@ -48,12 +49,12 @@
       "id": 1,
       "title": "TLS Integrity Score",
       "description": "% of TLS probes that completed cleanly. Lower = active SNI inspection or handshake interference.",
-      "type": "gauge",
+      "type": "barchart",
       "gridPos": {
         "x": 0,
         "y": 3,
-        "w": 5,
-        "h": 8
+        "w": 24,
+        "h": 10
       },
       "datasource": {
         "type": "postgres",
@@ -61,7 +62,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT tls_integrity AS \"TLS Integrity\" FROM test_runs WHERE test_id = ${test_id:sqlstring} LIMIT 1",
+          "rawSql": "SELECT test_id AS server, tls_integrity AS \"TLS Integrity\" FROM test_runs WHERE ('ALL' IN (${test_id:singlequote}) OR test_id IN (${test_id:singlequote})) AND tls_integrity IS NOT NULL ORDER BY tls_integrity ASC",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -95,6 +96,20 @@
             ]
           }
         }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "xTickLabelRotation": 0,
+        "showValue": "auto",
+        "legend": {
+          "showLegend": false,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
       }
     },
     {
@@ -113,7 +128,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT verdict, COUNT(*) AS count FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND category = 'tls' GROUP BY verdict ORDER BY count DESC",
+          "rawSql": "SELECT verdict, COUNT(*) AS count FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE (\\'ALL\\' IN (${test_id:singlequote}) OR run.test_id IN (${test_id:singlequote})) AND category = 'tls' GROUP BY verdict ORDER BY count DESC",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -142,7 +157,7 @@
       },
       "targets": [
         {
-          "rawSql": "WITH pairs AS (SELECT regexp_replace(test, '_sni_(blocked|neutral)$', '') AS pair_key, MAX(CASE WHEN subcategory = 'tls_sni_blocked' THEN verdict END) AS blocked_verdict, MAX(CASE WHEN subcategory = 'tls_sni_neutral' THEN verdict END) AS neutral_verdict, MAX(CASE WHEN subcategory = 'tls_sni_blocked' THEN target END) AS blocked_target FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND subcategory IN ('tls_sni_blocked', 'tls_sni_neutral') GROUP BY pair_key) SELECT pair_key AS target_pair, blocked_target, blocked_verdict, neutral_verdict, CASE WHEN blocked_verdict <> 'OK' AND neutral_verdict = 'OK' THEN 'SNI-INSPECTED' WHEN blocked_verdict = 'OK' AND neutral_verdict = 'OK' THEN 'clean' WHEN blocked_verdict <> 'OK' AND neutral_verdict <> 'OK' THEN 'IP-blocked' ELSE 'inconclusive' END AS diagnosis FROM pairs ORDER BY diagnosis, pair_key",
+          "rawSql": "WITH pairs AS (SELECT regexp_replace(test, '_sni_(blocked|neutral)$', '') AS pair_key, MAX(CASE WHEN subcategory = 'tls_sni_blocked' THEN verdict END) AS blocked_verdict, MAX(CASE WHEN subcategory = 'tls_sni_neutral' THEN verdict END) AS neutral_verdict, MAX(CASE WHEN subcategory = 'tls_sni_blocked' THEN target END) AS blocked_target FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE (\\'ALL\\' IN (${test_id:singlequote}) OR run.test_id IN (${test_id:singlequote})) AND subcategory IN ('tls_sni_blocked', 'tls_sni_neutral') GROUP BY pair_key) SELECT pair_key AS target_pair, blocked_target, blocked_verdict, neutral_verdict, CASE WHEN blocked_verdict <> 'OK' AND neutral_verdict = 'OK' THEN 'SNI-INSPECTED' WHEN blocked_verdict = 'OK' AND neutral_verdict = 'OK' THEN 'clean' WHEN blocked_verdict <> 'OK' AND neutral_verdict <> 'OK' THEN 'IP-blocked' ELSE 'inconclusive' END AS diagnosis FROM pairs ORDER BY diagnosis, pair_key",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -214,7 +229,7 @@
       "type": "table",
       "gridPos": {
         "x": 0,
-        "y": 11,
+        "y": 15,
         "w": 24,
         "h": 10
       },
@@ -224,7 +239,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT test, target, verdict, rtt_ms, method, notes FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND subcategory IN ('tls_sni_blocked', 'tls_sni_neutral') ORDER BY regexp_replace(test, '_sni_(blocked|neutral)$', ''), test",
+          "rawSql": "SELECT run.test_id AS server, test, target, verdict, rtt_ms, method, notes FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE (\\'ALL\\' IN (${test_id:singlequote}) OR run.test_id IN (${test_id:singlequote})) AND subcategory IN ('tls_sni_blocked', 'tls_sni_neutral') ORDER BY regexp_replace(test, '_sni_(blocked|neutral)$', ''), test",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -328,7 +343,7 @@
       "type": "barchart",
       "gridPos": {
         "x": 0,
-        "y": 21,
+        "y": 25,
         "w": 12,
         "h": 8
       },
@@ -338,7 +353,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT method, COUNT(*) AS detections FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND category = 'tls' AND method IS NOT NULL GROUP BY method ORDER BY detections DESC",
+          "rawSql": "SELECT method, COUNT(*) AS detections FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE (\\'ALL\\' IN (${test_id:singlequote}) OR run.test_id IN (${test_id:singlequote})) AND category = 'tls' AND method IS NOT NULL GROUP BY method ORDER BY detections DESC",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -360,7 +375,7 @@
       "type": "histogram",
       "gridPos": {
         "x": 12,
-        "y": 21,
+        "y": 25,
         "w": 12,
         "h": 8
       },
@@ -370,7 +385,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT rtt_ms FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND category = 'tls' AND verdict = 'OK' AND rtt_ms IS NOT NULL",
+          "rawSql": "SELECT rtt_ms FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE (\\'ALL\\' IN (${test_id:singlequote}) OR run.test_id IN (${test_id:singlequote})) AND category = 'tls' AND verdict = 'OK' AND rtt_ms IS NOT NULL",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
