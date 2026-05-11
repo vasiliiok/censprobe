@@ -66,6 +66,13 @@ _FETCH_TIMEOUT_SEC = 15.0
 # 2nd and 3rd attempt respectively.
 _FETCH_MAX_ATTEMPTS = 3
 _FETCH_RETRY_BACKOFF_BASE_SEC = 1.0
+# Hard ceiling on response bytes. Cert pinning already rules out a
+# random MitM, but a compromised listener (or a subtle server bug)
+# could otherwise stream unbounded data into the client's memory.
+# Real payloads are tiny: /creds is a few KB of YAML, /snapshot is
+# tens of KB of JSON, /stop is ~30 bytes of JSON ack. 10 MiB leaves
+# four orders of magnitude of headroom while still bounding RAM use.
+_MAX_RESPONSE_BYTES = 10 * 1024 * 1024
 
 
 class _TransientEndpointError(RuntimeError):
@@ -421,9 +428,11 @@ def _fetch_snapshot(
     # max_attempts is bumped here vs the default 3: openvpn graceful
     # terminate alone can take 30s, plus wg-quick down + iptables
     # teardown + ipapi.is enrichment can push the listener's
-    # commit_final_snapshots past a minute. Five attempts at
-    # exponential backoff (1+2+4+8+16 ≈ 31s of sleep + per-attempt
-    # _FETCH_TIMEOUT_SEC=15) covers the 30-60s window cleanly.
+    # commit_final_snapshots past a minute. With 5 attempts the
+    # wrapper sleeps between #1→#2..#4→#5 (4 gaps), so total backoff
+    # is 1+2+4+8 = 15s plus up to 5×_FETCH_TIMEOUT_SEC=75s of network
+    # time — comfortably covering the 30-60s teardown window without
+    # hard-waiting.
     body = _pinned_get_with_retry(
         host,
         port,
@@ -459,6 +468,13 @@ def _post_stop(
     tears down responders. We treat both 200 and 202 as success
     (POST-helpers in the retry wrapper accept 2xx broadly). Retries
     on transient errors.
+
+    Retrying POST is normally risky (double-submit hazard), but the
+    cred-server's /stop is explicitly idempotent: it sets a single
+    asyncio.Event guarded by ``Event.set()``, which is a no-op after
+    the first call. A retry that lands while the listener has
+    already started teardown will simply re-flip an already-set
+    event and return 202 — no double-teardown, no leaked state.
     """
     _pinned_get_with_retry(
         host,
@@ -545,6 +561,14 @@ def _pinned_get(
                     if not chunk:
                         break
                     buf += chunk
+                    if len(buf) > _MAX_RESPONSE_BYTES:
+                        # Defence-in-depth against an unbounded
+                        # response (compromised listener, server-side
+                        # bug). Real payloads are tiny — see
+                        # _MAX_RESPONSE_BYTES docstring.
+                        raise _PermanentEndpointError(
+                            f"response exceeded {_MAX_RESPONSE_BYTES} byte ceiling"
+                        )
     except (TimeoutError, ConnectionError, OSError, ssl.SSLError) as e:
         # ConnectionError covers refused / reset / aborted; OSError is
         # the supertype that also covers DNS / unreachable. SSLError

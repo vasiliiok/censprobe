@@ -29,6 +29,21 @@ generator, ``packages/client/src/censprobe_client/main.py::_pinned_get``
 for the consumer): self-signed cert, ``CERT_NONE`` + manual SHA-256
 compare, bearer token only sent after the fingerprint matches.
 
+Threat model — token visibility:
+  Both ``serve`` and ``pull`` pass the per-session token to ``rclone``
+  via process argv: ``--pass <token>`` on the serve side, and
+  ``--http-url https://op:<token>@host:port`` on the pull side. That
+  means anyone with read access to ``/proc/<pid>/cmdline`` (other
+  local users, container co-tenants) can lift the token while the
+  rclone process is alive. Mitigations: (a) the censprobe Docker
+  hosts in scope are single-operator boxes — no untrusted local
+  users; (b) the token is per-session and rolled on every ``sync
+  serve`` restart, so a leak is bounded to one transfer window;
+  (c) the cert pin still authenticates the server, so a token leak
+  alone cannot redirect the puller to a malicious endpoint. If sync
+  is ever deployed onto a multi-tenant host, switch the rclone glue
+  to ``--password-command`` (reads from stdin/env) for both sides.
+
 Refactor follow-up: ``generate_self_signed_cert`` and
 ``detect_external_ip`` (+ helpers) are duplicated here from
 ``cred_server.py`` rather than imported, because letting sync depend
@@ -49,6 +64,7 @@ import socket
 import ssl
 import sys
 import tempfile
+import time
 import urllib.request
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -82,6 +98,15 @@ RCLONE_BASIC_AUTH_USER = "op"
 _CERT_VALIDITY_HOURS = 24
 
 _FETCH_TIMEOUT_SEC = 15.0
+# Pull-side retry budget for the TLS pinning handshake. Mirrors the
+# listener/client pair's ``_FETCH_MAX_ATTEMPTS = 3``: same race
+# (operator pastes the pull command a few ms before ``rclone serve``
+# finishes binding the socket), same shape (transient OSError/SSLError
+# on attempt 1, success on attempt 2 or 3). Permanent errors (a
+# ``ValueError`` from fingerprint mismatch) bypass the retry path —
+# rerunning won't fix a typed-wrong fingerprint.
+_PIN_MAX_ATTEMPTS = 3
+_PIN_RETRY_BACKOFF_BASE_SEC = 1.0
 
 # Public-IP echo fallback chain — used when the local default-route
 # source IP is private/CGNAT and would not be reachable by a remote
@@ -273,6 +298,48 @@ def _fetch_and_verify_peer_cert(host: str, port: int, expected_fingerprint: str)
     return cert_obj.public_bytes(serialization.Encoding.PEM)
 
 
+def _fetch_and_verify_peer_cert_with_retry(
+    host: str,
+    port: int,
+    expected_fingerprint: str,
+    *,
+    max_attempts: int = _PIN_MAX_ATTEMPTS,
+) -> bytes:
+    """Wrap :func:`_fetch_and_verify_peer_cert` with bounded retry on
+    transient network errors.
+
+    Same retry shape as the listener/client pair: connection refused /
+    reset / SSL handshake mid-stream → retry with exponential backoff
+    (1s, 2s). ``ValueError`` (fingerprint typo or actual mismatch with
+    the serve side) is **permanent** — no retry, surface it immediately
+    so the operator sees the diagnostic without waiting for two more
+    failures.
+
+    Total worst-case wallclock: ``max_attempts × _FETCH_TIMEOUT_SEC``
+    (45s) plus 1+2=3s of backoff. Well under any patience threshold
+    for an interactive operator.
+    """
+    last_exc: OSError | ssl.SSLError | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return _fetch_and_verify_peer_cert(host, port, expected_fingerprint)
+        except (OSError, ssl.SSLError) as e:
+            last_exc = e
+            if attempt < max_attempts:
+                delay = _PIN_RETRY_BACKOFF_BASE_SEC * (2 ** (attempt - 1))
+                logger.warning(
+                    "Transient pin-fetch error on attempt %d/%d (%s: %s) — retrying in %.1fs",
+                    attempt,
+                    max_attempts,
+                    type(e).__name__,
+                    e,
+                    delay,
+                )
+                time.sleep(delay)
+    assert last_exc is not None  # mypy: at least one attempt ran
+    raise last_exc
+
+
 def _write_secret_tempfile(content: bytes, suffix: str) -> Path:
     """Write ``content`` to a 0o600 tempfile and return its path. Used
     for cert/key materialisation before handing off to rclone (rclone
@@ -440,13 +507,17 @@ def pull(server_host: str, port: int, token: str, cert_fingerprint: str) -> None
     )
 
     try:
-        cert_pem = _fetch_and_verify_peer_cert(server_host, port, cert_fingerprint)
+        cert_pem = _fetch_and_verify_peer_cert_with_retry(server_host, port, cert_fingerprint)
     except ValueError as e:
         console.print(f"[red]{e}[/red]")
         sys.exit(1)
     except (OSError, ssl.SSLError) as e:
+        # Already retried _PIN_MAX_ATTEMPTS times inside the helper.
+        # If we're still failing, the serve side is genuinely down or
+        # the port is unreachable — surface the diagnostic and exit.
         console.print(
-            f"[red]Could not reach sync server at {server_host}:{port}: "
+            f"[red]Could not reach sync server at {server_host}:{port} "
+            f"after {_PIN_MAX_ATTEMPTS} attempts: "
             f"{type(e).__name__}: {e}[/red]\n"
             "[yellow]Check that the serve side is running and the port is reachable.[/yellow]"
         )

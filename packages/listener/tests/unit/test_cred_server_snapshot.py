@@ -272,8 +272,9 @@ class TestStopEndpoint:
             loop.close()
 
     def test_get_stop_is_405(self) -> None:
-        # /stop only accepts POST — accidental GET (operator curl)
-        # falls through to the existing 405 path.
+        # /stop exists as a resource but only accepts POST — accidental
+        # GET (operator curl) gets 405 Method Not Allowed with
+        # Allow: POST, rather than the misleading 404 we used to send.
         cs = _build_cred_server()
         h = _build_handler_class(cs)
         code, _ = _invoke(
@@ -281,7 +282,21 @@ class TestStopEndpoint:
             path="/stop",
             headers={"Authorization": f"Bearer {cs.token}"},
         )
-        assert code == 404
+        assert code == 405
+
+    def test_post_to_get_only_endpoint_is_405(self) -> None:
+        # Mirror: POSTing to /creds or /snapshot returns 405 with
+        # Allow: GET. Operator-debug friendliness, no behaviour change
+        # for the legitimate client which only POSTs /stop.
+        cs = _build_cred_server()
+        h = _build_handler_class(cs)
+        code, _ = _invoke(
+            h,
+            path="/creds",
+            headers={"Authorization": f"Bearer {cs.token}"},
+            method="POST",
+        )
+        assert code == 405
 
 
 class TestUnknownPathStillReturns404:

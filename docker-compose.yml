@@ -186,6 +186,10 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://censprobe:${DB_PASSWORD}@postgres/censprobe
       CENSPROBE_IMPORT_INTERVAL_SEC: ${CENSPROBE_IMPORT_INTERVAL_SEC}
+      # Empty SYNC_API_TOKEN disables auth (intentional for dev). When
+      # set, /test-runs, /results, /protocols all require
+      # ``Authorization: Bearer ${SYNC_API_TOKEN}``. /health stays open.
+      SYNC_API_TOKEN: ${SYNC_API_TOKEN:-}
     volumes:
       - ./:/workspace
     # Bind to loopback only — the API has no authentication, and the only

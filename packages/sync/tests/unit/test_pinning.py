@@ -188,6 +188,77 @@ class TestFetchAndVerifyPeerCert:
             sync_main._fetch_and_verify_peer_cert("1.2.3.4", 8444, "not a fingerprint")
 
 
+class TestFetchAndVerifyPeerCertRetry:
+    """``_fetch_and_verify_peer_cert_with_retry`` mirrors the
+    listener/client pair's retry policy: transient OSError/SSLError →
+    bounded retry with exponential backoff; ValueError (fingerprint
+    typo or mismatch) → no retry.
+    """
+
+    @staticmethod
+    def _zero_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
+        # Strip sleeps so unit tests stay fast.
+        monkeypatch.setattr(sync_main, "_PIN_RETRY_BACKOFF_BASE_SEC", 0.0)
+        monkeypatch.setattr(sync_main.time, "sleep", lambda _s: None)
+
+    def test_first_attempt_succeeds_no_retry(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._zero_backoff(monkeypatch)
+        calls = {"n": 0}
+
+        def _fake(*_a: object, **_kw: object) -> bytes:
+            calls["n"] += 1
+            return b"-----BEGIN CERTIFICATE-----\nstub\n-----END CERTIFICATE-----\n"
+
+        monkeypatch.setattr(sync_main, "_fetch_and_verify_peer_cert", _fake)
+        out = sync_main._fetch_and_verify_peer_cert_with_retry("h", 1, "a" * 64)
+        assert b"BEGIN CERTIFICATE" in out
+        assert calls["n"] == 1
+
+    def test_transient_then_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._zero_backoff(monkeypatch)
+        attempts = {"n": 0}
+
+        def _fake(*_a: object, **_kw: object) -> bytes:
+            attempts["n"] += 1
+            if attempts["n"] < 3:
+                raise ConnectionRefusedError("serve not bound yet")
+            return b"ok"
+
+        monkeypatch.setattr(sync_main, "_fetch_and_verify_peer_cert", _fake)
+        out = sync_main._fetch_and_verify_peer_cert_with_retry("h", 1, "a" * 64)
+        assert out == b"ok"
+        assert attempts["n"] == 3
+
+    def test_transient_exhausts_max_attempts(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._zero_backoff(monkeypatch)
+        attempts = {"n": 0}
+
+        def _fake(*_a: object, **_kw: object) -> bytes:
+            attempts["n"] += 1
+            raise ConnectionRefusedError("serve never came up")
+
+        monkeypatch.setattr(sync_main, "_fetch_and_verify_peer_cert", _fake)
+        with pytest.raises(ConnectionRefusedError, match="never came up"):
+            sync_main._fetch_and_verify_peer_cert_with_retry("h", 1, "a" * 64)
+        # Default _PIN_MAX_ATTEMPTS == 3.
+        assert attempts["n"] == 3
+
+    def test_value_error_propagates_without_retry(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # ValueError = fingerprint mismatch or typo — retrying never
+        # fixes it. Must propagate after a single attempt.
+        self._zero_backoff(monkeypatch)
+        attempts = {"n": 0}
+
+        def _fake(*_a: object, **_kw: object) -> bytes:
+            attempts["n"] += 1
+            raise ValueError("cert fingerprint mismatch: ...")
+
+        monkeypatch.setattr(sync_main, "_fetch_and_verify_peer_cert", _fake)
+        with pytest.raises(ValueError, match="fingerprint mismatch"):
+            sync_main._fetch_and_verify_peer_cert_with_retry("h", 1, "a" * 64)
+        assert attempts["n"] == 1
+
+
 class TestSelfSignedCertGenerator:
     """``_generate_self_signed_cert`` is duplicated from cred_server until
     the helper is hoisted into probe-core. Until then, regression tests

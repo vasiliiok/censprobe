@@ -356,11 +356,6 @@ async def _async_main(test_id: str, session_id: str, creds_port: int) -> None:
         cred_server.stop()
         sys.exit(1)
 
-    # Wire the running responders into the cred-server so /snapshot can
-    # answer cross-verification requests. Done AFTER all responders
-    # started so the snapshot never sees a half-initialised state.
-    cred_server.attach_responders(responders)
-
     # Bind the asyncio Event we'll await in _wait_for_shutdown_signal,
     # so an authenticated POST /stop on the cred-server can wake the
     # main loop and trigger graceful teardown. The shutdown wait then
@@ -385,11 +380,9 @@ async def _async_main(test_id: str, session_id: str, creds_port: int) -> None:
     duration = (stopped_at - started_at).total_seconds()
 
     # ── Step 5: Stop responders (snapshot stats inside stop) + echo server ───
-    # Detach from cred-server FIRST so a late /snapshot poll doesn't
-    # race iptables -D in stop() and read counters that have already
-    # been deleted. Endpoint then 503s for the few seconds between
-    # detach and cred_server.stop().
-    cred_server.detach_responders()
+    # /snapshot stays 503 until commit_final_snapshots is called below,
+    # so no detach handshake is needed — the post-stop path is the
+    # only path that ever surfaces counter values.
     # Each responder's stop() captures its final connection_count /
     # data_transfer_ok state BEFORE tearing down its underlying
     # interface/process; the snapshot is then surfaced via the same

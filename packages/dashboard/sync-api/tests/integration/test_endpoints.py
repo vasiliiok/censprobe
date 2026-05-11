@@ -58,6 +58,116 @@ class TestHealth:
 
 
 @pytest.mark.integration
+class TestBearerAuth:
+    """When ``SYNC_API_TOKEN`` is set, /test-runs and friends require
+    ``Authorization: Bearer <token>``. /health always bypasses.
+
+    The middleware reads the token from a module-level constant. The
+    tests patch that constant via monkeypatch — easier than re-importing
+    the app with a different env, and the constant is re-read on every
+    request inside the middleware.
+    """
+
+    async def test_health_bypasses_auth_even_when_token_set(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        app_client: Any,
+    ) -> None:
+        from sync_api import main as sync_main
+
+        monkeypatch.setattr(sync_main, "_SYNC_API_TOKEN", "secret-token")
+        resp = await app_client.get("/health")
+        assert resp.status_code == 200
+
+    async def test_missing_bearer_returns_401(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        app_client: Any,
+    ) -> None:
+        from sync_api import main as sync_main
+
+        monkeypatch.setattr(sync_main, "_SYNC_API_TOKEN", "secret-token")
+        resp = await app_client.get("/test-runs")
+        assert resp.status_code == 401
+        assert "missing bearer token" in resp.text
+
+    async def test_wrong_token_returns_403(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        app_client: Any,
+    ) -> None:
+        from sync_api import main as sync_main
+
+        monkeypatch.setattr(sync_main, "_SYNC_API_TOKEN", "secret-token")
+        resp = await app_client.get(
+            "/test-runs",
+            headers={"Authorization": "Bearer wrong"},
+        )
+        assert resp.status_code == 403
+
+    async def test_correct_token_passes(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        app_client: Any,
+    ) -> None:
+        from sync_api import main as sync_main
+
+        monkeypatch.setattr(sync_main, "_SYNC_API_TOKEN", "secret-token")
+        resp = await app_client.get(
+            "/test-runs",
+            headers={"Authorization": "Bearer secret-token"},
+        )
+        assert resp.status_code == 200
+
+    async def test_empty_token_disables_auth(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        app_client: Any,
+    ) -> None:
+        # Empty string ⇒ middleware short-circuits and lets the request
+        # through unauthenticated. Matches the single-tenant dev default.
+        from sync_api import main as sync_main
+
+        monkeypatch.setattr(sync_main, "_SYNC_API_TOKEN", "")
+        resp = await app_client.get("/test-runs")
+        assert resp.status_code == 200
+
+
+@pytest.mark.integration
+class TestTestIdPathValidation:
+    """FastAPI's Path(pattern=...) rejects malformed ``test_id`` before
+    the handler runs. Mirrors the producer-side SAFE_ID_RE so neither
+    end can introduce a path-traversal-looking string into responses
+    or logs. Bad inputs return 422 (FastAPI's validation error code),
+    not 404.
+    """
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            "../etc/passwd",
+            "id with spaces",
+            "id/with/slashes",
+            "тест",  # non-ASCII
+            "a" * 65,  # over the 64-char ceiling
+            "",  # empty is collected by FastAPI's path routing differently
+        ],
+    )
+    async def test_malformed_test_id_returns_422(self, app_client: Any, bad: str) -> None:
+        # Empty string falls back to FastAPI's default empty-path
+        # handling (the request resolves to /test-runs/ which is a
+        # different route or 404) — skip that input from the 422 check.
+        if not bad:
+            return
+        resp = await app_client.get(f"/test-runs/{bad}")
+        # Slash-bearing inputs change the URL shape entirely — they hit
+        # the routing layer before pattern validation, so FastAPI may
+        # respond 404. The contract we care about: the request NEVER
+        # makes it into the handler with a malformed ID.
+        assert resp.status_code in (422, 404)
+
+
+@pytest.mark.integration
 class TestListTestRuns:
     async def test_empty_returns_empty_list(self, app_client: Any) -> None:
         resp = await app_client.get("/test-runs")

@@ -39,16 +39,13 @@ import threading
 import urllib.request
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from censprobe_core.utils import write_secret
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
-
-if TYPE_CHECKING:
-    from censprobe_listener._responder_dispatch import Responder
 
 logger = logging.getLogger(__name__)
 
@@ -159,14 +156,13 @@ class CredServer:
         # plain str field plus the existing _lock is sufficient — no
         # event/condition variable is needed.
         self._client_ip: str | None = None
-        # Set by main.py after responders have started so /snapshot can
-        # read live counter state. ``None`` while responders are still
-        # spinning up — /snapshot returns 503 until then.
-        self._responders: dict[str, Responder] | None = None
         # Finalised post-stop snapshots — populated by main.py AFTER
         # _stop_responders has captured each responder's final state.
-        # Until then ``/snapshot`` (which is now post-stop only) replies
-        # 503 — the client polls with retries.
+        # Until then ``/snapshot`` (which is post-stop only) replies
+        # 503 — the client polls with retries. There is no longer a
+        # mid-session live-snapshot path: the live-vs-final drift it
+        # caused on amneziawg-go was the original motivation for the
+        # 2026-05 refactor.
         self._final_snapshots: dict[str, dict[str, Any]] | None = None
         # Set by the snapshot handler once the client has successfully
         # GET /snapshot at least once AFTER commit_final_snapshots — so
@@ -221,26 +217,6 @@ class CredServer:
             self.bind,
             self.port,
         )
-
-    def attach_responders(self, responders: dict[str, Responder]) -> None:
-        """Plug the running responders dict into the cred-server.
-
-        Called from main.py once ``_start_responders`` has populated
-        the dict. After this call, the /snapshot endpoint starts
-        returning per-protocol live counter values; before it, the
-        endpoint replies 503 (Service Unavailable) so an over-eager
-        client can't race responder startup.
-        """
-        with self._lock:
-            self._responders = responders
-
-    def detach_responders(self) -> None:
-        """Mirror of :meth:`attach_responders` — called from main.py
-        right before the responders are stopped, so /snapshot stops
-        reading counters that are about to disappear.
-        """
-        with self._lock:
-            self._responders = None
 
     def bind_stop_event(self, ev: asyncio.Event, loop: asyncio.AbstractEventLoop) -> None:
         """Wire the asyncio Event ``_wait_for_shutdown_signal`` is
@@ -324,9 +300,15 @@ class CredServer:
             def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
                 return
 
-            def _reject(self, code: int, reason: str) -> None:
+            def _reject(self, code: int, reason: str, *, allow: str | None = None) -> None:
                 self.send_response(code)
                 self.send_header("Content-Type", "text/plain; charset=utf-8")
+                # RFC 7231 §6.5.5: a 405 response MUST advertise the
+                # methods the resource supports via the ``Allow`` header.
+                # Surfaces "use POST" to an operator who curls /stop by
+                # mistake without them having to read the source.
+                if allow is not None:
+                    self.send_header("Allow", allow)
                 self.end_headers()
                 self.wfile.write(reason.encode("utf-8"))
 
@@ -336,6 +318,13 @@ class CredServer:
                     return
                 if self.path == "/snapshot":
                     self._serve_snapshot()
+                    return
+                if self.path == "/stop":
+                    # /stop exists but only as POST — return 405 (with
+                    # Allow: POST) rather than 404 so the operator gets
+                    # an actionable diagnostic. Mirror of the do_POST
+                    # branch that rejects GET-only paths.
+                    self._reject(405, "method not allowed", allow="POST")
                     return
                 self._reject(404, "not found")
 
@@ -419,7 +408,13 @@ class CredServer:
                 if self.path == "/stop":
                     self._serve_stop()
                     return
-                self._reject(405, "method not allowed")
+                # /creds and /snapshot are GET-only — emit Allow: GET so
+                # an operator who curls them with -X POST sees the
+                # actual supported verb.
+                if self.path in ("/creds", "/snapshot"):
+                    self._reject(405, "method not allowed", allow="GET")
+                    return
+                self._reject(404, "not found")
 
             def _serve_stop(self) -> None:
                 """Client-driven shutdown trigger.
