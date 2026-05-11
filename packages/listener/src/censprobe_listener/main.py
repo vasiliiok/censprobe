@@ -595,7 +595,10 @@ async def _start_responders(
             responders[spec.name] = responder
             logger.info("%s started", spec.name)
         except Exception as e:
-            logger.error("%s failed to start: %s", spec.name, e)
+            # ``logger.exception`` includes the traceback automatically
+            # (S8572). ``str(e)`` is still needed for the errors[] map
+            # which gets surfaced in the operator-facing status table.
+            logger.exception("%s failed to start", spec.name)
             errors[spec.name] = str(e)
 
     return responders, errors

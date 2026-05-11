@@ -250,8 +250,10 @@ async def _try_import_one_file(
             if is_listener_report(fn):
                 n_s = await _import_listener_report(session, run, report_file)
                 return bool(n_s)
-    except Exception as e:
-        logger.error("Error importing %s: %s", fn, e)
+    except Exception:
+        # ``logger.exception`` includes the traceback automatically —
+        # no need to pass the exception value through ``%s`` (S8572).
+        logger.exception("Error importing %s", fn)
     return False
 
 
@@ -283,8 +285,9 @@ async def _import_one_test_dir(
     try:
         async with session.begin_nested():
             run = await _get_or_create_test_run(session, test_id, meta_path)
-    except Exception as e:
-        logger.error("Could not get/create test_run %s: %s", test_id, e)
+    except Exception:
+        # ``logger.exception`` carries the traceback for free (S8572).
+        logger.exception("Could not get/create test_run %s", test_id)
         return
     if run is None:
         return

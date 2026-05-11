@@ -309,7 +309,11 @@ async def _async_main(
             results[name] = result
             _print_single_result(name, result)
         except Exception as e:
-            logger.error("Probe %s failed with exception: %s", name, e)
+            # ``logger.exception`` auto-attaches the traceback so we
+            # don't have to thread the exception object into the
+            # format string (Sonar S8572). ``str(e)`` is still
+            # needed for the ProbeResult.error payload below.
+            logger.exception("Probe %s failed", name)
             results[name] = ProbeResult(verdict=Verdict.ERROR, error=str(e))
 
     # ── Step 3: Ask listener to stop, then fetch the final snapshot ──────────

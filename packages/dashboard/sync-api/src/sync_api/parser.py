@@ -213,8 +213,10 @@ def load_json(path: Path) -> dict[str, Any] | None:
             return None
         try:
             size = path.stat().st_size
-        except OSError as e:
-            logger.error("Report %s: stat failed: %s", path.name, e)
+        except OSError:
+            # ``logger.exception`` auto-attaches the traceback so we
+            # don't have to format the exception ourselves (S8572).
+            logger.exception("Report %s: stat failed", path.name)
             return None
         if size > _MAX_REPORT_BYTES:
             logger.error(
@@ -234,16 +236,25 @@ def load_json(path: Path) -> dict[str, Any] | None:
             return None
         return result
     except json.JSONDecodeError as e:
-        logger.error(
-            "Report %s: invalid JSON at line %d col %d: %s", path.name, e.lineno, e.colno, e.msg
+        # Keep the structured lineno/colno/msg fields — operators
+        # parsing logs grep on the line+col, and the traceback alone
+        # doesn't surface them at the top of the log line. Switching
+        # to ``logger.exception`` keeps the same structured prefix
+        # and appends the traceback automatically (S8572).
+        logger.exception(
+            "Report %s: invalid JSON at line %d col %d: %s",
+            path.name,
+            e.lineno,
+            e.colno,
+            e.msg,
         )
         return None
-    except OSError as e:
-        logger.error("Report %s: I/O error: %s", path.name, e)
+    except OSError:
+        logger.exception("Report %s: I/O error", path.name)
         return None
-    except Exception as e:
+    except Exception:
         # Last-ditch guard so one weird file never aborts the whole import.
-        logger.error("Report %s: unexpected parse error: %s", path.name, e)
+        logger.exception("Report %s: unexpected parse error", path.name)
         return None
 
 
