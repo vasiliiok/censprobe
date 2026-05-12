@@ -1,25 +1,20 @@
 """
 sync-api test fixtures.
 
-CRITICAL: ``sync_api.db`` reads ``DATABASE_URL`` and ``sync_api.main`` reads
-``CENSPROBE_IMPORT_INTERVAL_SEC`` + resolves ``SYNC_API_TOKEN`` at *import
-time*. We must set the first two env vars before any test (or smoke-import
-test) imports sync_api modules. pytest imports conftest.py before any
-sibling test file, so module-level env-var assignment here happens early
-enough.
+CRITICAL: ``sync_api.db`` reads ``DATABASE_URL`` and ``sync_api.main``
+reads ``CENSPROBE_IMPORT_INTERVAL_SEC`` at *import time*. We must set
+both env vars before any test (or smoke-import test) imports sync_api
+modules. pytest imports conftest.py before any sibling test file, so
+module-level env-var assignment here happens early enough.
 
 The placeholder DATABASE_URL is enough to construct an SQLAlchemy
 ``AsyncEngine`` (engine creation is lazy — no connection attempt). Real
-integration tests (Phase 4) override this via the ``postgres_container``
-fixture or a CI-side ``services: postgres``.
+integration tests override this via the ``postgres_container`` fixture
+or a CI-side ``services: postgres``.
 
-``SYNC_API_TOKEN`` is intentionally NOT set here. The resolution helper
-``sync_api.main._resolve_token`` falls back to its file path
-(/workspace/.sync-api-token) when the env is empty. On developer laptops
-and CI runners /workspace doesn't exist, so it falls again to the
-empty-string short-circuit and the middleware skips auth — exactly what
-unit + smoke tests want. Tests that exercise the auth middleware
-monkeypatch ``_SYNC_API_TOKEN`` directly.
+sync-api has no HTTP-level authentication (see ``main.py:92-100`` — the
+service is loopback-only and Grafana consumes Postgres directly). No
+auth-related env var is required for tests.
 """
 
 from __future__ import annotations

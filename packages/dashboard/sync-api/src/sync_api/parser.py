@@ -120,6 +120,15 @@ def parse_listener_report(
     else:
         client_connected = client_meta is not None
 
+    # session_id is the dedup key for the UPSERT-by-SID path in the
+    # importer. Reports written by listener after commit 959a12b (May 2026,
+    # auto-gen session_id) always carry a non-empty SID. Older historical
+    # reports (re-imported from a backup) may have an empty SID — in that
+    # case the importer's UPSERT-by-SID branch is skipped entirely and
+    # each empty-SID report lands as its own ListenerSession row (still
+    # deduped on the `(test_run_id, report_file)` UNIQUE constraint, so a
+    # single file can't double-import). Producers MUST emit a non-empty
+    # session_id; this is a defensive read, not a contract relaxation.
     session_meta = {
         "report_file": path.name,
         "session_id": str(raw.get("session_id") or ""),

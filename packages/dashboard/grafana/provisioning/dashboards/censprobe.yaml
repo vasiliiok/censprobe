@@ -7,7 +7,16 @@ providers:
     # overwritten on the next provisioning sync — lock them so users
     # can't lose work by accident, and so the JSON files stay the
     # single source of truth.
-    disableDeletion: true
+    #
+    # ``disableDeletion: false`` lets the provider reconcile deletions:
+    # ``git rm`` a dashboard, ``git pull`` on the host, and within
+    # ``updateIntervalSeconds`` the dashboard disappears from Grafana's
+    # internal sqlite too. With ``true`` (the old setting), retired
+    # dashboards survived as ghosts in the UI long after their JSON was
+    # gone — ``allowUiUpdates: false`` already blocks the UI's save path,
+    # so accidental operator deletion via the UI isn't a real risk on
+    # this provider.
+    disableDeletion: false
     updateIntervalSeconds: 30
     allowUiUpdates: false
     options:

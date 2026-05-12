@@ -287,3 +287,137 @@ class TestUpsertBySessionId:
         assert len(sessions) == 1
         # The newer file (T11) survives in DB.
         assert "T11" in sessions[0].report_file
+
+
+@pytest.mark.integration
+class TestReconciliation:
+    """Workspace-is-source-of-truth: removing report files from disk must
+    propagate to DB deletions on the next ``_import_once`` pass.
+
+    Three reconciliation modes (in increasing scope):
+      * file-level — one report removed, others remain
+      * empty-folder — every JSON gone from the test_id dir
+      * folder-removed — whole test_id directory gone
+    Plus a safety guard: a missing ``reports/`` root must NOT trigger a
+    mass-delete (we treat that as operator error, not intent).
+    """
+
+    async def test_deleted_solo_file_removes_db_rows(
+        self, workspace: Path, db_session: Any
+    ) -> None:
+        from sync_api.db import TestResult
+        from sync_api.main import _import_once
+
+        path = _write_report(workspace, "vu-1", "server-solo-2026-05-04.json", _solo_payload())
+        await _import_once()
+        assert len((await db_session.execute(select(TestResult))).scalars().all()) == 2
+
+        # Operator removed the file. After the next pass the rows must
+        # be gone — the workspace is the source of truth.
+        path.unlink()
+        await _import_once()
+        assert (await db_session.execute(select(TestResult))).first() is None
+
+    async def test_deleted_listener_file_removes_session_and_cascades(
+        self, workspace: Path, db_session: Any
+    ) -> None:
+        from sync_api.db import ListenerSession, ProtocolResult
+        from sync_api.main import _import_once
+
+        path = _write_report(
+            workspace,
+            "vu-1",
+            "server-listener-mts-2026-05-04T10-00-00Z.json",
+            _listener_payload(),
+        )
+        await _import_once()
+        assert len((await db_session.execute(select(ListenerSession))).scalars().all()) == 1
+        assert len((await db_session.execute(select(ProtocolResult))).scalars().all()) == 2
+
+        path.unlink()
+        await _import_once()
+        assert (await db_session.execute(select(ListenerSession))).first() is None
+        # Cascade on ListenerSession.id → protocol_results.session_id.
+        assert (await db_session.execute(select(ProtocolResult))).first() is None
+
+    async def test_empty_folder_drops_test_run(self, workspace: Path, db_session: Any) -> None:
+        from sync_api.db import TestRun
+        from sync_api.main import _import_once
+
+        path = _write_report(workspace, "vu-1", "server-solo-2026-05-04.json", _solo_payload())
+        await _import_once()
+        assert len((await db_session.execute(select(TestRun))).scalars().all()) == 1
+
+        # Remove all reports but keep the (now empty) directory. The
+        # workspace says "no data here" — Grafana must agree.
+        path.unlink()
+        assert (workspace / "reports" / "vu-1").exists()
+        await _import_once()
+        assert (await db_session.execute(select(TestRun))).first() is None
+
+    async def test_removed_folder_drops_test_run(self, workspace: Path, db_session: Any) -> None:
+        import shutil
+
+        from sync_api.db import TestRun
+        from sync_api.main import _import_once
+
+        _write_report(workspace, "vu-1", "server-solo-2026-05-04.json", _solo_payload())
+        _write_report(workspace, "vu-2", "server-solo-2026-05-04.json", _solo_payload())
+        await _import_once()
+        assert len((await db_session.execute(select(TestRun))).scalars().all()) == 2
+
+        # rm -rf reports/vu-1 — top-level reconciliation must drop the row.
+        shutil.rmtree(workspace / "reports" / "vu-1")
+        await _import_once()
+        rows = (await db_session.execute(select(TestRun))).scalars().all()
+        assert len(rows) == 1
+        assert rows[0].test_id == "vu-2"
+
+    async def test_partial_solo_delete_clears_scores(
+        self, workspace: Path, db_session: Any
+    ) -> None:
+        """If solo is removed but listener stays, scores must be cleared.
+
+        Otherwise the run shows stale ``entry_score`` etc. computed from
+        the deleted solo data — a worse UX than the "no data" state."""
+        from sync_api.db import TestRun
+        from sync_api.main import _import_once
+
+        solo_path = _write_report(workspace, "vu-1", "server-solo-1.json", _solo_payload())
+        _write_report(
+            workspace,
+            "vu-1",
+            "server-listener-mts-2026-05-04T10-00-00Z.json",
+            _listener_payload(),
+        )
+        await _import_once()
+        run = (
+            await db_session.execute(select(TestRun).where(TestRun.test_id == "vu-1"))
+        ).scalar_one()
+        assert run.entry_score is not None
+
+        solo_path.unlink()
+        await _import_once()
+        await db_session.refresh(run)
+        assert run.entry_score is None
+        assert run.overall_score is None
+        assert run.listener_session_count == 0
+
+    async def test_missing_reports_root_is_safe(self, workspace: Path, db_session: Any) -> None:
+        """Safety guard: a missing ``reports/`` directory must NOT trigger
+        a mass-delete. Operator might have unmounted the volume by mistake.
+        """
+        import shutil
+
+        from sync_api.db import TestRun
+        from sync_api.main import _import_once
+
+        _write_report(workspace, "vu-1", "server-solo-1.json", _solo_payload())
+        await _import_once()
+        assert len((await db_session.execute(select(TestRun))).scalars().all()) == 1
+
+        # Remove the entire reports/ root. Importer must short-circuit.
+        shutil.rmtree(workspace / "reports")
+        await _import_once()
+        # The row must still be there — workspace gone ≠ workspace empty.
+        assert len((await db_session.execute(select(TestRun))).scalars().all()) == 1

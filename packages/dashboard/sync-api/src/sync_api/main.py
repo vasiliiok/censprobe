@@ -65,8 +65,8 @@ from sync_api.parser import (
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 OptionalCategoryQuery = Annotated[str | None, Query()]
 OptionalVerdictQuery = Annotated[str | None, Query()]
-LimitQuery = Annotated[int, Query(le=2000)]
-OffsetQuery = Annotated[int, Query()]
+LimitQuery = Annotated[int, Query(ge=1, le=2000)]
+OffsetQuery = Annotated[int, Query(ge=0)]
 # Mirror of probe-core's SAFE_ID_RE — keep the producers (listener / solo
 # CLI ``--test-id``) and the API consumers in lockstep so anything that
 # would slip past the producer-side validator can't sneak in here as a
@@ -264,15 +264,74 @@ async def _recompute_scores_if_touched(
     report_files: list[Path],
     touched: bool,
 ) -> None:
-    """If anything was added, re-blend solo + listener scores onto ``run``."""
+    """If anything was added, re-blend solo + listener scores onto ``run``.
+
+    No savepoint wrap: the body only does file I/O (in a thread) plus
+    in-memory attribute writes on ``run``. There are no DB statements
+    here whose effect would need rolling back. If ``_apply_scores``
+    raises mid-way the outer ``session.refresh(run)`` re-reads the
+    server-side state so a partial mutation can't sneak into the
+    outer commit.
+    """
     if not touched:
         return
     try:
-        async with session.begin_nested():
-            loaded = await asyncio.to_thread(_load_reports_for_scoring, report_files)
-            _apply_scores(run, *loaded)
+        loaded = await asyncio.to_thread(_load_reports_for_scoring, report_files)
+        _apply_scores(run, *loaded)
     except Exception as e:
         logger.warning("score recompute failed for %s: %s", test_id, e)
+        await session.refresh(run)
+
+
+async def _delete_orphaned_files(
+    session: AsyncSession,
+    run: TestRun,
+    orphaned_results: set[str],
+    orphaned_sessions: set[str],
+) -> int:
+    """Delete DB rows for report files no longer on disk.
+
+    Returns the total number of report-file names removed (sum across
+    ``test_results`` and ``listener_sessions``). The caller uses this
+    to decide whether to recompute scores — same trigger as a successful
+    import.
+    """
+    deleted = 0
+    if orphaned_results:
+        await session.execute(
+            delete(TestResult).where(
+                TestResult.test_run_id == run.id,
+                TestResult.report_file.in_(orphaned_results),
+            )
+        )
+        deleted += len(orphaned_results)
+        logger.info(
+            "Removed %d solo report file(s) from %r: %s",
+            len(orphaned_results),
+            run.test_id,
+            sorted(orphaned_results),
+        )
+    if orphaned_sessions:
+        # Cascade-delete on ListenerSession clears ProtocolResult rows.
+        await session.execute(
+            delete(ListenerSession).where(
+                ListenerSession.test_run_id == run.id,
+                ListenerSession.report_file.in_(orphaned_sessions),
+            )
+        )
+        deleted += len(orphaned_sessions)
+        logger.info(
+            "Removed %d listener report file(s) from %r: %s",
+            len(orphaned_sessions),
+            run.test_id,
+            sorted(orphaned_sessions),
+        )
+    if deleted:
+        # Flush so subsequent queries in the same session see the
+        # deletions (the per-test-dir dedup set used the pre-delete
+        # snapshot, and the score recompute reads from disk anyway).
+        await session.flush()
+    return deleted
 
 
 async def _import_one_test_dir(
@@ -281,7 +340,23 @@ async def _import_one_test_dir(
     meta_path: Path,
     report_files: list[Path],
 ) -> None:
-    """Import all new files for one test_id and rescore the run if touched."""
+    """Import all new files for one test_id and rescore the run if touched.
+
+    Also acts as the per-test_id reconciliation step: report files that
+    were once imported but have since been removed from the workspace
+    are deleted from the DB. An empty directory (or one with only
+    ``meta.yaml``) drops the entire ``TestRun`` row — mirrors the
+    dashboard provisioning's ``disableDeletion: false`` so the workspace
+    stays the single source of truth for what Grafana renders.
+    """
+    if not report_files:
+        # No report files on disk → ensure nothing for this test_id lingers
+        # in the DB. Cascade clears TestResult / ListenerSession /
+        # ProtocolResult rows in one shot. No-op when the TestRun doesn't
+        # exist (delete-where on a missing row is silent).
+        await session.execute(delete(TestRun).where(TestRun.test_id == test_id))
+        return
+
     try:
         async with session.begin_nested():
             run = await _get_or_create_test_run(session, test_id, meta_path)
@@ -294,7 +369,14 @@ async def _import_one_test_dir(
 
     imported_results, imported_sessions = await _fetch_imported_filenames(session, run)
 
-    run_touched = False
+    on_disk_filenames = {p.name for p in report_files}
+    orphaned_results = imported_results - on_disk_filenames
+    orphaned_sessions = imported_sessions - on_disk_filenames
+    deleted = await _delete_orphaned_files(session, run, orphaned_results, orphaned_sessions)
+    # A reconciliation deletion is a state change just like a new import —
+    # the score recompute below must re-read the post-delete world.
+    run_touched = deleted > 0
+
     for report_file in report_files:
         fn = report_file.name
         if fn in imported_results or fn in imported_sessions:
@@ -311,20 +393,61 @@ async def _import_one_test_dir(
 
     # Solo's own scores were computed before any listener report was on
     # disk, so protocol reachability sat at the neutral 0.5 default.
-    # Re-blend solo + listener whenever a side adds new data.
+    # Re-blend solo + listener whenever a side adds new data — or when a
+    # reconciliation pass removed stale data.
     await _recompute_scores_if_touched(session, run, test_id, report_files, run_touched)
 
 
+async def _reconcile_missing_test_runs(session: AsyncSession, on_disk_test_ids: set[str]) -> int:
+    """Delete TestRun rows whose source directory is gone from the workspace.
+
+    Whole-folder cleanup: ``rm -rf reports/<test_id>/`` → cascade clears
+    ``test_results`` / ``listener_sessions`` / ``protocol_results``.
+    Returns the number of TestRun rows deleted.
+    """
+    rows = (await session.execute(select(TestRun))).scalars().all()
+    deleted = 0
+    for run in rows:
+        if run.test_id in on_disk_test_ids:
+            continue
+        logger.info("Removing TestRun %r (source directory gone)", run.test_id)
+        await session.delete(run)
+        deleted += 1
+    if deleted:
+        await session.flush()
+    return deleted
+
+
 async def _import_once() -> None:
-    """One pass over the reports directory: import new files and rescore touched runs."""
+    """One pass over the reports directory: import new files, reconcile
+    deletions, and rescore touched runs.
+
+    Workspace is the single source of truth. Three reconciliation
+    triggers (in increasing severity):
+
+      * a report file was removed from a test_id directory → that row(s)
+        deleted from DB; scores recomputed from the remaining files.
+      * a test_id directory is now empty (no JSON) → the TestRun and all
+        its children dropped.
+      * a test_id directory is gone entirely → handled at the top-level
+        via ``_reconcile_missing_test_runs``.
+
+    Safety guard: if ``reports/`` itself is missing (e.g. workspace
+    bind-mount stale or operator moved the directory), do nothing. We
+    only reconcile against an *intentionally* empty workspace, not a
+    *missing* one.
+    """
     reports_root = WORKSPACE / "reports"
-    test_dirs = await asyncio.to_thread(_list_report_files, reports_root)
-    if not test_dirs:
+    if not reports_root.exists():
         return
+
+    test_dirs = await asyncio.to_thread(_list_report_files, reports_root)
+    on_disk_test_ids = {test_id for test_id, _, _ in test_dirs}
 
     async with async_session_factory() as session:
         for test_id, meta_path, report_files in test_dirs:
             await _import_one_test_dir(session, test_id, meta_path, report_files)
+        await _reconcile_missing_test_runs(session, on_disk_test_ids)
         await session.commit()
 
 
@@ -335,6 +458,22 @@ def _apply_scores(
 ) -> None:
     """Rebuild server scores and write them onto `run`."""
     if not solo_results:
+        # No solo data left for this run — clear derived score columns so
+        # stale values from a previous import don't survive after the
+        # source files are removed from the workspace. The
+        # reconciliation path in ``_import_one_test_dir`` can land here
+        # if every solo report was deleted while listener reports remain.
+        run.entry_score = None
+        run.exit_score = None
+        run.relay_score = None
+        run.overall_score = None
+        run.listener_session_count = 0
+        run.throttling_detected = False
+        run.dns_integrity = None
+        run.tls_integrity = None
+        run.telegram_health = None
+        run.detected_techniques = None
+        run.recommended_protocols = None
         return
     scores = compute_scores(
         solo_results=solo_results,
@@ -528,8 +667,6 @@ async def _import_solo_report(session: AsyncSession, run: TestRun, path: Path) -
     if not results:
         return 0, False
 
-    run.last_synced_at = datetime.now(tz=UTC)
-
     for r in results:
         row = TestResult(test_run_id=run.id, **r)
         session.add(row)
@@ -552,20 +689,14 @@ async def _import_listener_report(session: AsyncSession, run: TestRun, path: Pat
     # the DB and Grafana panel 04 shows duplicated tiles, while score
     # recompute averages the two attempts instead of taking the latest.
     #
-    # Listener filenames carry an ISO-8601 timestamp suffix
-    # (`...-2026-04-21T10-30-00Z.json`), which sorts chronologically as
-    # plain ASCII. We compare report_file strings as the freshness
-    # proxy:
-    #
-    #   * existing.report_file >= current_file → DB already has a
-    #     newer-or-equal observation for this SID; refuse the import to
-    #     keep the latest snapshot stable across loop iterations (the
-    #     `imported_sessions` dedup set is rebuilt per pass and would
-    #     otherwise re-import an old file whose row we just deleted).
-    #   * existing.report_file <  current_file → DB row is stale;
-    #     delete it (cascade clears protocol_results) and continue with
-    #     a fresh INSERT.
-    #   * no existing row                        → plain INSERT.
+    # Freshness comparator: prefer ``started_at`` (typed timestamp in DB
+    # and in the new report), fall back to lexicographic filename compare
+    # for legacy reports where one side lacks ``started_at``. Filename
+    # compare only works because listener writes the timestamp suffix in
+    # ISO-8601 fixed-width form (`...-2026-04-21T10-30-00Z.json`), which
+    # sorts chronologically as plain ASCII — that's a producer-side
+    # convention this importer must not silently depend on as the only
+    # source of truth.
     if session_id:
         existing = (
             await session.execute(
@@ -576,7 +707,15 @@ async def _import_listener_report(session: AsyncSession, run: TestRun, path: Pat
             )
         ).scalar_one_or_none()
         if existing is not None:
-            if existing.report_file >= current_file:
+            new_started_at = sess_meta.get("started_at")
+            if existing.started_at is not None and new_started_at is not None:
+                # Typed-timestamp compare: robust against any filename
+                # convention change on the producer side.
+                existing_is_newer = existing.started_at >= new_started_at
+            else:
+                # Legacy fallback for reports missing ``started_at``.
+                existing_is_newer = existing.report_file >= current_file
+            if existing_is_newer:
                 logger.info(
                     "Skipping %s: SID %r already represented by newer report %s",
                     current_file,
@@ -634,7 +773,6 @@ def _run_to_dict(run: TestRun) -> dict[str, Any]:
         "kernel": run.kernel,
         "distro": run.distro,
         "created_at": run.created_at.isoformat() if run.created_at else None,
-        "last_synced_at": run.last_synced_at.isoformat() if run.last_synced_at else None,
         "scores": {
             "entry": run.entry_score,
             "exit": run.exit_score,

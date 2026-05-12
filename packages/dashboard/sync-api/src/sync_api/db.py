@@ -10,12 +10,14 @@ Schema:
 
 from __future__ import annotations
 
+import logging
 import os
 import urllib.parse as _urlparse
 from collections.abc import AsyncGenerator
 from datetime import datetime
 from typing import Any
 
+import asyncpg.exceptions
 from sqlalchemy import (
     Boolean,
     DateTime,
@@ -30,6 +32,8 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+logger = logging.getLogger(__name__)
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
@@ -88,7 +92,6 @@ class TestRun(Base):
     kernel: Mapped[str | None] = mapped_column(String(64), nullable=True)
     distro: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Scores (latest solo run)
     entry_score: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -263,6 +266,37 @@ class ProtocolResult(Base):
     session = relationship("ListenerSession", back_populates="protocol_results")
 
 
+# Operator-facing hint surfaced when Postgres rejects our credentials.
+# The most common cause in dev is a ``db_data`` named volume that was
+# initialized with an older ``DB_PASSWORD`` and survived ``docker system
+# prune`` (named volumes are kept while any container — even stopped —
+# references them). ``initdb`` only runs on a *fresh* PGDATA, so editing
+# ``.env`` later doesn't reset the on-disk password. Surfacing the fix in
+# the first log line turns a five-minute traceback hunt into a copy-paste.
+_DB_AUTH_FAILURE_HINT = (
+    "Postgres rejected the password for user 'censprobe'. The db_data "
+    "named volume likely predates the current DB_PASSWORD in .env "
+    "(initdb only runs on a fresh PGDATA). To reset:\n"
+    "    docker compose --profile dashboard down -v\n"
+    "    docker compose --profile dashboard up -d"
+)
+
+
+def _is_invalid_password_error(exc: BaseException) -> bool:
+    """True if `exc` (or its DBAPI ``.orig``) is asyncpg's password failure.
+
+    SQLAlchemy 2.0 leaves connection-time pool errors *unwrapped* (the
+    raw asyncpg exception bubbles out of ``engine.begin()``), but
+    query-time errors are wrapped in ``DBAPIError`` with ``.orig`` set
+    to the driver exception. We check both shapes so the hint fires
+    regardless of when the credential rejection surfaces.
+    """
+    if isinstance(exc, asyncpg.exceptions.InvalidPasswordError):
+        return True
+    orig = getattr(exc, "orig", None)
+    return isinstance(orig, asyncpg.exceptions.InvalidPasswordError)
+
+
 async def init_db() -> None:
     """Create all tables (if missing).
 
@@ -281,8 +315,13 @@ async def init_db() -> None:
     Reports on disk are the source of truth and re-import populates
     every column from scratch.
     """
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+    except Exception as exc:  # noqa: BLE001 - re-raised below; we only sniff for one type to log a hint
+        if _is_invalid_password_error(exc):
+            logger.error(_DB_AUTH_FAILURE_HINT)
+        raise
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
