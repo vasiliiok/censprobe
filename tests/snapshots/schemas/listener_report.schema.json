@@ -277,6 +277,18 @@
           "default": null,
           "title": "Note"
         },
+        "responder_self_test_ok": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Responder Self Test Ok"
+        },
         "throughput_throttled": {
           "default": false,
           "title": "Throughput Throttled",

@@ -72,6 +72,17 @@ _TELEGRAM_DC_PROBES: tuple[tuple[str, int, str], ...] = (
     ("149.154.175.100", 443, "DC3 aurora"),
 )
 
+# The C MTProxy binary upstreams to Telegram DCs on TCP/8888 (not 443).
+# proxy-multi.conf is downloaded at image build time from
+# https://core.telegram.org/getProxyConfig and baked into the runtime
+# image at this path — see packages/listener/Dockerfile.
+_PROXY_MULTI_CONF_PATH = Path("/usr/local/share/mtproxy-orig/proxy-multi.conf")
+
+# Cap how many upstreams we probe at preflight. proxy-multi.conf
+# typically has ~25 IPs; 6 distinct clusters is enough to distinguish
+# "all unreachable" (0/6 succeed) from "one DC migrated" (1-2 fail).
+_PROXY_MULTI_PROBE_SAMPLE = 6
+
 
 @dataclass(frozen=True)
 class CheckResult:
@@ -481,6 +492,212 @@ async def _check_telegram_dc_reach(
     )
 
 
+def _parse_proxy_multi_upstreams(
+    path: Path | None = None,
+) -> list[tuple[str, int, str]]:
+    """Parse ``proxy_for <cluster> <ip>:<port>;`` lines from proxy-multi.conf.
+
+    Returns a list of ``(ip, port, cluster_id)`` tuples in file order.
+    Duplicates and malformed lines are dropped silently. Returns an empty
+    list when the file is missing (image was built without the
+    mtproxy-orig stage, or the path moved).
+
+    The C MTProxy binary cycles auth_cluster RPC heartbeats across every
+    listed (ip, port) pair, so any one of them is a representative
+    reachability target. We surface ``cluster_id`` so the caller can pick
+    one IP per distinct cluster — sampling all of cluster 4's ten IPs
+    would waste the budget on a single Telegram DC.
+
+    ``path`` defaults to the module-level ``_PROXY_MULTI_CONF_PATH`` at
+    call time (NOT at def time, so monkeypatching the module constant
+    in tests reaches this function — a per-call lookup is cheap and
+    keeps the call sites argument-free).
+    """
+    if path is None:
+        path = _PROXY_MULTI_CONF_PATH
+    if not path.exists():
+        return []
+    out: list[tuple[str, int, str]] = []
+    seen: set[tuple[str, int]] = set()
+    for raw_line in path.read_text().splitlines():
+        line = raw_line.strip()
+        if not line.startswith("proxy_for "):
+            continue
+        parts = line.split()
+        # `proxy_for <cluster_id> <ip>:<port>;` — exactly three tokens.
+        if len(parts) < 3:
+            continue
+        cluster = parts[1]
+        ip_port = parts[2].rstrip(";")
+        ip, _, port_s = ip_port.rpartition(":")
+        if not ip or not port_s:
+            continue
+        try:
+            port = int(port_s)
+        except ValueError:
+            continue
+        key = (ip, port)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((ip, port, cluster))
+    return out
+
+
+async def _check_mtproxy_orig_upstream_reach(
+    timeout_s: float = 3.0,
+) -> CheckResult:
+    """Verify TCP reach to the actual upstream IPs the C MTProxy will dial.
+
+    Augments ``_check_telegram_dc_reach`` (which only tests 3 DC IPs on
+    port 443 — the canonical Telegram public endpoint). The original C
+    ``mtproto-proxy`` binary upstreams to a DIFFERENT set of IPs on port
+    **8888** sourced from ``proxy-multi.conf`` (e.g. the 91.108.4.0/24
+    cluster). On hosts where the egress allows 443 but blocks 8888 (or
+    where Telegram's port-8888 fleet treats the host's ASN
+    differently), the 443 check passes while every ``mtproto_orig``
+    probe of the resulting session reports BLOCKED with a length-read
+    timeout — a false positive against the strict "BLOCKED ≡ confirmed
+    block" invariant. This check closes that gap by probing the actual
+    upstream the responder will use, BEFORE clients run.
+
+    Picks at most one IP per distinct cluster_id so 6 probes cover 6
+    Telegram clusters rather than 6 IPs in cluster 4. ``warn`` when 0/N
+    reachable; ``ok`` otherwise (Telegram load-balances and partial
+    reach is normally fine in practice).
+    """
+    upstreams = _parse_proxy_multi_upstreams()
+    if not upstreams:
+        return CheckResult(
+            "mtproxy-orig-upstream",
+            "skip",
+            "proxy-multi.conf not found (image built without mtproxy-orig stage)",
+        )
+
+    # Pick at most one IP per cluster so we exercise breadth, not depth.
+    sampled: list[tuple[str, int, str]] = []
+    seen_clusters: set[str] = set()
+    for ip, port, cluster in upstreams:
+        if cluster in seen_clusters:
+            continue
+        seen_clusters.add(cluster)
+        sampled.append((ip, port, cluster))
+        if len(sampled) >= _PROXY_MULTI_PROBE_SAMPLE:
+            break
+
+    async def _connect(ip: str, port: int) -> bool:
+        try:
+            _, writer = await asyncio.wait_for(
+                asyncio.open_connection(ip, port), timeout=timeout_s
+            )
+        except (TimeoutError, OSError):
+            return False
+        with contextlib.suppress(Exception):
+            writer.close()
+            await writer.wait_closed()
+        return True
+
+    results = await asyncio.gather(*(_connect(ip, port) for ip, port, _ in sampled))
+    reachable = sum(1 for ok in results if ok)
+    total = len(sampled)
+    if reachable == 0:
+        ipport_list = ", ".join(f"{ip}:{port}" for ip, port, _ in sampled)
+        return CheckResult(
+            "mtproxy-orig-upstream",
+            "warn",
+            (
+                f"0/{total} mtproto-proxy upstream IPs reachable on port 8888 "
+                f"({ipport_list}). mtproto_orig sessions WILL timeout at the "
+                f"resPQ leg and report as ERROR (responder-side, not network) — "
+                f"check listener-egress firewall for TCP/8888 to Telegram's "
+                f"proxy fleet, or rebuild the image to refresh proxy-multi.conf."
+            ),
+        )
+    return CheckResult(
+        "mtproxy-orig-upstream",
+        "ok",
+        f"{reachable}/{total} mtproto-proxy upstream IPs reachable on port 8888",
+    )
+
+
+async def run_mtproxy_orig_self_test(
+    port: int, secret_hex: str, timeout_s: float = 12.0
+) -> CheckResult:
+    """Probe the just-started ``mtproto_orig`` responder against itself.
+
+    Single loopback call to :func:`probe_mtproto_orig` on ``127.0.0.1`` /
+    ``port`` with the in-memory session secret. Establishes whether the
+    C MTProxy slave is *actually* picking up client connections off the
+    accept queue, completing the obfuscated2 handshake, and relaying a
+    real ``req_pq_multi`` round-trip to a Telegram DC — i.e. the whole
+    stack the session-time probe relies on.
+
+    Why this is necessary even when ``_check_mtproxy_orig_upstream_reach``
+    passes: that check verifies the TCP path to DC:8888 is open from the
+    listener's egress. It does NOT verify the C binary is healthy. The
+    binary has known modes (aggressive auth_cluster reconnect loop;
+    auth_key-bootstrap stall; slave hard-stuck on a syscall) where
+    upstream reach is fine but ``accept4()`` never fires inside the
+    probe window — producing the exact BLOCKED-shape failure that
+    looks like DPI silent-drop but is purely server-side.
+
+    On WARN, the listener still serves sessions; ``_finalize_protocol_result``
+    will downgrade the mtproto_orig verdict from BLOCKED → ERROR with a
+    diagnostic note instead of misclassifying the responder bug as
+    censorship.
+    """
+    # Imported lazily to avoid pulling probe-core into the
+    # listener-startup hot path when this check is skipped (e.g.
+    # mtproto_orig disabled in censprobe.yaml).
+    from censprobe_core.models import Verdict
+    from censprobe_core.protocol_probes import probe_mtproto_orig
+
+    try:
+        result = await asyncio.wait_for(
+            probe_mtproto_orig("127.0.0.1", port, secret_hex),
+            timeout=timeout_s,
+        )
+    except TimeoutError:
+        return CheckResult(
+            "mtproxy-orig-self-test",
+            "warn",
+            (
+                f"loopback probe of mtproto_orig:{port} timed out after "
+                f"{timeout_s:.0f}s — responder appears wedged (likely C "
+                f"MTProxy auth_cluster reconnect loop starving accept(); "
+                f"strace the slave pid + tune -M N to confirm). Sessions "
+                f"WILL be downgraded BLOCKED→ERROR for this protocol."
+            ),
+        )
+    except Exception as e:
+        return CheckResult(
+            "mtproxy-orig-self-test",
+            "warn",
+            f"loopback probe raised {type(e).__name__}: {e}",
+        )
+
+    if result.verdict == Verdict.OK:
+        return CheckResult(
+            "mtproxy-orig-self-test",
+            "ok",
+            "loopback probe completed full obfuscated2 + req_pq → resPQ exchange",
+        )
+    # BLOCKED / ERROR / HANDSHAKE_ONLY from the loopback probe all mean
+    # "the responder didn't complete its own handshake within the budget".
+    # That is the signal we need for the downgrade — the precise verdict
+    # is a diagnostic message, not a fail-axis.
+    note_str = result.note or "<no note>"
+    return CheckResult(
+        "mtproxy-orig-self-test",
+        "warn",
+        (
+            f"loopback probe returned {result.verdict} (note: {note_str}) — "
+            f"responder cannot handshake against itself; session BLOCKED "
+            f"verdicts for mtproto_orig will be downgraded to ERROR."
+        ),
+    )
+
+
 async def run_preflight(udp_ports: Sequence[int]) -> list[CheckResult]:
     """Run all pre-startup checks in order; return individual results.
 
@@ -496,9 +713,14 @@ async def run_preflight(udp_ports: Sequence[int]) -> list[CheckResult]:
       4. ``conntrack`` reads the table state — its severity is
          downgraded to ok-with-advisory when NOTRACK is in place.
       5. ``conntrack-dmesg`` looks for recent table-full drops.
-      6. ``telegram-dc-reach`` opens TCP to a few Telegram DCs in
-         parallel — informs the operator BEFORE probes run whether
-         the mtproto verdicts will have a working DC backend.
+      6. ``telegram-dc-reach`` opens TCP to a few Telegram DCs on port
+         443 — quick public-endpoint reach signal for the operator.
+      7. ``mtproxy-orig-upstream`` opens TCP to the actual upstream IPs
+         the C MTProxy will dial (parsed from proxy-multi.conf,
+         port 8888). Complements (6) by exercising the SPECIFIC path
+         mtproto_orig sessions need; closes the false-BLOCKED gap where
+         a host has 443 reach but 8888 is blocked or treated
+         differently.
 
     The caller is expected to print the results; we return data
     rather than printing here so the listener can format with its
@@ -510,4 +732,5 @@ async def run_preflight(udp_ports: Sequence[int]) -> list[CheckResult]:
     conntrack = _check_conntrack(notrack_installed=notrack.status == "ok")
     dmesg = _check_dmesg_recent_drops()
     dc = await _check_telegram_dc_reach()
-    return [orphan, cap, notrack, conntrack, dmesg, dc]
+    upstream = await _check_mtproxy_orig_upstream_reach()
+    return [orphan, cap, notrack, conntrack, dmesg, dc, upstream]

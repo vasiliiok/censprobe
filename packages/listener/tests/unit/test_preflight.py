@@ -239,7 +239,13 @@ class TestRunPreflight:
         async def _fake_dc(timeout_s: float = 3.0) -> preflight.CheckResult:
             return preflight.CheckResult("telegram-dc-reach", "skip", "stubbed in unit test")
 
+        async def _fake_upstream(timeout_s: float = 3.0) -> preflight.CheckResult:
+            return preflight.CheckResult(
+                "mtproxy-orig-upstream", "skip", "stubbed in unit test"
+            )
+
         monkeypatch.setattr(preflight, "_check_telegram_dc_reach", _fake_dc)
+        monkeypatch.setattr(preflight, "_check_mtproxy_orig_upstream_reach", _fake_upstream)
 
         import asyncio
 
@@ -249,8 +255,9 @@ class TestRunPreflight:
         # orphan cleanup runs FIRST so subsequent installs aren't shadowed
         # by leftover rules; cap check is reported next so a missing-CAP
         # condition is loud BEFORE the conntrack/notrack output that
-        # depends on it; DC reach last because it's network-dependent
-        # and the slowest.
+        # depends on it; DC reach checks run last because they're
+        # network-dependent and the slowest, with the cheaper 443-port
+        # public probe ahead of the per-proxy-multi.conf 8888 probe.
         assert names == [
             "orphan-rules",
             "iptables-cap",
@@ -258,6 +265,194 @@ class TestRunPreflight:
             "conntrack",
             "conntrack-dmesg",
             "telegram-dc-reach",
+            "mtproxy-orig-upstream",
         ]
         # No warnings on a healthy host with stubbed-out tools.
         assert all(r.status in {"ok", "skip", "warn"} for r in results)
+
+
+class TestParseProxyMultiUpstreams:
+    """``_parse_proxy_multi_upstreams`` extracts (ip, port, cluster) tuples."""
+
+    def test_extracts_canonical_lines(self, tmp_path: Path) -> None:
+        p = tmp_path / "proxy-multi.conf"
+        p.write_text(
+            "# force_probability 10 10\n"
+            "default 2;\n"
+            "proxy_for 1 149.154.175.50:8888;\n"
+            "proxy_for 2 149.154.161.144:8888;\n"
+            "proxy_for 4 91.108.4.206:8888;\n"
+        )
+        got = preflight._parse_proxy_multi_upstreams(p)
+        assert got == [
+            ("149.154.175.50", 8888, "1"),
+            ("149.154.161.144", 8888, "2"),
+            ("91.108.4.206", 8888, "4"),
+        ]
+
+    def test_dedupes_repeated_ipport(self, tmp_path: Path) -> None:
+        p = tmp_path / "proxy-multi.conf"
+        # The same (ip, port) appears in both directions (e.g. cluster 1
+        # and cluster -1 in real proxy-multi.conf); dedup keeps the
+        # first-seen entry so we don't probe the same socket twice.
+        p.write_text(
+            "proxy_for 1 149.154.175.50:8888;\n"
+            "proxy_for -1 149.154.175.50:8888;\n"
+        )
+        got = preflight._parse_proxy_multi_upstreams(p)
+        assert got == [("149.154.175.50", 8888, "1")]
+
+    def test_skips_malformed_and_comments(self, tmp_path: Path) -> None:
+        p = tmp_path / "proxy-multi.conf"
+        p.write_text(
+            "# comment line\n"
+            "default 2;\n"  # not a proxy_for line
+            "proxy_for 1 not-an-ip-port;\n"  # no colon → dropped
+            "proxy_for 1 1.2.3.4:notanint;\n"  # bad port → dropped
+            "proxy_for 1\n"  # truncated → dropped
+            "proxy_for 1 1.2.3.4:8888;\n"  # valid
+        )
+        got = preflight._parse_proxy_multi_upstreams(p)
+        assert got == [("1.2.3.4", 8888, "1")]
+
+    def test_missing_file_returns_empty(self, tmp_path: Path) -> None:
+        # Image built without the mtproxy-orig stage → file doesn't exist;
+        # the upstream check then SKIPs rather than raising.
+        assert preflight._parse_proxy_multi_upstreams(tmp_path / "absent.conf") == []
+
+
+class TestMtproxyOrigUpstreamReach:
+    """``_check_mtproxy_orig_upstream_reach`` samples + tcp-probes."""
+
+    def test_skip_when_conf_missing(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.setattr(
+            preflight, "_PROXY_MULTI_CONF_PATH", tmp_path / "absent.conf"
+        )
+        import asyncio
+
+        r = asyncio.run(preflight._check_mtproxy_orig_upstream_reach())
+        assert r.status == "skip"
+        assert "proxy-multi.conf" in r.message
+
+    def test_warn_when_zero_reachable(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        p = tmp_path / "proxy-multi.conf"
+        p.write_text(
+            "proxy_for 1 1.2.3.4:8888;\n"
+            "proxy_for 2 5.6.7.8:8888;\n"
+        )
+        monkeypatch.setattr(preflight, "_PROXY_MULTI_CONF_PATH", p)
+
+        async def _all_fail(host: str, port: int) -> tuple:  # type: ignore[type-arg]
+            raise TimeoutError
+
+        # asyncio.open_connection is what _connect inside the check calls;
+        # stub it to fail so we test the WARN branch deterministically.
+        monkeypatch.setattr(preflight.asyncio, "open_connection", _all_fail)
+
+        import asyncio
+
+        r = asyncio.run(preflight._check_mtproxy_orig_upstream_reach(timeout_s=0.05))
+        assert r.status == "warn"
+        # The error message must explain WHY this is not a network block —
+        # operators reading the listener startup banner need to know that
+        # mtproto_orig BLOCKED verdicts are being rewritten to ERROR.
+        assert "8888" in r.message
+        assert "ERROR" in r.message
+
+    def test_one_ip_per_cluster_sample(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # Cluster 4 has 10 entries in real proxy-multi.conf; preflight
+        # MUST pick at most one of them so the sample exercises distinct
+        # clusters rather than the same DC ten times.
+        p = tmp_path / "proxy-multi.conf"
+        p.write_text(
+            "".join(
+                f"proxy_for 4 91.108.4.{i}:8888;\n" for i in (133, 143, 149, 158)
+            )
+            + "proxy_for 5 91.108.56.110:8888;\n"
+        )
+        monkeypatch.setattr(preflight, "_PROXY_MULTI_CONF_PATH", p)
+        attempted: list[tuple[str, int]] = []
+
+        async def _record(host: str, port: int) -> tuple:  # type: ignore[type-arg]
+            attempted.append((host, port))
+            raise OSError
+
+        monkeypatch.setattr(preflight.asyncio, "open_connection", _record)
+
+        import asyncio
+
+        asyncio.run(preflight._check_mtproxy_orig_upstream_reach(timeout_s=0.05))
+        # First IP for each of cluster 4 and 5 — not all 5 entries.
+        assert attempted == [("91.108.4.133", 8888), ("91.108.56.110", 8888)]
+
+
+class TestMtproxyOrigSelfTest:
+    """``run_mtproxy_orig_self_test`` consumes the protocol_probes verdict."""
+
+    def test_ok_when_probe_returns_ok(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from censprobe_core.models import Verdict
+        from censprobe_core.protocol_probes import ProbeResult
+
+        async def _probe_ok(host: str, port: int, secret_hex: str) -> ProbeResult:
+            r = ProbeResult()
+            r.verdict = Verdict.OK
+            r.handshake_ok = True
+            return r
+
+        import censprobe_core.protocol_probes as pp
+
+        monkeypatch.setattr(pp, "probe_mtproto_orig", _probe_ok)
+
+        import asyncio
+
+        r = asyncio.run(
+            preflight.run_mtproxy_orig_self_test(port=2080, secret_hex="dd" + "00" * 16)
+        )
+        assert r.status == "ok"
+
+    def test_warn_when_probe_blocks(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from censprobe_core.models import Verdict
+        from censprobe_core.protocol_probes import ProbeResult
+
+        async def _probe_blocked(host: str, port: int, secret_hex: str) -> ProbeResult:
+            r = ProbeResult()
+            r.verdict = Verdict.BLOCKED
+            r.note = "orig_resPQ_len_timeout_post_init"
+            return r
+
+        import censprobe_core.protocol_probes as pp
+
+        monkeypatch.setattr(pp, "probe_mtproto_orig", _probe_blocked)
+
+        import asyncio
+
+        r = asyncio.run(
+            preflight.run_mtproxy_orig_self_test(port=2080, secret_hex="dd" + "00" * 16)
+        )
+        assert r.status == "warn"
+        assert "ERROR" in r.message  # explains the downgrade behaviour
+
+    def test_warn_when_probe_hangs(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import asyncio
+
+        async def _hang(host: str, port: int, secret_hex: str) -> object:
+            await asyncio.sleep(10)
+            raise AssertionError("should not return")
+
+        import censprobe_core.protocol_probes as pp
+
+        monkeypatch.setattr(pp, "probe_mtproto_orig", _hang)
+
+        r = asyncio.run(
+            preflight.run_mtproxy_orig_self_test(
+                port=2080, secret_hex="dd" + "00" * 16, timeout_s=0.1
+            )
+        )
+        assert r.status == "warn"
+        assert "wedged" in r.message.lower() or "timeout" in r.message.lower()

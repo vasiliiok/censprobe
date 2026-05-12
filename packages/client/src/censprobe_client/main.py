@@ -36,7 +36,7 @@ from pathlib import Path
 import click
 from censprobe_core.config import load_config
 from censprobe_core.credentials_reader import parse_protocols_yaml
-from censprobe_core.models import LiveSnapshot, Verdict
+from censprobe_core.models import LiveSnapshot, ProtocolResult, Verdict
 from censprobe_core.protocol_probes import ProbeResult
 from censprobe_core.protocol_registry import enabled_protocols, known_names
 from rich.console import Console
@@ -743,14 +743,20 @@ def _listener_verdict(snap: LiveSnapshot) -> Verdict:
     """Apply :meth:`ProtocolResult.finalize` semantics to a live snapshot.
 
     Same predicates the listener will use when committing the JSON
-    report at session end, so the cross-verification table reflects
-    what the operator will see in reports/.
+    report at session end — delegated to ``ProtocolResult.finalize()``
+    so the BLOCKED→ERROR downgrade for failed-self-test responders
+    fires consistently on both sides of the cross-verification. Without
+    delegating, the cross-verification table would still print BLOCKED
+    while the JSON report (and Grafana, via sync-api) showed ERROR for
+    the same row — confusing operators about which signal to trust.
     """
-    if snap.data_transfer_ok:
-        return Verdict.OK
-    if snap.handshake_count > 0:
-        return Verdict.HANDSHAKE_ONLY
-    return Verdict.BLOCKED
+    pr = ProtocolResult(
+        handshake_count=snap.handshake_count,
+        data_transfer_ok=snap.data_transfer_ok,
+        responder_self_test_ok=snap.responder_self_test_ok,
+    )
+    pr.finalize()
+    return pr.verdict
 
 
 def _agreed_verdict(client: Verdict, listener: Verdict) -> tuple[str, str]:

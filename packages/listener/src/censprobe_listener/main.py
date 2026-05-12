@@ -59,7 +59,11 @@ from censprobe_listener.credentials import (
     generate_credentials,
 )
 from censprobe_listener.echo_server import EchoServer
-from censprobe_listener.preflight import CheckResult, run_preflight
+from censprobe_listener.preflight import (
+    CheckResult,
+    run_mtproxy_orig_self_test,
+    run_preflight,
+)
 
 # Title reused for the three Rich panels that summarize client-network
 # state. Hoisted to a constant — Sonar S1192 otherwise flags the literal
@@ -419,6 +423,25 @@ async def _async_main(
         cred_server.stop()
         sys.exit(1)
 
+    # ── Step 3c: Post-responder preflight self-tests ─────────────────────────
+    # mtproto_orig is the only protocol with a self-test today — see
+    # ``run_mtproxy_orig_self_test`` for the rationale. Result is
+    # surfaced as a WARN in the preflight panel AND threaded into
+    # ``_finalize_protocol_result`` so a wedged-responder session
+    # downgrades BLOCKED → ERROR instead of falsely attributing a
+    # local responder bug to network censorship.
+    self_test_results: dict[str, bool] = {}
+    post_preflight: list[CheckResult] = []
+    if "mtproto_orig" in responders:
+        st = await run_mtproxy_orig_self_test(
+            port=creds.mtproxy_orig_port,
+            secret_hex=creds.mtproxy_orig_secret,
+        )
+        post_preflight.append(st)
+        self_test_results["mtproto_orig"] = st.status == "ok"
+    if post_preflight:
+        _print_preflight(post_preflight)
+
     # Bind the asyncio Event we'll await in _wait_for_shutdown_signal,
     # so an authenticated POST /stop on the cred-server can wake the
     # main loop and trigger graceful teardown. The shutdown wait then
@@ -460,9 +483,17 @@ async def _async_main(
     final_snapshots: dict[str, dict[str, Any]] = {}
     for name, responder in responders.items():
         try:
-            final_snapshots[name] = responder.live_snapshot().model_dump(mode="json")
+            snap_dict = responder.live_snapshot().model_dump(mode="json")
         except Exception as e:
-            final_snapshots[name] = {"error": f"{type(e).__name__}: {e}"}
+            snap_dict = {"error": f"{type(e).__name__}: {e}"}
+        # Inject the post-responder self-test result (computed in
+        # step 3c) into the committed snapshot so the client's
+        # cross-verification panel can apply the same BLOCKED→ERROR
+        # downgrade the listener will write into the JSON report.
+        # Keyed by protocol name; absence keeps the field None.
+        if name in self_test_results:
+            snap_dict["responder_self_test_ok"] = self_test_results[name]
+        final_snapshots[name] = snap_dict
     cred_server.commit_final_snapshots(final_snapshots)
     if echo_server is not None:
         try:
@@ -500,7 +531,11 @@ async def _async_main(
     # ── Step 6: Finalize verdicts from snapshotted state ─────────────────────
     results: dict[str, ProtocolResult] = {}
     for name, responder in responders.items():
-        pr = _finalize_protocol_result(name, responder)
+        pr = _finalize_protocol_result(
+            name,
+            responder,
+            self_test_ok=self_test_results.get(name),
+        )
         results[name] = pr
 
     # Print final table
@@ -646,8 +681,20 @@ async def _stop_responders(responders: dict[str, Responder], timeout: float) -> 
         await asyncio.gather(*tasks.values(), return_exceptions=True)
 
 
-def _finalize_protocol_result(name: str, responder: Responder) -> ProtocolResult:
-    """Build ProtocolResult from a responder's post-stop snapshot."""
+def _finalize_protocol_result(
+    name: str,
+    responder: Responder,
+    self_test_ok: bool | None = None,
+) -> ProtocolResult:
+    """Build ProtocolResult from a responder's post-stop snapshot.
+
+    ``self_test_ok`` is the listener-side startup loopback-probe outcome
+    for this protocol — ``True`` when the responder successfully
+    handshook against itself, ``False`` when it didn't, ``None`` when
+    no self-test was configured. ``ProtocolResult.finalize()`` consumes
+    this signal to downgrade a False-test BLOCKED → ERROR with a note,
+    preserving the strict "BLOCKED ≡ confirmed block" invariant.
+    """
     # Different responders expose the field under different historical
     # names; prefer `connection_count` (the canonical one) and fall back
     # to `handshake_count` if a future responder uses that. `or` is a
@@ -677,6 +724,7 @@ def _finalize_protocol_result(name: str, responder: Responder) -> ProtocolResult
         handshake_count=handshake_count,
         data_transfer_ok=data_ok,
         avg_throughput_mbps=avg_throughput,
+        responder_self_test_ok=self_test_ok,
     )
     pr.finalize()
     return pr

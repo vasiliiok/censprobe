@@ -245,6 +245,17 @@ class LiveSnapshot(BaseModel):
     # bytes" from the status file; for WG/AWG it's the kernel's
     # ``peer->rx_bytes`` counter. Independent of ``data_packets``.
     bytes_received: int | None = None
+    # Mirror of :attr:`ProtocolResult.responder_self_test_ok` so the
+    # client-side cross-verification table can apply the SAME BLOCKED→
+    # ERROR downgrade the listener will write into the final report.
+    # Without this, the client would still print BLOCKED in its
+    # cross-verification panel even though the listener report
+    # downgraded the same protocol to ERROR, confusing operators about
+    # which signal to trust. The listener injects this value into the
+    # snapshot dict at commit time (``main.py`` ``commit_final_snapshots``)
+    # — the per-responder ``live_snapshot()`` methods don't carry it
+    # so a fleet of responders doesn't have to learn a new field.
+    responder_self_test_ok: bool | None = None
 
 
 class ProtocolResult(BaseModel):
@@ -268,6 +279,18 @@ class ProtocolResult(BaseModel):
     avg_throughput_mbps: float | None = None
     throughput_throttled: bool = False
     note: str | None = None
+    # Result of the listener-side startup self-test (loopback probe of
+    # the just-started responder). ``None`` when no self-test was
+    # configured for this protocol (most have none — only mtproto_orig
+    # ships one currently, because its C upstream-relayed handshake is
+    # the only failure mode where the responder can be silently wedged
+    # at the application layer in a way that mimics DPI silent-drop).
+    # ``False`` means the responder couldn't complete its own handshake
+    # against itself, so any later session-time BLOCKED for this
+    # protocol is NOT trustworthy as a censorship signal — preserving
+    # the "BLOCKED ≡ confirmed block" invariant requires downgrading
+    # such a verdict (see finalize()).
+    responder_self_test_ok: bool | None = None
 
     def finalize(self) -> None:
         """Derive verdict from the two responder signals.
@@ -298,6 +321,27 @@ class ProtocolResult(BaseModel):
             self.verdict = Verdict.HANDSHAKE_ONLY
         else:
             self.verdict = Verdict.BLOCKED
+
+        # Listener-side self-test downgrade. If the responder couldn't
+        # complete a probe against itself at startup, a session-time
+        # BLOCKED for this protocol cannot be distinguished from a real
+        # network block — and the strict "BLOCKED ≡ confirmed block"
+        # invariant forbids reporting one. Reclassify to ERROR with a
+        # diagnostic note so cross-verification surfaces it as
+        # "listener-side, not network" rather than censorship.
+        if (
+            self.responder_self_test_ok is False
+            and self.verdict == Verdict.BLOCKED
+            and self.handshake_count == 0
+            and not self.data_transfer_ok
+        ):
+            self.verdict = Verdict.ERROR
+            self.note = (
+                "listener-side responder self-test failed at startup — "
+                "this BLOCKED-shape result is not a confirmed network block "
+                "(the listener's own loopback probe could not complete the "
+                "responder handshake either)"
+            )
 
 
 class ListenerReport(BaseModel):
