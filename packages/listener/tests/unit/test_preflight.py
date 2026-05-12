@@ -409,7 +409,7 @@ class TestMtproxyOrigSelfTest:
         async def _probe_blocked(host: str, port: int, secret_hex: str) -> ProbeResult:
             r = ProbeResult()
             r.verdict = Verdict.BLOCKED
-            r.note = "orig_resPQ_len_timeout_post_init"
+            r.error = "orig_resPQ_len_timeout_post_init"
             return r
 
         import censprobe_core.protocol_probes as pp

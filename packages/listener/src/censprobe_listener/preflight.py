@@ -684,7 +684,10 @@ async def run_mtproxy_orig_self_test(
     # "the responder didn't complete its own handshake within the budget".
     # That is the signal we need for the downgrade — the precise verdict
     # is a diagnostic message, not a fail-axis.
-    note_str = result.note or "<no note>"
+    # ``ProbeResult.error`` is the diagnostic string ("orig_resPQ_len_timeout_post_init"
+    # etc.); ``ProbeResult`` has no ``note`` field — that lives on
+    # ``ProtocolResult``.
+    note_str = result.error or "<no diagnostic>"
     return CheckResult(
         "mtproxy-orig-self-test",
         "warn",
