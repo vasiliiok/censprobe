@@ -587,9 +587,7 @@ async def _check_mtproxy_orig_upstream_reach(
 
     async def _connect(ip: str, port: int) -> bool:
         try:
-            _, writer = await asyncio.wait_for(
-                asyncio.open_connection(ip, port), timeout=timeout_s
-            )
+            _, writer = await asyncio.wait_for(asyncio.open_connection(ip, port), timeout=timeout_s)
         except (TimeoutError, OSError):
             return False
         with contextlib.suppress(Exception):

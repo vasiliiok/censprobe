@@ -240,9 +240,7 @@ class TestRunPreflight:
             return preflight.CheckResult("telegram-dc-reach", "skip", "stubbed in unit test")
 
         async def _fake_upstream(timeout_s: float = 3.0) -> preflight.CheckResult:
-            return preflight.CheckResult(
-                "mtproxy-orig-upstream", "skip", "stubbed in unit test"
-            )
+            return preflight.CheckResult("mtproxy-orig-upstream", "skip", "stubbed in unit test")
 
         monkeypatch.setattr(preflight, "_check_telegram_dc_reach", _fake_dc)
         monkeypatch.setattr(preflight, "_check_mtproxy_orig_upstream_reach", _fake_upstream)
@@ -295,10 +293,7 @@ class TestParseProxyMultiUpstreams:
         # The same (ip, port) appears in both directions (e.g. cluster 1
         # and cluster -1 in real proxy-multi.conf); dedup keeps the
         # first-seen entry so we don't probe the same socket twice.
-        p.write_text(
-            "proxy_for 1 149.154.175.50:8888;\n"
-            "proxy_for -1 149.154.175.50:8888;\n"
-        )
+        p.write_text("proxy_for 1 149.154.175.50:8888;\nproxy_for -1 149.154.175.50:8888;\n")
         got = preflight._parse_proxy_multi_upstreams(p)
         assert got == [("149.154.175.50", 8888, "1")]
 
@@ -324,12 +319,8 @@ class TestParseProxyMultiUpstreams:
 class TestMtproxyOrigUpstreamReach:
     """``_check_mtproxy_orig_upstream_reach`` samples + tcp-probes."""
 
-    def test_skip_when_conf_missing(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        monkeypatch.setattr(
-            preflight, "_PROXY_MULTI_CONF_PATH", tmp_path / "absent.conf"
-        )
+    def test_skip_when_conf_missing(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        monkeypatch.setattr(preflight, "_PROXY_MULTI_CONF_PATH", tmp_path / "absent.conf")
         import asyncio
 
         r = asyncio.run(preflight._check_mtproxy_orig_upstream_reach())
@@ -340,10 +331,7 @@ class TestMtproxyOrigUpstreamReach:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         p = tmp_path / "proxy-multi.conf"
-        p.write_text(
-            "proxy_for 1 1.2.3.4:8888;\n"
-            "proxy_for 2 5.6.7.8:8888;\n"
-        )
+        p.write_text("proxy_for 1 1.2.3.4:8888;\nproxy_for 2 5.6.7.8:8888;\n")
         monkeypatch.setattr(preflight, "_PROXY_MULTI_CONF_PATH", p)
 
         async def _all_fail(host: str, port: int) -> tuple:  # type: ignore[type-arg]
@@ -371,9 +359,7 @@ class TestMtproxyOrigUpstreamReach:
         # clusters rather than the same DC ten times.
         p = tmp_path / "proxy-multi.conf"
         p.write_text(
-            "".join(
-                f"proxy_for 4 91.108.4.{i}:8888;\n" for i in (133, 143, 149, 158)
-            )
+            "".join(f"proxy_for 4 91.108.4.{i}:8888;\n" for i in (133, 143, 149, 158))
             + "proxy_for 5 91.108.56.110:8888;\n"
         )
         monkeypatch.setattr(preflight, "_PROXY_MULTI_CONF_PATH", p)
