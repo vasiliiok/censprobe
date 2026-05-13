@@ -1,0 +1,28 @@
+created_at: '2026-05-13T20:13:42.351172Z'
+planned_sessions: []
+probe_core_version: 0.1.0
+server:
+  distro: Debian GNU/Linux 13 (trixie) 13
+  endpoint:
+    asn:
+      asn: 20473
+      descr: AS-VULTR - The Constant Company, LLC, US
+      domain: constant.com
+      org: The Constant Company, LLC
+      route: 199.247.0.0/21
+    company:
+      domain: vultr.com
+      name: Vultr Holdings LLC Frankfurt
+      network: 199.247.2.0 - 199.247.3.255
+    datacenter:
+      domain: vultr.com
+      name: Vultr Holdings LLC Frankfurt
+      network: 199.247.2.0 - 199.247.3.255
+    is_datacenter: true
+    is_mobile: false
+    location:
+      city: Frankfurt am Main
+      country_code: DE
+  ipv6_available: false
+  kernel: 6.8.0-111-generic
+test_id: vultr-runtime-listener

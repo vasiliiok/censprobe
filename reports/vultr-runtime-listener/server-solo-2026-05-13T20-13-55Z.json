@@ -1,0 +1,5567 @@
+{
+  "test_id": "vultr-runtime-listener",
+  "report_type": "solo",
+  "generated_at": "2026-05-13T20:13:55.654905+00:00",
+  "probe_core_version": "0.1.0",
+  "server_meta": {
+    "endpoint": {
+      "is_mobile": false,
+      "is_datacenter": true,
+      "asn": {
+        "asn": 20473,
+        "descr": "AS-VULTR - The Constant Company, LLC, US",
+        "org": "The Constant Company, LLC",
+        "domain": "constant.com",
+        "route": "199.247.0.0/21"
+      },
+      "company": {
+        "name": "Vultr Holdings LLC Frankfurt",
+        "domain": "vultr.com",
+        "network": "199.247.2.0 - 199.247.3.255"
+      },
+      "datacenter": {
+        "name": "Vultr Holdings LLC Frankfurt",
+        "domain": "vultr.com",
+        "network": "199.247.2.0 - 199.247.3.255"
+      },
+      "location": {
+        "country_code": "DE",
+        "city": "Frankfurt am Main"
+      }
+    },
+    "ipv6_available": false,
+    "kernel": "6.8.0-111-generic",
+    "distro": "Debian GNU/Linux 13 (trixie) 13"
+  },
+  "results": [
+    {
+      "test": "doh_access_cloudflare",
+      "category": "dns",
+      "subcategory": "doh",
+      "target": "https://cloudflare-dns.com/dns-query",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status_code": 200
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.759894Z",
+      "notes": null
+    },
+    {
+      "test": "doh_access_google",
+      "category": "dns",
+      "subcategory": "doh",
+      "target": "https://dns.google/resolve",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status_code": 200
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:44.235755Z",
+      "notes": null
+    },
+    {
+      "test": "doh_access_mozilla",
+      "category": "dns",
+      "subcategory": "doh",
+      "target": "https://mozilla.cloudflare-dns.com/dns-query",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status_code": 200
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:44.356662Z",
+      "notes": null
+    },
+    {
+      "test": "dns_bbc_com_system",
+      "category": "dns",
+      "subcategory": "dns",
+      "target": "bbc.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "151.101.0.81",
+          "151.101.64.81",
+          "151.101.128.81",
+          "151.101.192.81"
+        ],
+        "system_ttl": 300,
+        "isp_ips": [
+          "151.101.0.81",
+          "151.101.64.81",
+          "151.101.128.81",
+          "151.101.192.81"
+        ],
+        "doh_ips": [
+          "151.101.128.81",
+          "151.101.192.81",
+          "151.101.0.81",
+          "151.101.64.81"
+        ],
+        "resolved_asn": "AS54113",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "151.101.64.81",
+            "151.101.192.81",
+            "151.101.0.81",
+            "151.101.128.81"
+          ],
+          "google_2": [
+            "151.101.128.81",
+            "151.101.192.81",
+            "151.101.0.81",
+            "151.101.64.81"
+          ],
+          "cloudflare_1": [
+            "151.101.0.81",
+            "151.101.128.81",
+            "151.101.192.81",
+            "151.101.64.81"
+          ],
+          "yandex": [
+            "151.101.0.81",
+            "151.101.64.81",
+            "151.101.128.81",
+            "151.101.192.81"
+          ],
+          "quad9": [
+            "151.101.128.81",
+            "151.101.0.81",
+            "151.101.64.81",
+            "151.101.192.81"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:44.826372Z",
+      "notes": null
+    },
+    {
+      "test": "dns_bellingcat_com_system",
+      "category": "dns",
+      "subcategory": "dns",
+      "target": "bellingcat.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "172.66.172.84",
+          "104.20.30.192"
+        ],
+        "system_ttl": 300,
+        "isp_ips": [
+          "104.20.30.192",
+          "172.66.172.84"
+        ],
+        "doh_ips": [
+          "104.20.30.192",
+          "172.66.172.84"
+        ],
+        "resolved_asn": "AS13335",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "104.20.30.192",
+            "172.66.172.84"
+          ],
+          "google_2": [
+            "172.66.172.84",
+            "104.20.30.192"
+          ],
+          "cloudflare_1": [
+            "172.66.172.84",
+            "104.20.30.192"
+          ],
+          "yandex": [
+            "8.6.112.0",
+            "8.47.69.0"
+          ],
+          "quad9": [
+            "172.66.172.84",
+            "104.20.30.192"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:45.220795Z",
+      "notes": null
+    },
+    {
+      "test": "dns_cloudflare_com_system",
+      "category": "dns",
+      "subcategory": "dns",
+      "target": "cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "104.16.133.229",
+          "104.16.132.229"
+        ],
+        "system_ttl": 218,
+        "isp_ips": [
+          "104.16.132.229",
+          "104.16.133.229"
+        ],
+        "doh_ips": [
+          "104.16.132.229",
+          "104.16.133.229"
+        ],
+        "resolved_asn": "AS13335",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "104.16.133.229",
+            "104.16.132.229"
+          ],
+          "google_2": [
+            "104.16.133.229",
+            "104.16.132.229"
+          ],
+          "cloudflare_1": [
+            "104.16.133.229",
+            "104.16.132.229"
+          ],
+          "yandex": [
+            "104.16.132.229",
+            "104.16.133.229"
+          ],
+          "quad9": [
+            "104.16.133.229",
+            "104.16.132.229"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:45.454551Z",
+      "notes": null
+    },
+    {
+      "test": "dns_crypto_cloudflare_com_system",
+      "category": "dns",
+      "subcategory": "dns",
+      "target": "crypto.cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "162.159.136.79",
+          "162.159.135.79"
+        ],
+        "system_ttl": 298,
+        "isp_ips": [
+          "162.159.136.79",
+          "162.159.135.79"
+        ],
+        "doh_ips": [
+          "162.159.136.79",
+          "162.159.135.79"
+        ],
+        "resolved_asn": "AS13335",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "162.159.136.79",
+            "162.159.135.79"
+          ],
+          "google_2": [
+            "162.159.135.79",
+            "162.159.136.79"
+          ],
+          "cloudflare_1": [
+            "162.159.135.79",
+            "162.159.136.79"
+          ],
+          "yandex": [
+            "162.159.135.79",
+            "162.159.136.79"
+          ],
+          "quad9": [
+            "162.159.135.79",
+            "162.159.136.79"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:45.764320Z",
+      "notes": null
+    },
+    {
+      "test": "dns_currenttime_tv_system",
+      "category": "dns",
+      "subcategory": "dns",
+      "target": "currenttime.tv",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "23.11.206.114"
+        ],
+        "system_ttl": 30,
+        "isp_ips": [
+          "95.100.110.14",
+          "95.100.110.20"
+        ],
+        "doh_ips": [
+          "2.23.7.26",
+          "184.86.103.219",
+          "2.23.7.10",
+          "23.11.206.114",
+          "184.86.103.214"
+        ],
+        "resolved_asn": "AS20940",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "2.23.7.26",
+            "2.23.7.10"
+          ],
+          "google_2": [
+            "95.100.110.20",
+            "95.100.110.14"
+          ],
+          "cloudflare_1": [
+            "2.23.7.10",
+            "2.23.7.26"
+          ],
+          "yandex": [
+            "2.19.183.12",
+            "2.19.183.34"
+          ],
+          "quad9": [
+            "23.11.206.114"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:46.012404Z",
+      "notes": null
+    },
+    {
+      "test": "dns_discord_com_system",
+      "category": "dns",
+      "subcategory": "dns",
+      "target": "discord.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "162.159.128.233",
+          "162.159.135.232",
+          "162.159.136.232",
+          "162.159.137.232",
+          "162.159.138.232"
+        ],
+        "system_ttl": 166,
+        "isp_ips": [
+          "162.159.135.232",
+          "162.159.136.232",
+          "162.159.137.232",
+          "162.159.138.232",
+          "162.159.128.233"
+        ],
+        "doh_ips": [
+          "162.159.136.232",
+          "162.159.138.232",
+          "162.159.135.232",
+          "162.159.128.233",
+          "162.159.137.232"
+        ],
+        "resolved_asn": "AS13335",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "162.159.136.232",
+            "162.159.135.232",
+            "162.159.138.232",
+            "162.159.137.232",
+            "162.159.128.233"
+          ],
+          "google_2": [
+            "162.159.138.232",
+            "162.159.137.232",
+            "162.159.136.232",
+            "162.159.128.233",
+            "162.159.135.232"
+          ],
+          "cloudflare_1": [
+            "162.159.135.232",
+            "162.159.137.232",
+            "162.159.136.232",
+            "162.159.128.233",
+            "162.159.138.232"
+          ],
+          "yandex": [
+            "162.159.138.232",
+            "162.159.128.233",
+            "162.159.136.232",
+            "162.159.137.232",
+            "162.159.135.232"
+          ],
+          "quad9": [
+            "162.159.138.232",
+            "162.159.136.232",
+            "162.159.128.233",
+            "162.159.135.232",
+            "162.159.137.232"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:46.318281Z",
+      "notes": null
+    },
+    {
+      "test": "dns_dw_com_system",
+      "category": "dns",
+      "subcategory": "dns",
+      "target": "dw.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "194.55.26.46",
+          "194.55.30.46"
+        ],
+        "system_ttl": 300,
+        "isp_ips": [
+          "194.55.26.46",
+          "194.55.30.46"
+        ],
+        "doh_ips": [
+          "194.55.26.46",
+          "194.55.30.46"
+        ],
+        "resolved_asn": "AS200777",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "194.55.26.46",
+            "194.55.30.46"
+          ],
+          "google_2": [
+            "194.55.26.46",
+            "194.55.30.46"
+          ],
+          "cloudflare_1": [
+            "194.55.30.46",
+            "194.55.26.46"
+          ],
+          "yandex": [
+            "194.55.30.46",
+            "194.55.26.46"
+          ],
+          "quad9": [
+            "194.55.30.46",
+            "194.55.26.46"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:46.657815Z",
+      "notes": null
+    },
+    {
+      "test": "dns_expressvpn_com_system",
+      "category": "dns",
+      "subcategory": "dns",
+      "target": "expressvpn.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "18.66.112.127",
+          "18.66.112.8",
+          "18.66.112.100",
+          "18.66.112.113"
+        ],
+        "system_ttl": 60,
+        "isp_ips": [
+          "18.66.112.113",
+          "18.66.112.127",
+          "18.66.112.8",
+          "18.66.112.100"
+        ],
+        "doh_ips": [
+          "13.227.231.59",
+          "18.66.112.100",
+          "13.227.231.99",
+          "18.66.112.127",
+          "13.227.231.103",
+          "18.66.112.113",
+          "18.66.112.8",
+          "13.227.231.111"
+        ],
+        "resolved_asn": "AS16509",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "18.66.112.100",
+            "18.66.112.127",
+            "18.66.112.8",
+            "18.66.112.113"
+          ],
+          "google_2": [
+            "18.66.112.8",
+            "18.66.112.113",
+            "18.66.112.127",
+            "18.66.112.100"
+          ],
+          "cloudflare_1": [
+            "18.66.112.113",
+            "18.66.112.8",
+            "18.66.112.100",
+            "18.66.112.127"
+          ],
+          "yandex": [
+            "18.66.112.100",
+            "18.66.112.113",
+            "18.66.112.127",
+            "18.66.112.8"
+          ],
+          "quad9": [
+            "3.173.161.70",
+            "3.173.161.64",
+            "3.173.161.119",
+            "3.173.161.128"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:47.132166Z",
+      "notes": null
+    },
+    {
+      "test": "dns_facebook_com_system",
+      "category": "dns",
+      "subcategory": "dns",
+      "target": "facebook.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "157.240.0.35"
+        ],
+        "system_ttl": 60,
+        "isp_ips": [
+          "157.240.0.35"
+        ],
+        "doh_ips": [
+          "157.240.253.35",
+          "57.144.244.1",
+          "157.240.0.35"
+        ],
+        "resolved_asn": "AS32934",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "157.240.0.35"
+          ],
+          "google_2": [
+            "157.240.0.35"
+          ],
+          "cloudflare_1": [
+            "57.144.244.1"
+          ],
+          "yandex": [
+            "157.240.253.35"
+          ],
+          "quad9": [
+            "157.240.203.35"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:47.339268Z",
+      "notes": null
+    },
+    {
+      "test": "dns_google_com_system",
+      "category": "dns",
+      "subcategory": "dns",
+      "target": "google.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "192.178.183.101",
+          "192.178.183.102",
+          "192.178.183.113",
+          "192.178.183.138",
+          "192.178.183.139",
+          "192.178.183.100"
+        ],
+        "system_ttl": 164,
+        "isp_ips": [
+          "142.250.154.101",
+          "142.250.154.102",
+          "142.250.154.113",
+          "142.250.154.138",
+          "142.250.154.139",
+          "142.250.154.100"
+        ],
+        "doh_ips": [
+          "142.251.13.113",
+          "142.250.154.139",
+          "142.250.154.138",
+          "142.250.154.113",
+          "142.250.154.102",
+          "142.250.154.101",
+          "142.251.13.101",
+          "142.251.13.100",
+          "192.178.183.113",
+          "192.178.183.138",
+          "142.251.13.139",
+          "142.251.13.138",
+          "192.178.183.101",
+          "192.178.183.100",
+          "192.178.183.139",
+          "192.178.183.102",
+          "142.251.13.102",
+          "142.250.154.100"
+        ],
+        "resolved_asn": "AS15169",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "142.250.154.101",
+            "142.250.154.102",
+            "142.250.154.113",
+            "142.250.154.139",
+            "142.250.154.138",
+            "142.250.154.100"
+          ],
+          "google_2": [
+            "142.250.154.113",
+            "142.250.154.102",
+            "142.250.154.138",
+            "142.250.154.100",
+            "142.250.154.139",
+            "142.250.154.101"
+          ],
+          "cloudflare_1": [
+            "192.178.183.139",
+            "192.178.183.100",
+            "192.178.183.101",
+            "192.178.183.138",
+            "192.178.183.102",
+            "192.178.183.113"
+          ],
+          "yandex": [
+            "172.217.19.238"
+          ],
+          "quad9": [
+            "142.251.20.113",
+            "142.251.20.101",
+            "142.251.20.102",
+            "142.251.20.100",
+            "142.251.20.138",
+            "142.251.20.139"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:47.675804Z",
+      "notes": null
+    },
+    {
+      "test": "dns_inopressa_ru_system",
+      "category": "dns",
+      "subcategory": "dns",
+      "target": "inopressa.ru",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "212.227.190.190"
+        ],
+        "system_ttl": 3600,
+        "isp_ips": [
+          "212.227.190.190"
+        ],
+        "doh_ips": [
+          "212.227.190.190"
+        ],
+        "resolved_asn": "AS8560",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "212.227.190.190"
+          ],
+          "google_2": [
+            "212.227.190.190"
+          ],
+          "cloudflare_1": [
+            "212.227.190.190"
+          ],
+          "yandex": [
+            "212.227.190.190"
+          ],
+          "quad9": [
+            "212.227.190.190"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:48.248371Z",
+      "notes": null
+    },
+    {
+      "test": "dns_instagram_com_system",
+      "category": "dns",
+      "subcategory": "dns",
+      "target": "instagram.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "157.240.0.174"
+        ],
+        "system_ttl": 60,
+        "isp_ips": [
+          "157.240.0.174"
+        ],
+        "doh_ips": [
+          "157.240.253.174",
+          "57.144.244.34",
+          "157.240.0.174"
+        ],
+        "resolved_asn": "AS32934",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "157.240.0.174"
+          ],
+          "google_2": [
+            "157.240.0.174"
+          ],
+          "cloudflare_1": [
+            "57.144.244.34"
+          ],
+          "yandex": [
+            "57.144.244.34"
+          ],
+          "quad9": [
+            "157.240.0.174"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:48.478219Z",
+      "notes": null
+    },
+    {
+      "test": "dns_linkedin_com_system",
+      "category": "dns",
+      "subcategory": "dns",
+      "target": "linkedin.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "150.171.22.12"
+        ],
+        "system_ttl": 42,
+        "isp_ips": [
+          "150.171.22.12"
+        ],
+        "doh_ips": [
+          "150.171.22.12"
+        ],
+        "resolved_asn": "AS8075",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "150.171.22.12"
+          ],
+          "google_2": [
+            "150.171.22.12"
+          ],
+          "cloudflare_1": [
+            "150.171.22.12"
+          ],
+          "yandex": [
+            "150.171.22.12"
+          ],
+          "quad9": [
+            "150.171.22.12"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:48.752578Z",
+      "notes": null
+    },
+    {
+      "test": "dns_mediazona_ca_system",
+      "category": "dns",
+      "subcategory": "dns",
+      "target": "mediazona.ca",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "172.67.173.185",
+          "104.21.64.6"
+        ],
+        "system_ttl": 295,
+        "isp_ips": [
+          "172.67.173.185",
+          "104.21.64.6"
+        ],
+        "doh_ips": [
+          "172.67.173.185",
+          "104.21.64.6"
+        ],
+        "resolved_asn": "AS13335",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "104.21.64.6",
+            "172.67.173.185"
+          ],
+          "google_2": [
+            "172.67.173.185",
+            "104.21.64.6"
+          ],
+          "cloudflare_1": [
+            "172.67.173.185",
+            "104.21.64.6"
+          ],
+          "yandex": [
+            "104.21.64.6",
+            "172.67.173.185"
+          ],
+          "quad9": [
+            "172.67.173.185",
+            "104.21.64.6"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:49.127798Z",
+      "notes": null
+    },
+    {
+      "test": "dns_meduza_io_system",
+      "category": "dns",
+      "subcategory": "dns",
+      "target": "meduza.io",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "104.18.1.79",
+          "104.18.0.79"
+        ],
+        "system_ttl": 300,
+        "isp_ips": [
+          "104.18.0.79",
+          "104.18.1.79"
+        ],
+        "doh_ips": [
+          "104.18.0.79",
+          "104.18.1.79"
+        ],
+        "resolved_asn": "AS13335",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "104.18.0.79",
+            "104.18.1.79"
+          ],
+          "google_2": [
+            "104.18.1.79",
+            "104.18.0.79"
+          ],
+          "cloudflare_1": [
+            "104.18.1.79",
+            "104.18.0.79"
+          ],
+          "yandex": [
+            "8.6.112.0",
+            "8.47.69.0"
+          ],
+          "quad9": [
+            "104.18.1.79",
+            "104.18.0.79"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:49.427614Z",
+      "notes": null
+    },
+    {
+      "test": "dns_mullvad_net_system",
+      "category": "dns",
+      "subcategory": "dns",
+      "target": "mullvad.net",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "45.83.223.209"
+        ],
+        "system_ttl": 56,
+        "isp_ips": [
+          "45.83.223.209"
+        ],
+        "doh_ips": [
+          "45.83.223.209"
+        ],
+        "resolved_asn": "AS39351",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "45.83.223.209"
+          ],
+          "google_2": [
+            "45.83.223.209"
+          ],
+          "cloudflare_1": [
+            "45.83.223.209"
+          ],
+          "yandex": [
+            "45.83.223.209"
+          ],
+          "quad9": [
+            "45.83.223.209"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:49.779570Z",
+      "notes": null
+    },
+    {
+      "test": "dns_nordvpn_com_system",
+      "category": "dns",
+      "subcategory": "dns",
+      "target": "nordvpn.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "104.19.159.190",
+          "104.16.208.203"
+        ],
+        "system_ttl": 300,
+        "isp_ips": [
+          "104.16.208.203",
+          "104.19.159.190"
+        ],
+        "doh_ips": [
+          "104.16.208.203",
+          "104.19.159.190"
+        ],
+        "resolved_asn": "AS13335",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "104.16.208.203",
+            "104.19.159.190"
+          ],
+          "google_2": [
+            "104.19.159.190",
+            "104.16.208.203"
+          ],
+          "cloudflare_1": [
+            "104.16.208.203",
+            "104.19.159.190"
+          ],
+          "yandex": [
+            "104.19.159.190",
+            "104.16.208.203"
+          ],
+          "quad9": [
+            "104.19.159.190",
+            "104.16.208.203"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:50.021092Z",
+      "notes": null
+    },
+    {
+      "test": "dns_novayagazeta_eu_system",
+      "category": "dns",
+      "subcategory": "dns",
+      "target": "novayagazeta.eu",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "172.66.169.237",
+          "104.20.34.97"
+        ],
+        "system_ttl": 300,
+        "isp_ips": [
+          "172.66.169.237",
+          "104.20.34.97"
+        ],
+        "doh_ips": [
+          "104.20.34.97",
+          "172.66.169.237"
+        ],
+        "resolved_asn": "AS13335",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "104.20.34.97",
+            "172.66.169.237"
+          ],
+          "google_2": [
+            "172.66.169.237",
+            "104.20.34.97"
+          ],
+          "cloudflare_1": [
+            "172.66.169.237",
+            "104.20.34.97"
+          ],
+          "yandex": [
+            "172.66.169.237",
+            "104.20.34.97"
+          ],
+          "quad9": [
+            "172.66.169.237",
+            "104.20.34.97"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:50.655333Z",
+      "notes": null
+    },
+    {
+      "test": "dns_protonvpn_com_system",
+      "category": "dns",
+      "subcategory": "dns",
+      "target": "protonvpn.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "185.159.159.140"
+        ],
+        "system_ttl": 300,
+        "isp_ips": [
+          "185.159.159.140"
+        ],
+        "doh_ips": [
+          "185.159.159.140"
+        ],
+        "resolved_asn": "AS209103",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "185.159.159.140"
+          ],
+          "google_2": [
+            "185.159.159.140"
+          ],
+          "cloudflare_1": [
+            "185.159.159.140"
+          ],
+          "yandex": [
+            "185.159.159.140"
+          ],
+          "quad9": [
+            "185.159.159.140"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:50.889511Z",
+      "notes": null
+    },
+    {
+      "test": "dns_rferl_org_system",
+      "category": "dns",
+      "subcategory": "dns",
+      "target": "rferl.org",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "184.86.103.200",
+          "184.86.103.214"
+        ],
+        "system_ttl": 12,
+        "isp_ips": [
+          "23.3.89.90"
+        ],
+        "doh_ips": [
+          "2.23.7.18",
+          "184.86.103.200",
+          "2.18.64.13",
+          "2.18.64.8",
+          "2.23.7.11",
+          "104.126.37.176",
+          "104.126.37.137",
+          "184.86.103.214"
+        ],
+        "resolved_asn": "AS20940",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "184.86.103.214",
+            "184.86.103.200"
+          ],
+          "google_2": [
+            "104.83.4.192",
+            "104.83.4.51"
+          ],
+          "cloudflare_1": [
+            "95.100.110.32",
+            "95.100.110.15"
+          ],
+          "yandex": [
+            "2.22.31.185",
+            "2.22.31.187"
+          ],
+          "quad9": [
+            "2.16.16.172",
+            "2.16.16.164"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:51.233090Z",
+      "notes": null
+    },
+    {
+      "test": "dns_signal_org_system",
+      "category": "dns",
+      "subcategory": "dns",
+      "target": "signal.org",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "104.18.11.47",
+          "104.18.10.47"
+        ],
+        "system_ttl": 300,
+        "isp_ips": [
+          "104.18.11.47",
+          "104.18.10.47"
+        ],
+        "doh_ips": [
+          "104.18.11.47",
+          "104.18.10.47"
+        ],
+        "resolved_asn": "AS13335",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "104.18.10.47",
+            "104.18.11.47"
+          ],
+          "google_2": [
+            "104.18.11.47",
+            "104.18.10.47"
+          ],
+          "cloudflare_1": [
+            "104.18.10.47",
+            "104.18.11.47"
+          ],
+          "yandex": [
+            "8.6.112.0",
+            "8.47.69.0"
+          ],
+          "quad9": [
+            "104.18.10.47",
+            "104.18.11.47"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:51.468715Z",
+      "notes": null
+    },
+    {
+      "test": "dns_tiktok_com_system",
+      "category": "dns",
+      "subcategory": "dns",
+      "target": "tiktok.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "104.126.37.153",
+          "104.126.37.123"
+        ],
+        "system_ttl": 20,
+        "isp_ips": [
+          "95.100.110.31",
+          "95.100.110.29"
+        ],
+        "doh_ips": [
+          "184.86.103.198",
+          "184.86.103.212",
+          "184.86.103.207",
+          "95.100.110.29",
+          "104.126.37.123",
+          "184.86.103.221",
+          "95.100.110.31",
+          "184.86.103.220",
+          "184.86.103.201",
+          "2.23.7.17",
+          "184.86.103.223",
+          "104.126.37.153",
+          "2.23.7.48"
+        ],
+        "resolved_asn": "AS20940",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "95.100.110.31",
+            "95.100.110.29"
+          ],
+          "google_2": [
+            "95.100.110.29",
+            "95.100.110.31"
+          ],
+          "cloudflare_1": [
+            "2.23.7.17",
+            "2.23.7.48"
+          ],
+          "yandex": [
+            "23.3.90.51",
+            "2.21.240.20",
+            "23.3.90.50",
+            "2.21.240.6",
+            "2.21.240.21",
+            "23.3.90.48",
+            "2.21.240.16",
+            "2.21.240.17"
+          ],
+          "quad9": [
+            "184.86.103.220",
+            "184.86.103.221",
+            "184.86.103.212",
+            "184.86.103.207",
+            "184.86.103.198",
+            "184.86.103.223",
+            "184.86.103.201"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:51.695434Z",
+      "notes": null
+    },
+    {
+      "test": "dns_tvrain_ru_system",
+      "category": "dns",
+      "subcategory": "dns",
+      "target": "tvrain.ru",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "109.234.211.253",
+          "109.234.211.254"
+        ],
+        "system_ttl": 293,
+        "isp_ips": [
+          "109.234.211.254",
+          "109.234.211.253"
+        ],
+        "doh_ips": [
+          "109.234.211.254",
+          "109.234.211.253"
+        ],
+        "resolved_asn": "AS13335",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "109.234.211.254",
+            "109.234.211.253"
+          ],
+          "google_2": [
+            "109.234.211.253",
+            "109.234.211.254"
+          ],
+          "cloudflare_1": [
+            "109.234.211.254",
+            "109.234.211.253"
+          ],
+          "yandex": [
+            "109.234.211.253",
+            "109.234.211.254"
+          ],
+          "quad9": [
+            "109.234.211.254",
+            "109.234.211.253"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:51.962328Z",
+      "notes": null
+    },
+    {
+      "test": "dns_twitter_com_system",
+      "category": "dns",
+      "subcategory": "dns",
+      "target": "twitter.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "151.101.66.146"
+        ],
+        "system_ttl": 293,
+        "isp_ips": [
+          "162.159.140.229"
+        ],
+        "doh_ips": [
+          "162.159.140.229",
+          "172.66.0.227"
+        ],
+        "resolved_asn": "AS54113",
+        "cert_valid": true,
+        "ip_overlap_with_doh": false,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "172.66.0.227"
+          ],
+          "google_2": [
+            "172.66.0.227"
+          ],
+          "cloudflare_1": [
+            "162.159.140.229"
+          ],
+          "yandex": [
+            "172.66.0.227"
+          ],
+          "quad9": [
+            "172.66.0.227"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:52.160539Z",
+      "notes": null
+    },
+    {
+      "test": "dns_viber_com_system",
+      "category": "dns",
+      "subcategory": "dns",
+      "target": "viber.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "54.86.99.81",
+          "34.193.149.125"
+        ],
+        "system_ttl": 60,
+        "isp_ips": [
+          "54.86.99.81",
+          "34.193.149.125"
+        ],
+        "doh_ips": [
+          "54.86.99.81",
+          "34.193.149.125"
+        ],
+        "resolved_asn": "AS14618",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "54.86.99.81",
+            "34.193.149.125"
+          ],
+          "google_2": [
+            "34.193.149.125",
+            "54.86.99.81"
+          ],
+          "cloudflare_1": [
+            "54.86.99.81",
+            "34.193.149.125"
+          ],
+          "yandex": [
+            "54.86.99.81",
+            "34.193.149.125"
+          ],
+          "quad9": [
+            "34.193.149.125",
+            "54.86.99.81"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:52.567822Z",
+      "notes": null
+    },
+    {
+      "test": "dns_vk_com_system",
+      "category": "dns",
+      "subcategory": "dns",
+      "target": "vk.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "87.240.129.133",
+          "87.240.132.67",
+          "87.240.132.72",
+          "87.240.132.78",
+          "87.240.137.164",
+          "93.186.225.194"
+        ],
+        "system_ttl": 779,
+        "isp_ips": [
+          "87.240.132.72",
+          "87.240.132.78",
+          "87.240.137.164",
+          "93.186.225.194",
+          "87.240.129.133",
+          "87.240.132.67"
+        ],
+        "doh_ips": [
+          "87.240.132.72",
+          "87.240.137.164",
+          "93.186.225.194",
+          "87.240.129.133",
+          "87.240.132.78",
+          "87.240.132.67"
+        ],
+        "resolved_asn": "AS47541",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "87.240.137.164",
+            "87.240.129.133",
+            "87.240.132.78",
+            "87.240.132.67",
+            "87.240.132.72",
+            "93.186.225.194"
+          ],
+          "google_2": [
+            "93.186.225.194",
+            "87.240.132.67",
+            "87.240.129.133",
+            "87.240.137.164",
+            "87.240.132.72",
+            "87.240.132.78"
+          ],
+          "cloudflare_1": [
+            "87.240.132.72",
+            "87.240.132.67",
+            "87.240.132.78",
+            "87.240.137.164",
+            "93.186.225.194",
+            "87.240.129.133"
+          ],
+          "yandex": [
+            "87.240.132.78",
+            "87.240.137.164",
+            "93.186.225.194",
+            "87.240.129.133",
+            "87.240.132.72",
+            "87.240.132.67"
+          ],
+          "quad9": [
+            "87.240.132.72",
+            "87.240.132.78",
+            "87.240.129.133",
+            "93.186.225.194",
+            "87.240.137.164",
+            "87.240.132.67"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:53.036572Z",
+      "notes": null
+    },
+    {
+      "test": "dns_web_telegram_org_system",
+      "category": "dns",
+      "subcategory": "dns",
+      "target": "web.telegram.org",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "149.154.167.99"
+        ],
+        "system_ttl": 694,
+        "isp_ips": [
+          "149.154.167.99"
+        ],
+        "doh_ips": [
+          "149.154.167.99"
+        ],
+        "resolved_asn": "AS62041",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "149.154.167.99"
+          ],
+          "google_2": [
+            "149.154.167.99"
+          ],
+          "cloudflare_1": [
+            "149.154.167.99"
+          ],
+          "yandex": [
+            "149.154.167.99"
+          ],
+          "quad9": [
+            "149.154.167.99"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:53.314325Z",
+      "notes": null
+    },
+    {
+      "test": "dns_web_whatsapp_com_system",
+      "category": "dns",
+      "subcategory": "dns",
+      "target": "web.whatsapp.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "157.240.0.60"
+        ],
+        "system_ttl": 2,
+        "isp_ips": [
+          "157.240.30.54"
+        ],
+        "doh_ips": [
+          "57.144.245.32",
+          "157.240.0.60"
+        ],
+        "resolved_asn": "AS32934",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "157.240.0.60"
+          ],
+          "google_2": [
+            "157.240.0.60"
+          ],
+          "cloudflare_1": [
+            "57.144.245.32"
+          ],
+          "yandex": [
+            "157.240.253.60"
+          ],
+          "quad9": [
+            "157.240.203.60"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:53.520455Z",
+      "notes": null
+    },
+    {
+      "test": "dns_weba_telegram_org_system",
+      "category": "dns",
+      "subcategory": "dns",
+      "target": "weba.telegram.org",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "149.154.167.99"
+        ],
+        "system_ttl": 700,
+        "isp_ips": [
+          "149.154.167.99"
+        ],
+        "doh_ips": [
+          "149.154.167.99"
+        ],
+        "resolved_asn": "AS62041",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "149.154.167.99"
+          ],
+          "google_2": [
+            "149.154.167.99"
+          ],
+          "cloudflare_1": [
+            "149.154.167.99"
+          ],
+          "yandex": [
+            "149.154.167.99"
+          ],
+          "quad9": [
+            "149.154.167.99"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:53.952441Z",
+      "notes": null
+    },
+    {
+      "test": "dns_webk_telegram_org_system",
+      "category": "dns",
+      "subcategory": "dns",
+      "target": "webk.telegram.org",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "149.154.167.99"
+        ],
+        "system_ttl": 700,
+        "isp_ips": [
+          "149.154.167.99"
+        ],
+        "doh_ips": [
+          "149.154.167.99"
+        ],
+        "resolved_asn": "AS62041",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "149.154.167.99"
+          ],
+          "google_2": [
+            "149.154.167.99"
+          ],
+          "cloudflare_1": [
+            "149.154.167.99"
+          ],
+          "yandex": [
+            "149.154.167.99"
+          ],
+          "quad9": [
+            "149.154.167.99"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:54.191599Z",
+      "notes": null
+    },
+    {
+      "test": "dns_whatsapp_com_system",
+      "category": "dns",
+      "subcategory": "dns",
+      "target": "whatsapp.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "157.240.30.54"
+        ],
+        "system_ttl": 13,
+        "isp_ips": [
+          "157.240.0.60"
+        ],
+        "doh_ips": [
+          "57.144.245.32",
+          "157.240.0.60"
+        ],
+        "resolved_asn": "AS32934",
+        "cert_valid": true,
+        "ip_overlap_with_doh": false,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "157.240.0.60"
+          ],
+          "google_2": [
+            "157.240.0.60"
+          ],
+          "cloudflare_1": [
+            "157.240.253.60"
+          ],
+          "yandex": [
+            "57.144.245.32"
+          ],
+          "quad9": [
+            "157.240.0.60"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:54.416178Z",
+      "notes": null
+    },
+    {
+      "test": "dns_wikipedia_org_system",
+      "category": "dns",
+      "subcategory": "dns",
+      "target": "wikipedia.org",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "185.15.59.224"
+        ],
+        "system_ttl": 180,
+        "isp_ips": [
+          "185.15.59.224"
+        ],
+        "doh_ips": [
+          "185.15.59.224"
+        ],
+        "resolved_asn": "AS14907",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "185.15.59.224"
+          ],
+          "google_2": [
+            "185.15.59.224"
+          ],
+          "cloudflare_1": [
+            "185.15.59.224"
+          ],
+          "yandex": [
+            "185.15.59.224"
+          ],
+          "quad9": [
+            "185.15.59.224"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:54.695101Z",
+      "notes": null
+    },
+    {
+      "test": "dns_yandex_ru_system",
+      "category": "dns",
+      "subcategory": "dns",
+      "target": "yandex.ru",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "77.88.44.55",
+          "77.88.55.88",
+          "5.255.255.77"
+        ],
+        "system_ttl": 191,
+        "isp_ips": [
+          "77.88.55.88",
+          "5.255.255.77",
+          "77.88.44.55"
+        ],
+        "doh_ips": [
+          "77.88.44.55",
+          "77.88.55.88",
+          "5.255.255.77"
+        ],
+        "resolved_asn": "AS208398",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "77.88.44.55",
+            "77.88.55.88",
+            "5.255.255.77"
+          ],
+          "google_2": [
+            "77.88.44.55",
+            "5.255.255.77",
+            "77.88.55.88"
+          ],
+          "cloudflare_1": [
+            "77.88.44.55",
+            "5.255.255.77",
+            "77.88.55.88"
+          ],
+          "yandex": [
+            "5.255.255.77",
+            "77.88.44.55",
+            "77.88.55.88"
+          ],
+          "quad9": [
+            "77.88.55.88",
+            "77.88.44.55",
+            "5.255.255.77"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:55.034222Z",
+      "notes": null
+    },
+    {
+      "test": "dns_youtube_com_system",
+      "category": "dns",
+      "subcategory": "dns",
+      "target": "youtube.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "system_ips": [
+          "142.251.20.93",
+          "142.251.20.136",
+          "142.251.20.190",
+          "142.251.20.91"
+        ],
+        "system_ttl": 147,
+        "isp_ips": [
+          "142.251.20.190",
+          "142.251.20.91",
+          "142.251.20.93",
+          "142.251.20.136"
+        ],
+        "doh_ips": [
+          "142.251.20.91",
+          "142.251.127.136",
+          "142.250.154.93",
+          "142.251.127.91",
+          "142.251.20.136",
+          "142.251.20.190",
+          "142.250.154.190",
+          "142.250.154.91",
+          "142.250.154.136",
+          "142.251.127.190",
+          "142.251.127.93",
+          "142.251.20.93"
+        ],
+        "resolved_asn": "AS15169",
+        "cert_valid": true,
+        "ip_overlap_with_doh": true,
+        "isp_resolver": "108.61.10.10",
+        "public_resolver_ips": {
+          "google_1": [
+            "142.251.20.136",
+            "142.251.20.93",
+            "142.251.20.91",
+            "142.251.20.190"
+          ],
+          "google_2": [
+            "142.251.20.136",
+            "142.251.20.93",
+            "142.251.20.91",
+            "142.251.20.190"
+          ],
+          "cloudflare_1": [
+            "142.251.13.93",
+            "142.251.13.136",
+            "142.251.13.91",
+            "142.251.13.190"
+          ],
+          "yandex": [
+            "64.233.162.190",
+            "64.233.162.93",
+            "64.233.162.136",
+            "64.233.162.91"
+          ],
+          "quad9": [
+            "142.251.14.91",
+            "142.251.14.136",
+            "142.251.14.93",
+            "142.251.14.190"
+          ]
+        }
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:55.412798Z",
+      "notes": null
+    },
+    {
+      "test": "tcp_1_1_1_1_443",
+      "category": "tcp",
+      "subcategory": "tcp",
+      "target": "1.1.1.1:443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "all_verdicts": [
+          "OK",
+          "OK",
+          "OK"
+        ],
+        "rtts_ms": [
+          121.40981201082468,
+          10.564732016064227,
+          36.24374099308625
+        ],
+        "rst_detection": "rtt_heuristic_no_scapy"
+      },
+      "rtt_ms": 10.564732016064227,
+      "elapsed_ms": 1715.3127660276368,
+      "attempts": 3,
+      "timestamp": "2026-05-13T20:13:44.199806Z",
+      "notes": null
+    },
+    {
+      "test": "tcp_1_1_1_1_853",
+      "category": "tcp",
+      "subcategory": "tcp",
+      "target": "1.1.1.1:853",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "all_verdicts": [
+          "OK",
+          "OK",
+          "OK"
+        ],
+        "rtts_ms": [
+          121.08997302129865,
+          10.329413984436542,
+          35.730587027501315
+        ],
+        "rst_detection": "rtt_heuristic_no_scapy"
+      },
+      "rtt_ms": 10.329413984436542,
+      "elapsed_ms": 1715.4814079985954,
+      "attempts": 3,
+      "timestamp": "2026-05-13T20:13:44.200335Z",
+      "notes": null
+    },
+    {
+      "test": "tcp_8_8_8_8_443",
+      "category": "tcp",
+      "subcategory": "tcp",
+      "target": "8.8.8.8:443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "all_verdicts": [
+          "OK",
+          "OK",
+          "OK"
+        ],
+        "rtts_ms": [
+          120.79313700087368,
+          10.402259009424597,
+          58.54652205016464
+        ],
+        "rst_detection": "rtt_heuristic_no_scapy"
+      },
+      "rtt_ms": 10.402259009424597,
+      "elapsed_ms": 1738.1487940438092,
+      "attempts": 3,
+      "timestamp": "2026-05-13T20:13:44.223327Z",
+      "notes": null
+    },
+    {
+      "test": "tcp_8_8_8_8_853",
+      "category": "tcp",
+      "subcategory": "tcp",
+      "target": "8.8.8.8:853",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "all_verdicts": [
+          "OK",
+          "OK",
+          "OK"
+        ],
+        "rtts_ms": [
+          120.31034502433613,
+          10.151695983950049,
+          35.60423600720242
+        ],
+        "rst_detection": "rtt_heuristic_no_scapy"
+      },
+      "rtt_ms": 10.151695983950049,
+      "elapsed_ms": 1714.6812539431266,
+      "attempts": 3,
+      "timestamp": "2026-05-13T20:13:44.200384Z",
+      "notes": null
+    },
+    {
+      "test": "tcp_9_9_9_9_443",
+      "category": "tcp",
+      "subcategory": "tcp",
+      "target": "9.9.9.9:443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "all_verdicts": [
+          "OK",
+          "OK",
+          "OK"
+        ],
+        "rtts_ms": [
+          120.0534530216828,
+          10.116243967786431,
+          35.92666098847985
+        ],
+        "rst_detection": "rtt_heuristic_no_scapy"
+      },
+      "rtt_ms": 10.116243967786431,
+      "elapsed_ms": 1713.8364869751967,
+      "attempts": 3,
+      "timestamp": "2026-05-13T20:13:44.199737Z",
+      "notes": null
+    },
+    {
+      "test": "tcp_77_88_8_8_443",
+      "category": "tcp",
+      "subcategory": "tcp",
+      "target": "77.88.8.8:443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "all_verdicts": [
+          "OK",
+          "OK",
+          "OK"
+        ],
+        "rtts_ms": [
+          120.02524599665776,
+          97.10416599409655,
+          105.97166902152821
+        ],
+        "rst_detection": "rtt_heuristic_no_scapy"
+      },
+      "rtt_ms": 97.10416599409655,
+      "elapsed_ms": 1923.9498879760504,
+      "attempts": 3,
+      "timestamp": "2026-05-13T20:13:44.410033Z",
+      "notes": null
+    },
+    {
+      "test": "tls_signal_org_sni_blocked",
+      "category": "tls",
+      "subcategory": "tls_sni_blocked",
+      "target": "104.18.11.47:signal.org",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "104.18.11.47",
+        "sni": "signal.org",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 23.93086301162839,
+        "rtt_total_ms": 36.784549010917544,
+        "alpn": null,
+        "cert_subject_cn": "signal.org",
+        "cert_issuer_cn": "WE1",
+        "resolve_path": "doh"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:42.837580Z",
+      "notes": null
+    },
+    {
+      "test": "tls_signal_org_sni_neutral",
+      "category": "tls",
+      "subcategory": "tls_sni_neutral",
+      "target": "104.18.11.47:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "104.18.11.47",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 3.1838190043345094,
+        "rtt_total_ms": 9.56158700864762,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:42.930926Z",
+      "notes": null
+    },
+    {
+      "test": "tls_whatsapp_com_sni_blocked",
+      "category": "tls",
+      "subcategory": "tls_sni_blocked",
+      "target": "157.240.253.60:whatsapp.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "157.240.253.60",
+        "sni": "whatsapp.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 24.666381010320038,
+        "rtt_total_ms": 30.476637999527156,
+        "alpn": null,
+        "cert_subject_cn": "*.whatsapp.net",
+        "cert_issuer_cn": "DigiCert Global G2 TLS RSA SHA256 2020 CA1",
+        "resolve_path": "doh"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:42.933324Z",
+      "notes": null
+    },
+    {
+      "test": "tls_whatsapp_com_sni_neutral",
+      "category": "tls",
+      "subcategory": "tls_sni_neutral",
+      "target": "157.240.253.60:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "157.240.253.60",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 3.774251032155007,
+        "rtt_total_ms": 9.316404000855982,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:42.958456Z",
+      "notes": null
+    },
+    {
+      "test": "tls_web_whatsapp_com_sni_blocked",
+      "category": "tls",
+      "subcategory": "tls_sni_blocked",
+      "target": "57.144.249.32:web.whatsapp.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "57.144.249.32",
+        "sni": "web.whatsapp.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 32.82091399887577,
+        "rtt_total_ms": 43.64598903339356,
+        "alpn": null,
+        "cert_subject_cn": "*.whatsapp.net",
+        "cert_issuer_cn": "DigiCert Global G2 TLS RSA SHA256 2020 CA1",
+        "resolve_path": "doh"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:42.919676Z",
+      "notes": null
+    },
+    {
+      "test": "tls_web_whatsapp_com_sni_neutral",
+      "category": "tls",
+      "subcategory": "tls_sni_neutral",
+      "target": "57.144.249.32:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "57.144.249.32",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 1.8933049868792295,
+        "rtt_total_ms": 7.445700000971556,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:42.948902Z",
+      "notes": null
+    },
+    {
+      "test": "tls_discord_com_sni_blocked",
+      "category": "tls",
+      "subcategory": "tls_sni_blocked",
+      "target": "162.159.128.233:discord.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "162.159.128.233",
+        "sni": "discord.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 27.340760978404433,
+        "rtt_total_ms": 35.234872018918395,
+        "alpn": null,
+        "cert_subject_cn": "discord.com",
+        "cert_issuer_cn": "WE1",
+        "resolve_path": "doh"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:42.935923Z",
+      "notes": null
+    },
+    {
+      "test": "tls_discord_com_sni_neutral",
+      "category": "tls",
+      "subcategory": "tls_sni_neutral",
+      "target": "162.159.128.233:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "162.159.128.233",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 2.0729239913634956,
+        "rtt_total_ms": 14.921370020601898,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:42.960120Z",
+      "notes": null
+    },
+    {
+      "test": "tls_viber_com_sni_blocked",
+      "category": "tls",
+      "subcategory": "tls_sni_blocked",
+      "target": "34.193.149.125:viber.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "34.193.149.125",
+        "sni": "viber.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 119.25673799123615,
+        "rtt_total_ms": 217.36238803714514,
+        "alpn": null,
+        "cert_subject_cn": "*.viber.com",
+        "cert_issuer_cn": "Amazon RSA 2048 M04",
+        "resolve_path": "doh"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.012873Z",
+      "notes": null
+    },
+    {
+      "test": "tls_viber_com_sni_neutral",
+      "category": "tls",
+      "subcategory": "tls_sni_neutral",
+      "target": "34.193.149.125:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "34.193.149.125",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 89.94391496526077,
+        "rtt_total_ms": 180.63537898706272,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.226711Z",
+      "notes": null
+    },
+    {
+      "test": "tls_vk_com_sni_blocked",
+      "category": "tls",
+      "subcategory": "tls_sni_blocked",
+      "target": "87.240.129.133:vk.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "87.240.129.133",
+        "sni": "vk.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 59.39282203326002,
+        "rtt_total_ms": 103.95747399888933,
+        "alpn": null,
+        "cert_subject_cn": "*.vk.com",
+        "cert_issuer_cn": "GlobalSign ECC OV SSL CA 2018",
+        "resolve_path": "doh"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.010191Z",
+      "notes": null
+    },
+    {
+      "test": "tls_vk_com_sni_neutral",
+      "category": "tls",
+      "subcategory": "tls_sni_neutral",
+      "target": "87.240.129.133:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "87.240.129.133",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 35.191309987567365,
+        "rtt_total_ms": 71.44833297934383,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.122740Z",
+      "notes": null
+    },
+    {
+      "test": "tls_yandex_ru_sni_blocked",
+      "category": "tls",
+      "subcategory": "tls_sni_blocked",
+      "target": "77.88.44.55:yandex.ru",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "77.88.44.55",
+        "sni": "yandex.ru",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 66.18463201448321,
+        "rtt_total_ms": 114.19792100787163,
+        "alpn": null,
+        "cert_subject_cn": "*.yandex.tr",
+        "cert_issuer_cn": "GlobalSign ECC OV SSL CA 2018",
+        "resolve_path": "doh"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.128656Z",
+      "notes": null
+    },
+    {
+      "test": "tls_yandex_ru_sni_neutral",
+      "category": "tls",
+      "subcategory": "tls_sni_neutral",
+      "target": "77.88.44.55:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "77.88.44.55",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 39.29407201940194,
+        "rtt_total_ms": 83.08661100454628,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.226813Z",
+      "notes": null
+    },
+    {
+      "test": "tls_wikipedia_org_sni_blocked",
+      "category": "tls",
+      "subcategory": "tls_sni_blocked",
+      "target": "185.15.59.224:wikipedia.org",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "185.15.59.224",
+        "sni": "wikipedia.org",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 29.039201966952533,
+        "rtt_total_ms": 43.98531996412203,
+        "alpn": null,
+        "cert_subject_cn": "*.wikipedia.org",
+        "cert_issuer_cn": "E7",
+        "resolve_path": "doh"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.133467Z",
+      "notes": null
+    },
+    {
+      "test": "tls_wikipedia_org_sni_neutral",
+      "category": "tls",
+      "subcategory": "tls_sni_neutral",
+      "target": "185.15.59.224:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "185.15.59.224",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 8.01232602680102,
+        "rtt_total_ms": 20.18989803036675,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.176436Z",
+      "notes": null
+    },
+    {
+      "test": "tls_google_com_sni_blocked",
+      "category": "tls",
+      "subcategory": "tls_sni_blocked",
+      "target": "192.178.183.139:google.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "192.178.183.139",
+        "sni": "google.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 22.881824988871813,
+        "rtt_total_ms": 38.38163096224889,
+        "alpn": null,
+        "cert_subject_cn": "*.google.com",
+        "cert_issuer_cn": "WE2",
+        "resolve_path": "doh"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.092404Z",
+      "notes": null
+    },
+    {
+      "test": "tls_google_com_sni_neutral",
+      "category": "tls",
+      "subcategory": "tls_sni_neutral",
+      "target": "192.178.183.139:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "192.178.183.139",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 4.400213016197085,
+        "rtt_total_ms": 16.251038992777467,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.134287Z",
+      "notes": null
+    },
+    {
+      "test": "tls_cloudflare_com_sni_blocked",
+      "category": "tls",
+      "subcategory": "tls_sni_blocked",
+      "target": "104.16.132.229:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "104.16.132.229",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 23.552528000436723,
+        "rtt_total_ms": 34.8966860328801,
+        "alpn": null,
+        "cert_subject_cn": "cloudflare.com",
+        "cert_issuer_cn": "WE1",
+        "resolve_path": "doh"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.140381Z",
+      "notes": null
+    },
+    {
+      "test": "tls_cloudflare_com_sni_neutral",
+      "category": "tls",
+      "subcategory": "tls_sni_neutral",
+      "target": "104.16.132.229:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "104.16.132.229",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 2.4291349691338837,
+        "rtt_total_ms": 9.92512097582221,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.176281Z",
+      "notes": null
+    },
+    {
+      "test": "tls_crypto_cloudflare_com_sni_blocked",
+      "category": "tls",
+      "subcategory": "tls_sni_blocked",
+      "target": "162.159.135.79:crypto.cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "162.159.135.79",
+        "sni": "crypto.cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 21.78580895997584,
+        "rtt_total_ms": 34.29735294776037,
+        "alpn": null,
+        "cert_subject_cn": "crypto.cloudflare.com",
+        "cert_issuer_cn": "WE1",
+        "resolve_path": "doh"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.224335Z",
+      "notes": null
+    },
+    {
+      "test": "tls_crypto_cloudflare_com_sni_neutral",
+      "category": "tls",
+      "subcategory": "tls_sni_neutral",
+      "target": "162.159.135.79:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "162.159.135.79",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 5.8813809882849455,
+        "rtt_total_ms": 31.612642982508987,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.268978Z",
+      "notes": null
+    },
+    {
+      "test": "tls_crypto_cloudflare_com_ech",
+      "category": "tls",
+      "subcategory": "tls_ech",
+      "target": "crypto.cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "curl_returncode": 0,
+        "ech_config_source": "https_record_doh",
+        "stderr_tail": "ttps://research.cloudflare.com\r\n< Server: cloudflare\r\n< Strict-Transport-Security: max-age=31536000; includeSubDomains\r\n< Vary: Accept-Encoding\r\n< X-Content-Type-Options: nosniff\r\n< Date: Wed, 13 May 2026 20:13:43 GMT\r\n< \r\n{ [167 bytes data]\n* Connection #0 to host crypto.cloudflare.com left intact\n"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": 413.0750569747761,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.682060Z",
+      "notes": null
+    },
+    {
+      "test": "tls_meduza_io_sni_blocked",
+      "category": "tls",
+      "subcategory": "tls_sni_blocked",
+      "target": "104.18.1.79:meduza.io",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "104.18.1.79",
+        "sni": "meduza.io",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 30.13903903774917,
+        "rtt_total_ms": 47.17012302717194,
+        "alpn": null,
+        "cert_subject_cn": "meduza.io",
+        "cert_issuer_cn": "E7",
+        "resolve_path": "doh"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.235715Z",
+      "notes": null
+    },
+    {
+      "test": "tls_meduza_io_sni_neutral",
+      "category": "tls",
+      "subcategory": "tls_sni_neutral",
+      "target": "104.18.1.79:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "104.18.1.79",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 3.4759119735099375,
+        "rtt_total_ms": 9.57067497074604,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.268836Z",
+      "notes": null
+    },
+    {
+      "test": "tls_novayagazeta_eu_sni_blocked",
+      "category": "tls",
+      "subcategory": "tls_sni_blocked",
+      "target": "104.20.34.97:novayagazeta.eu",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "104.20.34.97",
+        "sni": "novayagazeta.eu",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 24.521426996216178,
+        "rtt_total_ms": 37.7025919733569,
+        "alpn": null,
+        "cert_subject_cn": "novayagazeta.eu",
+        "cert_issuer_cn": "E8",
+        "resolve_path": "doh"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.306186Z",
+      "notes": null
+    },
+    {
+      "test": "tls_novayagazeta_eu_sni_neutral",
+      "category": "tls",
+      "subcategory": "tls_sni_neutral",
+      "target": "104.20.34.97:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "104.20.34.97",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 4.538017034064978,
+        "rtt_total_ms": 12.908214994240552,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.346663Z",
+      "notes": null
+    },
+    {
+      "test": "tls_novayagazeta_eu_ech",
+      "category": "tls",
+      "subcategory": "tls_ech",
+      "target": "novayagazeta.eu",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": "no_ech_in_https_record"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": 303.0018719728105,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.649654Z",
+      "notes": "Server has no ECH config — cannot conclude about censorship."
+    },
+    {
+      "test": "tls_mediazona_ca_sni_blocked",
+      "category": "tls",
+      "subcategory": "tls_sni_blocked",
+      "target": "172.67.173.185:mediazona.ca",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "172.67.173.185",
+        "sni": "mediazona.ca",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 24.407420016359538,
+        "rtt_total_ms": 37.030681036412716,
+        "alpn": null,
+        "cert_subject_cn": "mediazona.ca",
+        "cert_issuer_cn": "WE1",
+        "resolve_path": "doh"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.345761Z",
+      "notes": null
+    },
+    {
+      "test": "tls_mediazona_ca_sni_neutral",
+      "category": "tls",
+      "subcategory": "tls_sni_neutral",
+      "target": "172.67.173.185:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "172.67.173.185",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 2.4487010086886585,
+        "rtt_total_ms": 10.25345700327307,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.405472Z",
+      "notes": null
+    },
+    {
+      "test": "tls_mediazona_ca_ech",
+      "category": "tls",
+      "subcategory": "tls_ech",
+      "target": "mediazona.ca",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "curl_returncode": 0,
+        "ech_config_source": "https_record_doh",
+        "stderr_tail": "JNKRXZd%2BXsiq3%2BfmcTeFO%2B1xbl%2BlEegWzkMeIUOUWS%2FN5t6akV9QDCR01hZx6UA83YWfvTvNwfrbpbMmucfi%2FK1cGzcOQqosQ555lH3rXxVRBe5Tm2Q%3D\"}]}\r\n< cf-cache-status: DYNAMIC\r\n< CF-RAY: 9fb4534b5b95dbf7-FRA\r\n< alt-svc: h3=\":443\"; ma=86400\r\n< \r\n{ [724 bytes data]\n* Connection #0 to host mediazona.ca left intact\n"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": 494.06248703598976,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.899534Z",
+      "notes": null
+    },
+    {
+      "test": "tls_tvrain_ru_sni_blocked",
+      "category": "tls",
+      "subcategory": "tls_sni_blocked",
+      "target": "109.234.211.254:tvrain.ru",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "109.234.211.254",
+        "sni": "tvrain.ru",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 25.638995051849633,
+        "rtt_total_ms": 40.06941901752725,
+        "alpn": null,
+        "cert_subject_cn": "tvrain.ru",
+        "cert_issuer_cn": "WE1",
+        "resolve_path": "doh"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.407462Z",
+      "notes": null
+    },
+    {
+      "test": "tls_tvrain_ru_sni_neutral",
+      "category": "tls",
+      "subcategory": "tls_sni_neutral",
+      "target": "109.234.211.254:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "109.234.211.254",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 4.378011974040419,
+        "rtt_total_ms": 13.04774102754891,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.422893Z",
+      "notes": null
+    },
+    {
+      "test": "tls_bbc_com_sni_blocked",
+      "category": "tls",
+      "subcategory": "tls_sni_blocked",
+      "target": "151.101.0.81:bbc.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "151.101.0.81",
+        "sni": "bbc.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 26.46276098676026,
+        "rtt_total_ms": 31.73230099491775,
+        "alpn": null,
+        "cert_subject_cn": "www.bbc.com",
+        "cert_issuer_cn": "GlobalSign RSA OV SSL CA 2018",
+        "resolve_path": "doh"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.410323Z",
+      "notes": null
+    },
+    {
+      "test": "tls_bbc_com_sni_neutral",
+      "category": "tls",
+      "subcategory": "tls_sni_neutral",
+      "target": "151.101.0.81:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "151.101.0.81",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 3.4471930121071637,
+        "rtt_total_ms": 8.149121014866978,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.422572Z",
+      "notes": null
+    },
+    {
+      "test": "tls_dw_com_sni_blocked",
+      "category": "tls",
+      "subcategory": "tls_sni_blocked",
+      "target": "194.55.26.46:dw.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "194.55.26.46",
+        "sni": "dw.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 39.77670700987801,
+        "rtt_total_ms": 65.88958704378456,
+        "alpn": null,
+        "cert_subject_cn": "*.dw.com",
+        "cert_issuer_cn": "Thawte TLS RSA CA G1",
+        "resolve_path": "doh"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.464280Z",
+      "notes": null
+    },
+    {
+      "test": "tls_dw_com_sni_neutral",
+      "category": "tls",
+      "subcategory": "tls_sni_neutral",
+      "target": "194.55.26.46:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "194.55.26.46",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 20.521269005257636,
+        "rtt_total_ms": 46.712473034858704,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.517108Z",
+      "notes": null
+    },
+    {
+      "test": "tls_rferl_org_sni_blocked",
+      "category": "tls",
+      "subcategory": "tls_sni_blocked",
+      "target": "2.23.7.11:rferl.org",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "2.23.7.11",
+        "sni": "rferl.org",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 25.49140201881528,
+        "rtt_total_ms": 29.79175397194922,
+        "alpn": null,
+        "cert_subject_cn": "rfe-prod-4.cert.pangeadigital.io",
+        "cert_issuer_cn": "R12",
+        "resolve_path": "doh"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.503714Z",
+      "notes": null
+    },
+    {
+      "test": "tls_rferl_org_sni_neutral",
+      "category": "tls",
+      "subcategory": "tls_sni_neutral",
+      "target": "2.23.7.11:www.akamai.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "2.23.7.11",
+        "sni": "www.akamai.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 5.212290969211608,
+        "rtt_total_ms": 129.2676929733716,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.658706Z",
+      "notes": null
+    },
+    {
+      "test": "tls_currenttime_tv_sni_blocked",
+      "category": "tls",
+      "subcategory": "tls_sni_blocked",
+      "target": "104.126.37.168:currenttime.tv",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "104.126.37.168",
+        "sni": "currenttime.tv",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 24.273500021081418,
+        "rtt_total_ms": 31.407338043209165,
+        "alpn": null,
+        "cert_subject_cn": "rfe-prod-9.cert.pangeadigital.io",
+        "cert_issuer_cn": "R13",
+        "resolve_path": "doh"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.518930Z",
+      "notes": null
+    },
+    {
+      "test": "tls_currenttime_tv_sni_neutral",
+      "category": "tls",
+      "subcategory": "tls_sni_neutral",
+      "target": "104.126.37.168:www.akamai.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "104.126.37.168",
+        "sni": "www.akamai.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 1.9752910011447966,
+        "rtt_total_ms": 7.818260986823589,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.531374Z",
+      "notes": null
+    },
+    {
+      "test": "tls_inopressa_ru_sni_blocked",
+      "category": "tls",
+      "subcategory": "tls_sni_blocked",
+      "target": "212.227.190.190:inopressa.ru",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "212.227.190.190",
+        "sni": "inopressa.ru",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 33.66825100965798,
+        "rtt_total_ms": 74.98410798143595,
+        "alpn": null,
+        "cert_subject_cn": "*.inopressa.ru",
+        "cert_issuer_cn": "E7",
+        "resolve_path": "doh"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.724684Z",
+      "notes": null
+    },
+    {
+      "test": "tls_inopressa_ru_sni_neutral",
+      "category": "tls",
+      "subcategory": "tls_sni_neutral",
+      "target": "212.227.190.190:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "212.227.190.190",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 19.12826200714335,
+        "rtt_total_ms": 57.24519700743258,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.827285Z",
+      "notes": null
+    },
+    {
+      "test": "tls_bellingcat_com_sni_blocked",
+      "category": "tls",
+      "subcategory": "tls_sni_blocked",
+      "target": "172.66.172.84:bellingcat.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "172.66.172.84",
+        "sni": "bellingcat.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 34.69237999524921,
+        "rtt_total_ms": 46.15261702565476,
+        "alpn": null,
+        "cert_subject_cn": "bellingcat.com",
+        "cert_issuer_cn": "WE1",
+        "resolve_path": "doh"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.657678Z",
+      "notes": null
+    },
+    {
+      "test": "tls_bellingcat_com_sni_neutral",
+      "category": "tls",
+      "subcategory": "tls_sni_neutral",
+      "target": "172.66.172.84:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "172.66.172.84",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 2.7480710414238274,
+        "rtt_total_ms": 11.117776040919125,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.677241Z",
+      "notes": null
+    },
+    {
+      "test": "tls_youtube_com_sni_blocked",
+      "category": "tls",
+      "subcategory": "tls_sni_blocked",
+      "target": "142.251.127.91:youtube.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "142.251.127.91",
+        "sni": "youtube.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 24.886549974326044,
+        "rtt_total_ms": 44.907105970196426,
+        "alpn": null,
+        "cert_subject_cn": "*.google.com",
+        "cert_issuer_cn": "WE2",
+        "resolve_path": "doh"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.772865Z",
+      "notes": null
+    },
+    {
+      "test": "tls_youtube_com_sni_neutral",
+      "category": "tls",
+      "subcategory": "tls_sni_neutral",
+      "target": "142.251.127.91:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "142.251.127.91",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 2.7709949645213783,
+        "rtt_total_ms": 16.31231897044927,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.827432Z",
+      "notes": null
+    },
+    {
+      "test": "tls_instagram_com_sni_blocked",
+      "category": "tls",
+      "subcategory": "tls_sni_blocked",
+      "target": "157.240.253.174:instagram.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "157.240.253.174",
+        "sni": "instagram.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 26.433521998114884,
+        "rtt_total_ms": 32.7793940086849,
+        "alpn": null,
+        "cert_subject_cn": "*.instagram.com",
+        "cert_issuer_cn": "DigiCert Global G2 TLS RSA SHA256 2020 CA1",
+        "resolve_path": "doh"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.806697Z",
+      "notes": null
+    },
+    {
+      "test": "tls_instagram_com_sni_neutral",
+      "category": "tls",
+      "subcategory": "tls_sni_neutral",
+      "target": "157.240.253.174:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "157.240.253.174",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 11.176294006872922,
+        "rtt_total_ms": 27.638715982902795,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.881026Z",
+      "notes": null
+    },
+    {
+      "test": "tls_facebook_com_sni_blocked",
+      "category": "tls",
+      "subcategory": "tls_sni_blocked",
+      "target": "157.240.253.35:facebook.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "157.240.253.35",
+        "sni": "facebook.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 23.627293994650245,
+        "rtt_total_ms": 33.555170986801386,
+        "alpn": null,
+        "cert_subject_cn": "*.facebook.com",
+        "cert_issuer_cn": "DigiCert Global G2 TLS RSA SHA256 2020 CA1",
+        "resolve_path": "doh"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.892505Z",
+      "notes": null
+    },
+    {
+      "test": "tls_facebook_com_sni_neutral",
+      "category": "tls",
+      "subcategory": "tls_sni_neutral",
+      "target": "157.240.253.35:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "157.240.253.35",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 2.37451697466895,
+        "rtt_total_ms": 7.566404994577169,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.928935Z",
+      "notes": null
+    },
+    {
+      "test": "tls_twitter_com_sni_blocked",
+      "category": "tls",
+      "subcategory": "tls_sni_blocked",
+      "target": "172.66.0.227:twitter.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "172.66.0.227",
+        "sni": "twitter.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 24.79152602609247,
+        "rtt_total_ms": 43.411958031356335,
+        "alpn": null,
+        "cert_subject_cn": "twitter.com",
+        "cert_issuer_cn": "E7",
+        "resolve_path": "doh"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.877480Z",
+      "notes": null
+    },
+    {
+      "test": "tls_twitter_com_sni_neutral",
+      "category": "tls",
+      "subcategory": "tls_sni_neutral",
+      "target": "172.66.0.227:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "172.66.0.227",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 4.426972009241581,
+        "rtt_total_ms": 9.313596994616091,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.895993Z",
+      "notes": null
+    },
+    {
+      "test": "tls_tiktok_com_sni_blocked",
+      "category": "tls",
+      "subcategory": "tls_sni_blocked",
+      "target": "184.86.103.221:tiktok.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "184.86.103.221",
+        "sni": "tiktok.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 21.460893971379846,
+        "rtt_total_ms": 29.163354018237442,
+        "alpn": null,
+        "cert_subject_cn": "*.tiktok.com",
+        "cert_issuer_cn": "RapidSSL TLS ECC CA G1",
+        "resolve_path": "doh"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.967651Z",
+      "notes": null
+    },
+    {
+      "test": "tls_tiktok_com_sni_neutral",
+      "category": "tls",
+      "subcategory": "tls_sni_neutral",
+      "target": "184.86.103.221:cloudflare.com",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "184.86.103.221",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": false,
+        "error": "ssl_error",
+        "detail": "[SSL: TLSV1_ALERT_INTERNAL_ERROR] tlsv1 alert internal error (_ssl.c:1010)"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 3,
+      "timestamp": "2026-05-13T20:13:44.127631Z",
+      "notes": null
+    },
+    {
+      "test": "tls_linkedin_com_sni_blocked",
+      "category": "tls",
+      "subcategory": "tls_sni_blocked",
+      "target": "150.171.22.12:linkedin.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "150.171.22.12",
+        "sni": "linkedin.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 30.334933020640165,
+        "rtt_total_ms": 65.65799604868516,
+        "alpn": null,
+        "cert_subject_cn": "www.linkedin.com",
+        "cert_issuer_cn": "DigiCert Global G2 TLS RSA SHA256 2020 CA1",
+        "resolve_path": "doh"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:44.064222Z",
+      "notes": null
+    },
+    {
+      "test": "tls_linkedin_com_sni_neutral",
+      "category": "tls",
+      "subcategory": "tls_sni_neutral",
+      "target": "150.171.22.12:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "150.171.22.12",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 7.581080950330943,
+        "rtt_total_ms": 34.16880196891725,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:44.128089Z",
+      "notes": null
+    },
+    {
+      "test": "tls_nordvpn_com_sni_blocked",
+      "category": "tls",
+      "subcategory": "tls_sni_blocked",
+      "target": "104.16.208.203:nordvpn.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "104.16.208.203",
+        "sni": "nordvpn.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 22.329794999677688,
+        "rtt_total_ms": 40.124338993337005,
+        "alpn": null,
+        "cert_subject_cn": "*.nordvpn.com",
+        "cert_issuer_cn": "Sectigo Public Server Authentication CA DV R36",
+        "resolve_path": "doh"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:44.007518Z",
+      "notes": null
+    },
+    {
+      "test": "tls_nordvpn_com_sni_neutral",
+      "category": "tls",
+      "subcategory": "tls_sni_neutral",
+      "target": "104.16.208.203:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "104.16.208.203",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 2.7816329966299236,
+        "rtt_total_ms": 10.568352008704096,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:44.053294Z",
+      "notes": null
+    },
+    {
+      "test": "tls_protonvpn_com_sni_blocked",
+      "category": "tls",
+      "subcategory": "tls_sni_blocked",
+      "target": "185.159.159.140:protonvpn.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "185.159.159.140",
+        "sni": "protonvpn.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 45.25411099893972,
+        "rtt_total_ms": 78.31460697343573,
+        "alpn": null,
+        "cert_subject_cn": "protonmail.com",
+        "cert_issuer_cn": "R13",
+        "resolve_path": "doh"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:44.130159Z",
+      "notes": null
+    },
+    {
+      "test": "tls_protonvpn_com_sni_neutral",
+      "category": "tls",
+      "subcategory": "tls_sni_neutral",
+      "target": "185.159.159.140:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "185.159.159.140",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 26.953802967909724,
+        "rtt_total_ms": 59.035432001110166,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:44.190368Z",
+      "notes": null
+    },
+    {
+      "test": "tls_expressvpn_com_sni_blocked",
+      "category": "tls",
+      "subcategory": "tls_sni_blocked",
+      "target": "18.66.112.113:expressvpn.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "18.66.112.113",
+        "sni": "expressvpn.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 25.491364998742938,
+        "rtt_total_ms": 34.70415197080001,
+        "alpn": null,
+        "cert_subject_cn": "expressvpn.com",
+        "cert_issuer_cn": "Amazon RSA 2048 M01",
+        "resolve_path": "doh"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:44.135847Z",
+      "notes": null
+    },
+    {
+      "test": "tls_expressvpn_com_sni_neutral",
+      "category": "tls",
+      "subcategory": "tls_sni_neutral",
+      "target": "18.66.112.113:aws.amazon.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "18.66.112.113",
+        "sni": "aws.amazon.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 2.4170540273189545,
+        "rtt_total_ms": 12.13639200432226,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:44.149989Z",
+      "notes": null
+    },
+    {
+      "test": "tls_mullvad_net_sni_blocked",
+      "category": "tls",
+      "subcategory": "tls_sni_blocked",
+      "target": "45.83.223.209:mullvad.net",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "45.83.223.209",
+        "sni": "mullvad.net",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 30.685806996189058,
+        "rtt_total_ms": 45.69471598370001,
+        "alpn": null,
+        "cert_subject_cn": "mullvad.net",
+        "cert_issuer_cn": "E7",
+        "resolve_path": "doh"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:44.157050Z",
+      "notes": null
+    },
+    {
+      "test": "tls_mullvad_net_sni_neutral",
+      "category": "tls",
+      "subcategory": "tls_sni_neutral",
+      "target": "45.83.223.209:cloudflare.com",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "ip": "45.83.223.209",
+        "sni": "cloudflare.com",
+        "port": 443,
+        "ok": true,
+        "rtt_connect_ms": 10.741124977357686,
+        "rtt_total_ms": 23.859874985646456,
+        "alpn": null,
+        "cert_subject_cn": null,
+        "cert_issuer_cn": null
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:44.183663Z",
+      "notes": null
+    },
+    {
+      "test": "http_signal_org",
+      "category": "http",
+      "subcategory": "http",
+      "target": "https://signal.org/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 22194,
+        "tls_ok": true,
+        "final_url": "https://signal.org/",
+        "content_type": "text/html; charset=utf-8"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.974546Z",
+      "notes": null
+    },
+    {
+      "test": "http_whatsapp_com__832d23",
+      "category": "http",
+      "subcategory": "http",
+      "target": "https://www.whatsapp.com/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 48775,
+        "tls_ok": true,
+        "final_url": "https://www.whatsapp.com/",
+        "content_type": "text/html; charset=\"utf-8\""
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:44.614708Z",
+      "notes": null
+    },
+    {
+      "test": "http_web_whatsapp_com",
+      "category": "http",
+      "subcategory": "http",
+      "target": "https://web.whatsapp.com/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 87564,
+        "tls_ok": true,
+        "final_url": "https://web.whatsapp.com/",
+        "content_type": "text/html; charset=\"utf-8\""
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:44.200987Z",
+      "notes": null
+    },
+    {
+      "test": "http_discord_com",
+      "category": "http",
+      "subcategory": "http",
+      "target": "https://discord.com/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 23228,
+        "tls_ok": true,
+        "final_url": "https://discord.com/",
+        "content_type": "text/html; charset=utf-8"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:44.176355Z",
+      "notes": null
+    },
+    {
+      "test": "http_viber_com__118c39",
+      "category": "http",
+      "subcategory": "http",
+      "target": "https://www.viber.com/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 52584,
+        "tls_ok": true,
+        "final_url": "https://www.viber.com/ru/",
+        "content_type": "text/html; charset=UTF-8"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:44.127480Z",
+      "notes": null
+    },
+    {
+      "test": "http_vk_com",
+      "category": "http",
+      "subcategory": "http",
+      "target": "https://vk.com/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 163208,
+        "tls_ok": true,
+        "final_url": "https://vk.com/",
+        "content_type": "text/html; charset=windows-1251"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:44.151906Z",
+      "notes": null
+    },
+    {
+      "test": "http_yandex_ru",
+      "category": "http",
+      "subcategory": "http",
+      "target": "https://yandex.ru/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 2451,
+        "tls_ok": true,
+        "final_url": "https://sso.passport.yandex.ru/push?uuid=b506c78c-178c-42cd-9c46-33251aa1b95d&retpath=https%3A%2F%2Fdzen.ru%2F%3Fyredirect%3Dtrue%26is_autologin_ya%3Dtrue",
+        "content_type": "text/html; charset=utf-8"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:44.053801Z",
+      "notes": null
+    },
+    {
+      "test": "http_wikipedia_org__75e5d8",
+      "category": "http",
+      "subcategory": "http",
+      "target": "https://ru.wikipedia.org/wiki/%D0%97%D0%B0%D0%B3%D0%BB%D0%B0%D0%B2%D0%BD%D0%B0%D1%8F_%D1%81%D1%82%D1%80%D0%B0%D0%BD%D0%B8%D1%86%D0%B0",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 223027,
+        "tls_ok": true,
+        "final_url": "https://ru.wikipedia.org/wiki/%D0%97%D0%B0%D0%B3%D0%BB%D0%B0%D0%B2%D0%BD%D0%B0%D1%8F_%D1%81%D1%82%D1%80%D0%B0%D0%BD%D0%B8%D1%86%D0%B0",
+        "content_type": "text/html; charset=UTF-8"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.960943Z",
+      "notes": null
+    },
+    {
+      "test": "http_wikipedia_org__2ced9d",
+      "category": "http",
+      "subcategory": "http",
+      "target": "https://en.wikipedia.org/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 234287,
+        "tls_ok": true,
+        "final_url": "https://en.wikipedia.org/wiki/Main_Page",
+        "content_type": "text/html; charset=UTF-8"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:44.307143Z",
+      "notes": null
+    },
+    {
+      "test": "http_google_com__595c3c",
+      "category": "http",
+      "subcategory": "http",
+      "target": "https://www.google.com/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 83052,
+        "tls_ok": true,
+        "final_url": "https://www.google.com/",
+        "content_type": "text/html; charset=UTF-8"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:44.415497Z",
+      "notes": null
+    },
+    {
+      "test": "http_cloudflare_com__c453b3",
+      "category": "http",
+      "subcategory": "http",
+      "target": "https://www.cloudflare.com/cdn-cgi/trace",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 254,
+        "tls_ok": true,
+        "final_url": "https://www.cloudflare.com/cdn-cgi/trace",
+        "content_type": "text/plain"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:44.249838Z",
+      "notes": null
+    },
+    {
+      "test": "http_crypto_cloudflare_com__814f39",
+      "category": "http",
+      "subcategory": "http",
+      "target": "https://crypto.cloudflare.com/cdn-cgi/trace",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 310,
+        "tls_ok": true,
+        "final_url": "https://crypto.cloudflare.com/cdn-cgi/trace",
+        "content_type": "text/plain"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:44.296156Z",
+      "notes": null
+    },
+    {
+      "test": "http_meduza_io",
+      "category": "http",
+      "subcategory": "http",
+      "target": "https://meduza.io/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 374625,
+        "tls_ok": true,
+        "final_url": "https://meduza.io/",
+        "content_type": "text/html; charset=utf-8"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:44.376950Z",
+      "notes": null
+    },
+    {
+      "test": "http_novayagazeta_eu",
+      "category": "http",
+      "subcategory": "http",
+      "target": "https://novayagazeta.eu/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 32996,
+        "tls_ok": true,
+        "final_url": "https://novayagazeta.eu/",
+        "content_type": "text/html; charset=UTF-8"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:44.341394Z",
+      "notes": null
+    },
+    {
+      "test": "http_mediazona_ca",
+      "category": "http",
+      "subcategory": "http",
+      "target": "https://mediazona.ca/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 20928,
+        "tls_ok": true,
+        "final_url": "https://mediazona.ca/",
+        "content_type": "text/html; charset=utf-8"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:44.398814Z",
+      "notes": null
+    },
+    {
+      "test": "http_tvrain_ru",
+      "category": "http",
+      "subcategory": "http",
+      "target": "https://tvrain.ru/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 165825,
+        "tls_ok": true,
+        "final_url": "https://tvrain.tv/",
+        "content_type": "text/html; charset=utf-8"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:44.877666Z",
+      "notes": null
+    },
+    {
+      "test": "http_bbc_com__4be679",
+      "category": "http",
+      "subcategory": "http",
+      "target": "https://www.bbc.com/russian/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 524292,
+        "tls_ok": true,
+        "final_url": "https://www.bbc.com/russian",
+        "content_type": "text/html; charset=utf-8"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:44.476997Z",
+      "notes": null
+    },
+    {
+      "test": "http_dw_com__8747ff",
+      "category": "http",
+      "subcategory": "http",
+      "target": "https://www.dw.com/ru/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 285279,
+        "tls_ok": true,
+        "final_url": "https://www.dw.com/ru/%D1%82%D0%B5%D0%BC%D1%8B-%D0%B4%D0%BD%D1%8F/s-9119",
+        "content_type": "text/html; charset=utf-8"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:44.516806Z",
+      "notes": null
+    },
+    {
+      "test": "http_rferl_org__f0d0bb",
+      "category": "http",
+      "subcategory": "http",
+      "target": "https://www.rferl.org/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 132603,
+        "tls_ok": true,
+        "final_url": "https://www.rferl.org/",
+        "content_type": "text/html; charset=utf-8"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:44.663036Z",
+      "notes": null
+    },
+    {
+      "test": "http_currenttime_tv__4de7ad",
+      "category": "http",
+      "subcategory": "http",
+      "target": "https://www.currenttime.tv/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 175096,
+        "tls_ok": true,
+        "final_url": "https://www.currenttime.tv/",
+        "content_type": "text/html; charset=utf-8"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:44.470143Z",
+      "notes": null
+    },
+    {
+      "test": "http_inopressa_ru__dd783d",
+      "category": "http",
+      "subcategory": "http",
+      "target": "https://www.inopressa.ru/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 44827,
+        "tls_ok": true,
+        "final_url": "https://www.inopressa.ru/",
+        "content_type": "text/html; charset=windows-1251;"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:44.593005Z",
+      "notes": null
+    },
+    {
+      "test": "http_bellingcat_com__dc1655",
+      "category": "http",
+      "subcategory": "http",
+      "target": "https://www.bellingcat.com/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 19973,
+        "tls_ok": true,
+        "final_url": "https://www.bellingcat.com/",
+        "content_type": "text/html; charset=UTF-8"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:44.615453Z",
+      "notes": null
+    },
+    {
+      "test": "http_youtube_com__fef0e9",
+      "category": "http",
+      "subcategory": "http",
+      "target": "https://www.youtube.com/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 80219,
+        "tls_ok": true,
+        "final_url": "https://www.youtube.com/",
+        "content_type": "text/html; charset=utf-8"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:45.029594Z",
+      "notes": null
+    },
+    {
+      "test": "http_instagram_com__e730d8",
+      "category": "http",
+      "subcategory": "http",
+      "target": "https://www.instagram.com/",
+      "verdict": "ANOMALY",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 429,
+        "body_length": 0,
+        "tls_ok": true,
+        "final_url": "https://www.instagram.com/accounts/login/?next=https%3A%2F%2Fwww.instagram.com%2F&is_from_rle",
+        "content_type": "text/html; charset=\"utf-8\""
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:44.973980Z",
+      "notes": null
+    },
+    {
+      "test": "http_facebook_com__108ec1",
+      "category": "http",
+      "subcategory": "http",
+      "target": "https://www.facebook.com/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 78153,
+        "tls_ok": true,
+        "final_url": "https://www.facebook.com/",
+        "content_type": "text/html; charset=\"utf-8\""
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:45.574489Z",
+      "notes": null
+    },
+    {
+      "test": "http_twitter_com",
+      "category": "http",
+      "subcategory": "http",
+      "target": "https://twitter.com/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 266706,
+        "tls_ok": true,
+        "final_url": "https://x.com/",
+        "content_type": "text/html; charset=utf-8"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:45.203782Z",
+      "notes": null
+    },
+    {
+      "test": "http_twitter_com__c95ba9",
+      "category": "http",
+      "subcategory": "http",
+      "target": "https://x.com/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 266706,
+        "tls_ok": true,
+        "final_url": "https://x.com/",
+        "content_type": "text/html; charset=utf-8"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:45.104217Z",
+      "notes": null
+    },
+    {
+      "test": "http_tiktok_com__52b897",
+      "category": "http",
+      "subcategory": "http",
+      "target": "https://www.tiktok.com/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 88538,
+        "tls_ok": true,
+        "final_url": "https://www.tiktok.com/",
+        "content_type": "text/html; charset=utf-8"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:45.102625Z",
+      "notes": null
+    },
+    {
+      "test": "http_linkedin_com__d0d41a",
+      "category": "http",
+      "subcategory": "http",
+      "target": "https://www.linkedin.com/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 153954,
+        "tls_ok": true,
+        "final_url": "https://www.linkedin.com/",
+        "content_type": "text/html; charset=utf-8"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:45.229189Z",
+      "notes": null
+    },
+    {
+      "test": "http_nordvpn_com",
+      "category": "http",
+      "subcategory": "http",
+      "target": "https://nordvpn.com/",
+      "verdict": "GEOBLOCK_NOT_CENSORSHIP",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 403,
+        "body_length": 3295,
+        "tls_ok": true,
+        "final_url": "https://nordvpn.com/",
+        "content_type": "text/html; charset=UTF-8"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:44.930531Z",
+      "notes": null
+    },
+    {
+      "test": "http_protonvpn_com",
+      "category": "http",
+      "subcategory": "http",
+      "target": "https://protonvpn.com/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 335878,
+        "tls_ok": true,
+        "final_url": "https://protonvpn.com/",
+        "content_type": "text/html; charset=utf-8"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:45.207982Z",
+      "notes": null
+    },
+    {
+      "test": "http_expressvpn_com__d8e42a",
+      "category": "http",
+      "subcategory": "http",
+      "target": "https://www.expressvpn.com/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 79765,
+        "tls_ok": true,
+        "final_url": "https://www.expressvpn.com/",
+        "content_type": "text/html"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:45.228504Z",
+      "notes": null
+    },
+    {
+      "test": "http_mullvad_net",
+      "category": "http",
+      "subcategory": "http",
+      "target": "https://mullvad.net/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "status": 200,
+        "body_length": 60777,
+        "tls_ok": true,
+        "final_url": "https://mullvad.net/ru",
+        "content_type": "text/html"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:45.237443Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_ipv6_skipped",
+      "category": "telegram",
+      "subcategory": "telegram_meta",
+      "target": "ipv6",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 0.0,
+      "evidence": {
+        "reason": "host_has_no_ipv6",
+        "skipped_endpoints": 15
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:42.592020Z",
+      "notes": "IPv6 unavailable on probe host — DC v6 endpoints not tested."
+    },
+    {
+      "test": "telegram_dc1_v4_443",
+      "category": "telegram",
+      "subcategory": "telegram_dc",
+      "target": "149.154.175.53:443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 345.3,
+        "mtproto_response": false,
+        "response_bytes": 0,
+        "probe_total_ms": 5346.4
+      },
+      "rtt_ms": 345.3499239985831,
+      "elapsed_ms": 5347.200877033174,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:47.939771Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_dc1_v4_80",
+      "category": "telegram",
+      "subcategory": "telegram_dc",
+      "target": "149.154.175.53:80",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 345.2,
+        "mtproto_response": false,
+        "response_bytes": 0,
+        "probe_total_ms": 5346.3
+      },
+      "rtt_ms": 345.23755102418363,
+      "elapsed_ms": 5347.047438030131,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:47.939840Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_dc1_v4_5222",
+      "category": "telegram",
+      "subcategory": "telegram_dc",
+      "target": "149.154.175.53:5222",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 345.3,
+        "mtproto_response": false,
+        "response_bytes": 0,
+        "probe_total_ms": 5346.4
+      },
+      "rtt_ms": 345.26851400732994,
+      "elapsed_ms": 5346.963411022443,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:47.940057Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_dc2_v4_443",
+      "category": "telegram",
+      "subcategory": "telegram_dc",
+      "target": "149.154.167.51:443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 27.8,
+        "mtproto_response": false,
+        "response_bytes": 0,
+        "probe_total_ms": 5030.2
+      },
+      "rtt_ms": 27.82760397531092,
+      "elapsed_ms": 5030.670320964418,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:47.624085Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_dc2_v4_80",
+      "category": "telegram",
+      "subcategory": "telegram_dc",
+      "target": "149.154.167.51:80",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 16.7,
+        "mtproto_response": false,
+        "response_bytes": 0,
+        "probe_total_ms": 5018.2
+      },
+      "rtt_ms": 16.73781097633764,
+      "elapsed_ms": 5018.666044052225,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:47.612228Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_dc2_v4_5222",
+      "category": "telegram",
+      "subcategory": "telegram_dc",
+      "target": "149.154.167.51:5222",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 16.8,
+        "mtproto_response": false,
+        "response_bytes": 0,
+        "probe_total_ms": 5018.2
+      },
+      "rtt_ms": 16.755600983742625,
+      "elapsed_ms": 5018.528507032897,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:47.612377Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_dc3_v4_443",
+      "category": "telegram",
+      "subcategory": "telegram_dc",
+      "target": "149.154.175.100:443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 344.3,
+        "mtproto_response": false,
+        "response_bytes": 0,
+        "probe_total_ms": 5345.2
+      },
+      "rtt_ms": 344.32146803010255,
+      "elapsed_ms": 5346.246172965039,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:47.939592Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_dc3_v4_80",
+      "category": "telegram",
+      "subcategory": "telegram_dc",
+      "target": "149.154.175.100:80",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 344.4,
+        "mtproto_response": false,
+        "response_bytes": 0,
+        "probe_total_ms": 5345.5
+      },
+      "rtt_ms": 344.4041080074385,
+      "elapsed_ms": 5346.17050900124,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:47.939932Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_dc3_v4_5222",
+      "category": "telegram",
+      "subcategory": "telegram_dc",
+      "target": "149.154.175.100:5222",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 344.3,
+        "mtproto_response": false,
+        "response_bytes": 0,
+        "probe_total_ms": 5345.4
+      },
+      "rtt_ms": 344.3440279806964,
+      "elapsed_ms": 5346.083895012271,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:47.940003Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_dc4_v4_443",
+      "category": "telegram",
+      "subcategory": "telegram_dc",
+      "target": "149.154.167.91:443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 16.5,
+        "mtproto_response": false,
+        "response_bytes": 0,
+        "probe_total_ms": 5017.8
+      },
+      "rtt_ms": 16.46204199641943,
+      "elapsed_ms": 5018.0679929908365,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:47.612448Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_dc4_v4_80",
+      "category": "telegram",
+      "subcategory": "telegram_dc",
+      "target": "149.154.167.91:80",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 27.0,
+        "mtproto_response": false,
+        "response_bytes": 0,
+        "probe_total_ms": 5029.5
+      },
+      "rtt_ms": 27.0336180110462,
+      "elapsed_ms": 5029.761151992716,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:47.624242Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_dc4_v4_5222",
+      "category": "telegram",
+      "subcategory": "telegram_dc",
+      "target": "149.154.167.91:5222",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 27.0,
+        "mtproto_response": false,
+        "response_bytes": 0,
+        "probe_total_ms": 5029.4
+      },
+      "rtt_ms": 26.996311964467168,
+      "elapsed_ms": 5029.6679949969985,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:47.624321Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_dc5_v4_443",
+      "category": "telegram",
+      "subcategory": "telegram_dc",
+      "target": "91.108.56.130:443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 344.1,
+        "mtproto_response": false,
+        "response_bytes": 0,
+        "probe_total_ms": 5345.2
+      },
+      "rtt_ms": 344.0653959987685,
+      "elapsed_ms": 5345.661355997436,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:47.940190Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_dc5_v4_80",
+      "category": "telegram",
+      "subcategory": "telegram_dc",
+      "target": "91.108.56.130:80",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 343.9,
+        "mtproto_response": false,
+        "response_bytes": 0,
+        "probe_total_ms": 5345.0
+      },
+      "rtt_ms": 343.8726960448548,
+      "elapsed_ms": 5345.53639695514,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:47.940109Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_dc5_v4_5222",
+      "category": "telegram",
+      "subcategory": "telegram_dc",
+      "target": "91.108.56.130:5222",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 343.6,
+        "mtproto_response": false,
+        "response_bytes": 0,
+        "probe_total_ms": 5344.8
+      },
+      "rtt_ms": 343.64368999376893,
+      "elapsed_ms": 5345.208265003748,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:47.940242Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_web_web_telegram_org",
+      "category": "telegram",
+      "subcategory": "telegram_web",
+      "target": "https://web.telegram.org/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": 200
+      },
+      "rtt_ms": 78.3436720375903,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:48.036097Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_web_webk_telegram_org",
+      "category": "telegram",
+      "subcategory": "telegram_web",
+      "target": "https://webk.telegram.org/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": 200
+      },
+      "rtt_ms": 69.07725997734815,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:48.027886Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_web_weba_telegram_org",
+      "category": "telegram",
+      "subcategory": "telegram_web",
+      "target": "https://weba.telegram.org/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": 200
+      },
+      "rtt_ms": 61.59335601842031,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:48.021068Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_aux_core_telegram_org",
+      "category": "telegram",
+      "subcategory": "telegram_aux",
+      "target": "https://core.telegram.org/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": 200
+      },
+      "rtt_ms": 141.75169699592516,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:48.249759Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_aux_my_telegram_org",
+      "category": "telegram",
+      "subcategory": "telegram_aux",
+      "target": "https://my.telegram.org/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": 200
+      },
+      "rtt_ms": 146.51998196495697,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:48.256094Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_aux_translations_telegram_org",
+      "category": "telegram",
+      "subcategory": "telegram_aux",
+      "target": "https://translations.telegram.org/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": 200
+      },
+      "rtt_ms": 139.54083202406764,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:48.250004Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_aux_t_me",
+      "category": "telegram",
+      "subcategory": "telegram_aux",
+      "target": "https://t.me/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": 200
+      },
+      "rtt_ms": 159.48343399213627,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:48.270754Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_aux_telegram_org",
+      "category": "telegram",
+      "subcategory": "telegram_aux",
+      "target": "https://telegram.org/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": 200
+      },
+      "rtt_ms": 129.34894498903304,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:48.241329Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_aux_desktop_telegram_org",
+      "category": "telegram",
+      "subcategory": "telegram_aux",
+      "target": "https://desktop.telegram.org/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": 200
+      },
+      "rtt_ms": 123.78735898528248,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:48.236705Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_aux_macos_telegram_org",
+      "category": "telegram",
+      "subcategory": "telegram_aux",
+      "target": "https://macos.telegram.org/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": 200
+      },
+      "rtt_ms": 133.93154100049287,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:48.248156Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_cdn_cdn_telegram_org",
+      "category": "telegram",
+      "subcategory": "telegram_cdn",
+      "target": "https://cdn.telegram.org/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": 200
+      },
+      "rtt_ms": 184.03734400635585,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:48.472895Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_cdn_cdn1_cdn_telegram_org",
+      "category": "telegram",
+      "subcategory": "telegram_cdn",
+      "target": "https://cdn1.cdn-telegram.org/",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 0.0,
+      "evidence": {
+        "error": "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: Hostname mismatch, certificate is not valid for 'cdn1.cdn-telegram.org'. (_ssl.c:1010)",
+        "reason": "wrong_cert_owned_family",
+        "cert_san_match": "*.t.me"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:49.110289Z",
+      "notes": "TLS hostname check failed but cert is system-trusted and belongs to the Telegram-owned domain family — authentic but misrouted endpoint, not censorship."
+    },
+    {
+      "test": "telegram_cdn_cdn4_cdn_telegram_org",
+      "category": "telegram",
+      "subcategory": "telegram_cdn",
+      "target": "https://cdn4.cdn-telegram.org/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": 200
+      },
+      "rtt_ms": 147.97974401153624,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:48.438393Z",
+      "notes": null
+    },
+    {
+      "test": "telegram_cdn_cdn5_cdn_telegram_org",
+      "category": "telegram",
+      "subcategory": "telegram_cdn",
+      "target": "https://cdn5.cdn-telegram.org/",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 0.0,
+      "evidence": {
+        "error": "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: Hostname mismatch, certificate is not valid for 'cdn5.cdn-telegram.org'. (_ssl.c:1010)",
+        "reason": "wrong_cert_owned_family",
+        "cert_san_match": "*.t.me"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:55.308016Z",
+      "notes": "TLS hostname check failed but cert is system-trusted and belongs to the Telegram-owned domain family — authentic but misrouted endpoint, not censorship."
+    },
+    {
+      "test": "telegram_health_score",
+      "category": "telegram",
+      "subcategory": "telegram_health",
+      "target": "telegram",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "health_score": 1.0,
+        "health_pct": 100.0
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:55.319538Z",
+      "notes": null
+    },
+    {
+      "test": "cloudflare_quic_1111",
+      "category": "cloudflare",
+      "subcategory": "cloudflare_quic",
+      "target": "udp://1.1.1.1:443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "response_bytes": 23,
+        "is_version_negotiation": true,
+        "note": "UDP 443 passes TSPU — QUIC/HTTP3 accessible"
+      },
+      "rtt_ms": 80.13220096472651,
+      "elapsed_ms": 80.34360397141427,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:42.598068Z",
+      "notes": null
+    },
+    {
+      "test": "cloudflare_quic_1001",
+      "category": "cloudflare",
+      "subcategory": "cloudflare_quic",
+      "target": "udp://1.0.0.1:443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "response_bytes": 23,
+        "is_version_negotiation": true,
+        "note": "UDP 443 passes TSPU — QUIC/HTTP3 accessible"
+      },
+      "rtt_ms": 80.1454980392009,
+      "elapsed_ms": 80.25027700932696,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:42.598311Z",
+      "notes": null
+    },
+    {
+      "test": "cloudflare_quic_warp_masque",
+      "category": "cloudflare",
+      "subcategory": "cloudflare_quic",
+      "target": "udp://162.159.197.10:443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "response_bytes": 23,
+        "is_version_negotiation": true,
+        "note": "UDP 443 passes TSPU — QUIC/HTTP3 accessible"
+      },
+      "rtt_ms": 80.07096796063706,
+      "elapsed_ms": 80.14096197439358,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:42.598362Z",
+      "notes": null
+    },
+    {
+      "test": "google_quic_dns",
+      "category": "cloudflare",
+      "subcategory": "cloudflare_quic",
+      "target": "udp://8.8.8.8:443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "response_bytes": 31,
+        "is_version_negotiation": true,
+        "note": "UDP 443 passes TSPU — QUIC/HTTP3 accessible"
+      },
+      "rtt_ms": 80.09680500254035,
+      "elapsed_ms": 80.17014100914821,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:42.598500Z",
+      "notes": null
+    },
+    {
+      "test": "quad9_quic_dns",
+      "category": "cloudflare",
+      "subcategory": "cloudflare_quic",
+      "target": "udp://9.9.9.9:443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "response_bytes": 23,
+        "is_version_negotiation": true,
+        "note": "UDP 443 passes TSPU — QUIC/HTTP3 accessible"
+      },
+      "rtt_ms": 79.69290297478437,
+      "elapsed_ms": 79.79422900825739,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:42.598220Z",
+      "notes": null
+    },
+    {
+      "test": "cloudflare_warp_engage_api",
+      "category": "cloudflare",
+      "subcategory": "cloudflare_warp",
+      "target": "tcp://engage.cloudflareclient.com:443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 87.6
+      },
+      "rtt_ms": 87.60598697699606,
+      "elapsed_ms": 88.88656698400155,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:42.606235Z",
+      "notes": null
+    },
+    {
+      "test": "cloudflare_warp_connectivity_check",
+      "category": "cloudflare",
+      "subcategory": "cloudflare_warp",
+      "target": "tcp://connectivity.cloudflareclient.com:443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 87.6
+      },
+      "rtt_ms": 87.61493099154904,
+      "elapsed_ms": 88.7960929539986,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:42.606383Z",
+      "notes": null
+    },
+    {
+      "test": "cloudflare_warp_zt_orchestration",
+      "category": "cloudflare",
+      "subcategory": "cloudflare_warp",
+      "target": "tcp://zero-trust-client.cloudflareclient.com:443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 87.1
+      },
+      "rtt_ms": 87.10798103129491,
+      "elapsed_ms": 88.16330501576886,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:42.606478Z",
+      "notes": null
+    },
+    {
+      "test": "cloudflare_warp_masque_anycast_tcp",
+      "category": "cloudflare",
+      "subcategory": "cloudflare_warp",
+      "target": "tcp://162.159.197.10:443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 81.5
+      },
+      "rtt_ms": 81.48132404312491,
+      "elapsed_ms": 86.2832740531303,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:42.601312Z",
+      "notes": null
+    },
+    {
+      "test": "cloudflare_warp_wg_anycast_tcp",
+      "category": "cloudflare",
+      "subcategory": "cloudflare_warp",
+      "target": "tcp://162.159.193.10:443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "tcp_connect_ms": 81.4
+      },
+      "rtt_ms": 81.36932901106775,
+      "elapsed_ms": 86.1411209916696,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:42.601388Z",
+      "notes": null
+    },
+    {
+      "test": "cloudflare_warp_masque_udp_4443",
+      "category": "cloudflare",
+      "subcategory": "cloudflare_warp_udp_masque",
+      "target": "udp://162.159.197.10:4443",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 0.3,
+      "evidence": {
+        "protocol": "masque",
+        "error": "icmp_unreachable",
+        "reason": "pop_doesnt_bind_fallback_port"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": 78.30409496091306,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:42.598412Z",
+      "notes": "ICMP Port Unreachable. Network path open; this Cloudflare anycast member is just not advertising this fallback port. Not a censorship signal."
+    },
+    {
+      "test": "cloudflare_warp_masque_udp_8443",
+      "category": "cloudflare",
+      "subcategory": "cloudflare_warp_udp_masque",
+      "target": "udp://162.159.197.10:8443",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 0.9,
+      "evidence": {
+        "protocol": "masque",
+        "response_bytes": 23,
+        "note": "QUIC VN reply — MASQUE port reachable and running HTTP/3"
+      },
+      "rtt_ms": 78.11232999665663,
+      "elapsed_ms": 78.18738999776542,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:42.598464Z",
+      "notes": null
+    },
+    {
+      "test": "cloudflare_warp_wg_udp_2408",
+      "category": "cloudflare",
+      "subcategory": "cloudflare_warp_udp_wg",
+      "target": "udp://162.159.193.10:2408",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 0.1,
+      "evidence": {
+        "protocol": "wireguard",
+        "error": "udp_timeout",
+        "timeout_sec": 2.0,
+        "reason": "tunnel_silently_drops_invalid"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": 2081.4719149493612,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:44.601796Z",
+      "notes": "UDP timeout on a wireguard port is the protocol's default behaviour — cannot be attributed to censorship without a positive control signal."
+    },
+    {
+      "test": "cloudflare_warp_wg_udp_4500",
+      "category": "cloudflare",
+      "subcategory": "cloudflare_warp_udp_wg",
+      "target": "udp://162.159.193.10:4500",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 0.1,
+      "evidence": {
+        "protocol": "wireguard",
+        "error": "udp_timeout",
+        "timeout_sec": 2.0,
+        "reason": "tunnel_silently_drops_invalid"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": 2079.732488025911,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:44.601969Z",
+      "notes": "UDP timeout on a wireguard port is the protocol's default behaviour — cannot be attributed to censorship without a positive control signal."
+    },
+    {
+      "test": "cloudflare_http_workers_dev",
+      "category": "cloudflare",
+      "subcategory": "cloudflare_http",
+      "target": "https://workers.dev/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": 200,
+        "expected": 200
+      },
+      "rtt_ms": 1199.9127720482647,
+      "elapsed_ms": 1199.9936469946988,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.722364Z",
+      "notes": null
+    },
+    {
+      "test": "cloudflare_http_pages_dev",
+      "category": "cloudflare",
+      "subcategory": "cloudflare_http",
+      "target": "https://pages.dev/",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": 200,
+        "expected": 200
+      },
+      "rtt_ms": 690.6518650357611,
+      "elapsed_ms": 690.7632870133966,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:43.232784Z",
+      "notes": null
+    },
+    {
+      "test": "cloudflare_http_cloudflare_dns_com",
+      "category": "cloudflare",
+      "subcategory": "cloudflare_http",
+      "target": "https://cloudflare-dns.com/cdn-cgi/trace",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "status": 200,
+        "expected": 200
+      },
+      "rtt_ms": 278.9267580374144,
+      "elapsed_ms": 279.0234380518086,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:42.839243Z",
+      "notes": null
+    },
+    {
+      "test": "throttling_youtube_sni_probe_method_b",
+      "category": "throttling",
+      "subcategory": "throttling",
+      "target": "speedtest.selectel.ru (SNI=1-googlevideo.com)",
+      "verdict": "INCONCLUSIVE",
+      "method": null,
+      "confidence": 0.0,
+      "evidence": {
+        "reason": "non_censoring_vantage_method_b_skipped"
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:55.428158Z",
+      "notes": "Method B is a censor-specific test against a single throughput endpoint; from an uncensored vantage the relative bandwidth comparison is dominated by geographic latency rather than SNI policy. Override modules.throttling.require_censoring_vantage if you have supplied a custom target_url tied to your own in-country control."
+    },
+    {
+      "test": "middlebox_header_host_case",
+      "category": "middlebox",
+      "subcategory": "middlebox",
+      "target": "1.1.1.1:80",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "sent_header": "hOsT",
+        "status_line": "HTTP/1.1 301 Moved Permanently",
+        "status_code": 301,
+        "response_head": "HTTP/1.1 301 Moved Permanently\r\nServer: cloudflare\r\nDate: Wed, 13 May 2026 20:13:55 GMT\r\nContent-Type: text/html\r\nContent-Length: 167\r\nConnection: close\r\nLocation: https://1.1.1.1/\r\nCF-RAY: 9fb453957d",
+        "cloudflare_ok_statuses": [
+          301,
+          302,
+          400
+        ]
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:55.435601Z",
+      "notes": "Modified Host header case"
+    },
+    {
+      "test": "middlebox_header_useragent_case",
+      "category": "middlebox",
+      "subcategory": "middlebox",
+      "target": "1.1.1.1:80",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "sent_header": "uSeR-aGeNt",
+        "status_line": "HTTP/1.1 301 Moved Permanently",
+        "status_code": 301,
+        "response_head": "HTTP/1.1 301 Moved Permanently\r\nServer: cloudflare\r\nDate: Wed, 13 May 2026 20:13:55 GMT\r\nContent-Type: text/html\r\nContent-Length: 167\r\nConnection: close\r\nLocation: https://1.1.1.1/\r\nCF-RAY: 9fb453957e",
+        "cloudflare_ok_statuses": [
+          301,
+          302,
+          400
+        ]
+      },
+      "rtt_ms": null,
+      "elapsed_ms": null,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:55.438680Z",
+      "notes": "Modified User-Agent case"
+    },
+    {
+      "test": "middlebox_invalid_request_line",
+      "category": "middlebox",
+      "subcategory": "middlebox",
+      "target": "httpbin.org:80",
+      "verdict": "OK",
+      "method": null,
+      "confidence": 1.0,
+      "evidence": {
+        "sent_method": "EIASIEP",
+        "status_line": "HTTP/1.1 405 METHOD NOT ALLOWED",
+        "status_code": 405,
+        "response_head": "HTTP/1.1 405 METHOD NOT ALLOWED\r\nDate: Wed, 13 May 2026 20:13:55 GMT\r\nContent-Type: text/html\r\nContent-Length: 178\r\nConnection: keep-alive\r\nServer: gunicorn/19.9.0\r\nAllow: OPTIONS, GET, HEAD\r\nAccess-C",
+        "expected_one_of": [
+          400,
+          405,
+          501
+        ]
+      },
+      "rtt_ms": null,
+      "elapsed_ms": 191.03728397749364,
+      "attempts": 1,
+      "timestamp": "2026-05-13T20:13:55.629722Z",
+      "notes": null
+    }
+  ],
+  "summary": {
+    "total": 193,
+    "by_verdict": {
+      "OK": 182,
+      "INCONCLUSIVE": 9,
+      "ANOMALY": 1,
+      "GEOBLOCK_NOT_CENSORSHIP": 1
+    },
+    "by_category": {
+      "dns": {
+        "OK": 37
+      },
+      "tcp": {
+        "OK": 6
+      },
+      "tls": {
+        "OK": 63,
+        "INCONCLUSIVE": 2
+      },
+      "http": {
+        "OK": 31,
+        "ANOMALY": 1,
+        "GEOBLOCK_NOT_CENSORSHIP": 1
+      },
+      "telegram": {
+        "INCONCLUSIVE": 3,
+        "OK": 28
+      },
+      "cloudflare": {
+        "OK": 14,
+        "INCONCLUSIVE": 3
+      },
+      "throttling": {
+        "INCONCLUSIVE": 1
+      },
+      "middlebox": {
+        "OK": 3
+      }
+    },
+    "detected_techniques": [],
+    "blocked_count": 0,
+    "ok_count": 182,
+    "module_failures": []
+  }
+}
