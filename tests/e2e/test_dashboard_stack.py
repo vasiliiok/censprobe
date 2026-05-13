@@ -110,10 +110,16 @@ def test_sync_api_health(dashboard_stack: None) -> None:
     assert body.get("status") == "ok", body
 
 
-def test_sync_api_test_runs_empty_on_fresh_db(dashboard_stack: None) -> None:
-    """A freshly-migrated database has no test runs imported yet — the
-    endpoint must return an empty list, not 500. Catches the regression
-    where a missing table or column propagates to JSON serialization.
+def test_sync_api_test_runs_returns_well_typed_list(dashboard_stack: None) -> None:
+    """``/test-runs`` returns a list of TestRun dicts after schema migration.
+
+    Earlier this test asserted an empty list (assuming ``reports/`` was
+    untracked), but operator-shipped demo data committed under
+    ``reports/`` makes that assumption brittle — the background importer
+    picks them up on startup. The real intent is "the endpoint returns
+    a sane list shape after init_db ran, not 500 from a missing
+    column" — assert the shape instead, plus a smoke check on at least
+    one row when present.
 
     Path has no trailing slash — sync-api defines `@app.get("/test-runs")`
     and a trailing slash triggers FastAPI's default 307 redirect, which
@@ -122,4 +128,9 @@ def test_sync_api_test_runs_empty_on_fresh_db(dashboard_stack: None) -> None:
     assert r.status_code == 200, r.text
     payload = r.json()
     assert isinstance(payload, list), payload
-    assert payload == [], f"expected empty list on fresh DB, got {payload!r}"
+    for row in payload:
+        assert isinstance(row, dict), row
+        # Required fields surfaced by ``_run_to_dict`` — guards a column
+        # rename or model-drift refactor that would silently empty cells.
+        for key in ("test_id", "created_at", "scores"):
+            assert key in row, f"missing {key!r} in {row!r}"
