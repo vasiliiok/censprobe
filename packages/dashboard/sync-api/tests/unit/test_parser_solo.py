@@ -131,6 +131,7 @@ class TestParseSoloReport:
                         "target": "x",
                         "verdict": "OK",
                         "rtt_ms": "12.5",
+                        "elapsed_ms": "175.0",
                         "attempts": "3",
                         "confidence": "0.7",
                     }
@@ -140,8 +141,37 @@ class TestParseSoloReport:
         _, results = parse_solo_report(path)
         r = results[0]
         assert r["rtt_ms"] == pytest.approx(12.5)
+        assert r["elapsed_ms"] == pytest.approx(175.0)
         assert r["attempts"] == 3
         assert r["confidence"] == pytest.approx(0.7)
+
+    def test_elapsed_ms_copied_when_present(self, tmp_path: Path) -> None:
+        # elapsed_ms was added 2026-05; reports written before that have
+        # no such field and must land with elapsed_ms=None (not zero,
+        # which would falsely show "0 ms" on Grafana panels). Reports
+        # written after must round-trip the numeric value.
+        path_old = _write(
+            tmp_path / "server-solo-old.json",
+            {"results": [{"test": "x", "category": "dns", "target": "y", "verdict": "OK"}]},
+        )
+        path_new = _write(
+            tmp_path / "server-solo-new.json",
+            {
+                "results": [
+                    {
+                        "test": "x",
+                        "category": "dns",
+                        "target": "y",
+                        "verdict": "OK",
+                        "elapsed_ms": 42.5,
+                    }
+                ]
+            },
+        )
+        _, old_results = parse_solo_report(path_old)
+        _, new_results = parse_solo_report(path_new)
+        assert old_results[0]["elapsed_ms"] is None
+        assert new_results[0]["elapsed_ms"] == pytest.approx(42.5)
 
     def test_results_not_a_list_returns_empty(self, tmp_path: Path) -> None:
         # A future writer accidentally stores results as a dict — we

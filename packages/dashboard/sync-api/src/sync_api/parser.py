@@ -83,6 +83,7 @@ def parse_solo_report(
                 "method": r.get("method"),
                 "confidence": _to_float(r.get("confidence"), default=1.0),
                 "rtt_ms": _to_float(r.get("rtt_ms"), default=None),
+                "elapsed_ms": _to_float(r.get("elapsed_ms"), default=None),
                 "attempts": _to_int(r.get("attempts"), default=1),
                 "notes": r.get("notes"),
                 "timestamp": _parse_dt(r.get("timestamp")),

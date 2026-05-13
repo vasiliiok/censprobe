@@ -9,9 +9,53 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import os
 import re
+import time
+from collections.abc import Callable, Coroutine
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar
+
+if TYPE_CHECKING:
+    from censprobe_core.models import TestResult
+
+
+_P_TEST = ParamSpec("_P_TEST")
+_TR = TypeVar("_TR", bound="TestResult | None")
+
+
+def stamp_test_elapsed(
+    fn: Callable[_P_TEST, Coroutine[Any, Any, _TR]],
+) -> Callable[_P_TEST, Coroutine[Any, Any, _TR]]:
+    """Wrap a solo-module ``_test_*`` coroutine so its returned
+    :class:`TestResult` always carries ``elapsed_ms`` set to the
+    coroutine's total wall-clock runtime.
+
+    Mirrors ``protocol_probes._stamp_elapsed`` but for the
+    ``TestResult``/Pydantic side (solo modules: tcp/dns/tls/http/
+    telegram/cloudflare/throttling/middlebox).
+
+    No-op when the wrapped coroutine returned ``None`` (some helpers
+    skip cleanly with no result), or when it already populated
+    ``elapsed_ms`` itself (preserve any more nuanced measurement).
+
+    Return type is ``Coroutine`` (not the broader ``Awaitable``) so
+    callers wrapping the result in ``asyncio.create_task`` typecheck
+    cleanly — ``create_task`` rejects bare ``Awaitable`` because it
+    needs a real coroutine object.
+    """
+
+    @functools.wraps(fn)
+    async def wrapper(*args: _P_TEST.args, **kwargs: _P_TEST.kwargs) -> _TR:
+        t0 = time.monotonic()
+        result = await fn(*args, **kwargs)
+        if result is not None and result.elapsed_ms is None:
+            result.elapsed_ms = (time.monotonic() - t0) * 1000
+        return result
+
+    return wrapper
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Identifier validation

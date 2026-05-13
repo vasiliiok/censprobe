@@ -65,6 +65,7 @@ import httpx
 from censprobe_core._evidence import describe_exception
 from censprobe_core.models import BlockingMethod, TestResult, Verdict
 from censprobe_core.server_meta import is_censoring_vantage
+from censprobe_core.utils import stamp_test_elapsed
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +168,7 @@ def _build_quic_vn_trigger() -> bytes:
     return header + b"\x00" * (_QUIC_INITIAL_MIN_SIZE - len(header))
 
 
+@stamp_test_elapsed
 async def _test_quic(host: str, port: int, name: str) -> TestResult:
     """
     Send a QUIC VN trigger to host:port/UDP and wait for any server response.
@@ -299,6 +301,7 @@ async def _test_quic(host: str, port: int, name: str) -> TestResult:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+@stamp_test_elapsed
 async def _test_warp_tcp(host: str, port: int, name: str) -> TestResult:
     """
     TCP connect to WARP endpoint. Verifies IP-level reachability independent of
@@ -519,6 +522,7 @@ def _classify_warp_udp_oserror(e: OSError, name: str, target: str, protocol: str
     )
 
 
+@stamp_test_elapsed
 async def _test_warp_udp(
     host: str,
     port: int,
@@ -616,6 +620,7 @@ def _slug(s: str) -> str:
     return s.replace(".", "_").replace("-", "_").replace("/", "_")
 
 
+@stamp_test_elapsed
 async def _test_http(domain: str, url: str, expected_status: int) -> TestResult:
     """HTTPS GET to a Cloudflare platform URL."""
     test_name = f"cloudflare_http_{_slug(domain)}"

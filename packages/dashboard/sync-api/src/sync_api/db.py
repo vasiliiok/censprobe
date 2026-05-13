@@ -149,7 +149,16 @@ class TestResult(Base):
     verdict: Mapped[str] = mapped_column(String(64), nullable=False)
     method: Mapped[str | None] = mapped_column(String(64), nullable=True)
     confidence: Mapped[float] = mapped_column(Float, default=1.0)
+    # rtt_ms: protocol-/module-specific latency signal (TCP-connect for
+    # tcp/tls probes, query-RTT for DNS, tunnel ICMP-ping for VPN
+    # protocols). Semantics vary by module/protocol.
     rtt_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # elapsed_ms: total wall-clock time of the probe in ms. Uniform
+    # semantics across all probes (added 2026-05). Display layers and
+    # latency-distribution panels should prefer this over rtt_ms because
+    # rtt_ms can be a sub-measurement (e.g. just TCP connect) that
+    # under-reports actual probe duration on timeout-failing paths.
+    elapsed_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
     attempts: Mapped[int] = mapped_column(Integer, default=1)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

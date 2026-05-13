@@ -43,6 +43,7 @@ from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 
 from censprobe_core.models import BlockingMethod, TestResult, Verdict
+from censprobe_core.utils import stamp_test_elapsed
 
 logger = logging.getLogger(__name__)
 
@@ -257,6 +258,7 @@ async def _test_dc_reachability(
     return results
 
 
+@stamp_test_elapsed
 async def _test_dc_port(dc_id: int, ip_ver: str, ip: str, port: int) -> TestResult:
     """TCP connect + MTProto ReqPqMulti to one DC endpoint."""
     test_name = f"telegram_dc{dc_id}_{ip_ver}_{port}"

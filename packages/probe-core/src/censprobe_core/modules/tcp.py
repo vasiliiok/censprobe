@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from censprobe_core.config import TcpModuleConfig
 from censprobe_core.models import BlockingMethod, TestResult, Verdict
 from censprobe_core.server_meta import is_censoring_vantage
+from censprobe_core.utils import stamp_test_elapsed
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,7 @@ async def run_tcp_tests(
     return await asyncio.gather(*[_bounded(ip, port) for ip, port in targets])
 
 
+@stamp_test_elapsed
 async def _test_tcp(ip: str, port: int, repeats: int, cfg: TcpModuleConfig) -> TestResult:
     """Test TCP connectivity to ip:port."""
     target = f"{ip}:{port}"

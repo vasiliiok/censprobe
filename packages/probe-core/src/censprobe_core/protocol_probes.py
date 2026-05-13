@@ -18,15 +18,16 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import json
 import logging
 import socket
 import tempfile
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, ParamSpec
 
 from censprobe_core.echo_ports import ECHO_PORTS
 from censprobe_core.link_utils import async_delete_iface, async_rm_amneziawg_socket
@@ -92,7 +93,29 @@ class ProbeResult:
     verdict: Verdict = Verdict.BLOCKED
     handshake_ok: bool = False
     data_ok: bool = False
+    # Protocol-specific latency signal. Semantics differ by probe:
+    #   * openvpn / wireguard / amneziawg — ICMP-ping RTT measured
+    #     *through* the established tunnel (data-plane). None until
+    #     handshake completed.
+    #   * shadowsocks / hysteria2 / vless_reality — TCP/QUIC connect
+    #     RTT to the listener.
+    #   * mtproto_proxy / mtproto_proxy_alt / mtproto_orig — TCP connect
+    #     RTT to the proxy (NOT the full req_pq→resPQ round-trip; for
+    #     that, see ``elapsed_ms``).
+    # rtt_ms is intentionally NOT "total probe duration" — that field is
+    # ``elapsed_ms`` below. For a probe that times out reading L7 frames
+    # after a fast TCP-connect, rtt_ms will be in the ms range while
+    # elapsed_ms will be the full PROBE_TIMEOUT. That distinction is the
+    # whole reason elapsed_ms exists: prior to its introduction (May 2026)
+    # display layers rendered rtt_ms as "(Xms)" next to verdicts, which
+    # silently misled operators on every timeout-failing probe.
     rtt_ms: float | None = None
+    # Total wall-clock time from probe function entry to return,
+    # regardless of verdict. Always set when the probe ran. The display
+    # layer prefers this for "(Xms)" labels because it's the only field
+    # whose semantics are uniform across protocols and across OK/error
+    # return paths.
+    elapsed_ms: float | None = None
     error: str | None = None
     # Sustained-data signal — populated only for SS / VLESS / Hy2 (the
     # three SOCKS-routed protocols that go through the listener echo
@@ -109,6 +132,38 @@ class ProbeResult:
     # server with a small uplink, so the flag is informational, not a
     # verdict.
     throughput_throttled: bool = False
+
+
+_P = ParamSpec("_P")
+
+
+def _stamp_elapsed(
+    fn: Callable[_P, Coroutine[Any, Any, ProbeResult]],
+) -> Callable[_P, Coroutine[Any, Any, ProbeResult]]:
+    """Wrap a probe coroutine so its ProbeResult always carries
+    ``elapsed_ms`` set to the function's total wall-clock runtime.
+
+    Centralised here so individual probes don't have to stamp the field
+    at every return site (each has 10+ early-exit ProbeResult paths for
+    parsing, TCP-connect, handshake-fail, timeout, etc.). The wrapper
+    only writes the field when the inner function left it ``None``, so
+    a probe is free to override with a more nuanced measurement if it
+    wants (none currently do).
+
+    Declared return type is ``Coroutine`` rather than ``Awaitable`` so
+    callers wrapping the result in ``asyncio.create_task`` typecheck
+    cleanly — ``create_task`` rejects bare ``Awaitable``.
+    """
+
+    @functools.wraps(fn)
+    async def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> ProbeResult:
+        t0 = time.monotonic()
+        result = await fn(*args, **kwargs)
+        if result.elapsed_ms is None:
+            result.elapsed_ms = (time.monotonic() - t0) * 1000
+        return result
+
+    return wrapper
 
 
 async def run_cmd(cmd: list[str], timeout: float = PROBE_TIMEOUT) -> tuple[int, str, str]:
@@ -567,6 +622,7 @@ async def proxy_throughput(
 # ─────────────────────────────────────────────────────────────────────────────
 # OpenVPN probe
 # ─────────────────────────────────────────────────────────────────────────────
+@_stamp_elapsed
 async def probe_openvpn(host: str, port: int, psk_pem: str) -> ProbeResult:
     result = ProbeResult()
     if not psk_pem or "BEGIN OpenVPN Static key" not in psk_pem:
@@ -693,6 +749,7 @@ async def _poll_wg_handshake(tool: str, iface: str, timeout: float) -> bool:
 # ─────────────────────────────────────────────────────────────────────────────
 # WireGuard probe
 # ─────────────────────────────────────────────────────────────────────────────
+@_stamp_elapsed
 async def probe_wireguard(
     host: str,
     port: int,
@@ -773,6 +830,7 @@ PersistentKeepalive = 25
 # ─────────────────────────────────────────────────────────────────────────────
 # AmneziaWG probe
 # ─────────────────────────────────────────────────────────────────────────────
+@_stamp_elapsed
 async def probe_amneziawg(
     host: str,
     port: int,
@@ -870,6 +928,7 @@ PersistentKeepalive = 25
 # ─────────────────────────────────────────────────────────────────────────────
 # Shadowsocks-2022 probe
 # ─────────────────────────────────────────────────────────────────────────────
+@_stamp_elapsed
 async def probe_shadowsocks(host: str, port: int, method: str, password_b64: str) -> ProbeResult:
     return await _tunnel_via_singbox_or_xray(
         binary_cmd=["sing-box", "run", "-c", "{conf}"],
@@ -901,6 +960,7 @@ async def probe_shadowsocks(host: str, port: int, method: str, password_b64: str
 # ─────────────────────────────────────────────────────────────────────────────
 # VLESS+Reality probe
 # ─────────────────────────────────────────────────────────────────────────────
+@_stamp_elapsed
 async def probe_vless_reality(
     host: str, port: int, uuid: str, public_key: str, short_id: str, server_name: str
 ) -> ProbeResult:
@@ -955,6 +1015,7 @@ async def probe_vless_reality(
 # ─────────────────────────────────────────────────────────────────────────────
 # Hysteria 2 probe
 # ─────────────────────────────────────────────────────────────────────────────
+@_stamp_elapsed
 async def probe_hysteria2(host: str, port: int, auth: str, obfs_password: str) -> ProbeResult:
     result = ProbeResult()
     local_port = _pick_free_local_port()
@@ -1452,6 +1513,7 @@ def _validate_welcome_packet(
     return None
 
 
+@_stamp_elapsed
 async def probe_mtproto_proxy(host: str, port: int, secret_hex: str) -> ProbeResult:
     """Three-signal probe of mtg (faketls + obfuscated2 + relayed MTProto).
 
@@ -2018,6 +2080,7 @@ async def _exchange_obfuscated2_respq(
     return _validate_res_pq(body_pt, nonce)
 
 
+@_stamp_elapsed
 async def probe_mtproto_orig(host: str, port: int, secret_hex: str) -> ProbeResult:
     """Two-signal probe of the original Telegram MTProxy (C, obfuscated2).
 

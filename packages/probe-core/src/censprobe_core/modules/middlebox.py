@@ -20,6 +20,7 @@ import string
 from typing import Any
 
 from censprobe_core.models import BlockingMethod, TestResult, Verdict
+from censprobe_core.utils import stamp_test_elapsed
 
 logger = logging.getLogger(__name__)
 
@@ -226,6 +227,7 @@ async def _raw_http_request(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+@stamp_test_elapsed
 async def _test_invalid_request_line() -> TestResult | None:
     """
     Send an HTTP request with a non-standard method.

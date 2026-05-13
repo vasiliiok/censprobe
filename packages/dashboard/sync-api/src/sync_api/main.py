@@ -802,6 +802,7 @@ def _result_to_dict(r: TestResult) -> dict[str, Any]:
         "method": r.method,
         "confidence": r.confidence,
         "rtt_ms": r.rtt_ms,
+        "elapsed_ms": r.elapsed_ms,
         "attempts": r.attempts,
         "notes": r.notes,
         "timestamp": r.timestamp.isoformat() if r.timestamp else None,

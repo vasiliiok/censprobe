@@ -304,6 +304,7 @@ async def _async_main(
             await asyncio.sleep(random.uniform(0.5, 3.0))  # noqa: S311
 
         console.print(f"[dim]Probing {name}...[/dim]")
+        probe_t0 = time.monotonic()
         try:
             result = await factory(server_host, creds)
             results[name] = result
@@ -313,8 +314,15 @@ async def _async_main(
             # don't have to thread the exception object into the
             # format string (Sonar S8572). ``str(e)`` is still
             # needed for the ProbeResult.error payload below.
+            # ``elapsed_ms`` is stamped here (not via the per-probe
+            # decorator) because exceptions bypass the decorator's
+            # post-return stamping.
             logger.exception("Probe %s failed", name)
-            results[name] = ProbeResult(verdict=Verdict.ERROR, error=str(e))
+            results[name] = ProbeResult(
+                verdict=Verdict.ERROR,
+                error=str(e),
+                elapsed_ms=(time.monotonic() - probe_t0) * 1000,
+            )
 
     # ── Step 3: Ask listener to stop, then fetch the final snapshot ──────────
     # The listener IS the ground truth: kernel-level counters, post-
@@ -675,8 +683,14 @@ def _print_single_result(name: str, result: ProbeResult) -> None:
         Verdict.ERROR: "[dim]ERROR[/dim]",
     }
     v_str = icons.get(result.verdict, str(result.verdict))
-    rtt_str = f" ({result.rtt_ms:.0f}ms)" if result.rtt_ms else ""
-    console.print(f"  {name:<20} {v_str}{rtt_str}")
+    # Prefer elapsed_ms (total probe wall-clock — uniform across protocols
+    # and across OK/error paths) over rtt_ms (protocol-specific latency
+    # signal that, for timeout-failing TCP probes, reflects only the
+    # initial TCP connect and is misleadingly small). rtt_ms remains the
+    # fallback for any probe path that didn't get elapsed_ms stamped.
+    duration_ms = result.elapsed_ms if result.elapsed_ms is not None else result.rtt_ms
+    duration_str = f" ({duration_ms:.0f}ms)" if duration_ms is not None else ""
+    console.print(f"  {name:<20} {v_str}{duration_str}")
 
 
 def _print_results(results: dict[str, ProbeResult], server_host: str) -> None:
@@ -687,6 +701,14 @@ def _print_results(results: dict[str, ProbeResult], server_host: str) -> None:
     )
     table.add_column("Protocol", style="cyan", width=20)
     table.add_column("Verdict", width=22)
+    # "Elapsed" is total probe wall-clock (uniform semantics across all
+    # protocols, OK + error paths). It is the right number to look at
+    # when asking "how long did this probe take to finish".
+    # "RTT" is the protocol-specific latency signal preserved alongside:
+    # TCP-connect for TCP-based probes, tunnel ICMP-ping RTT for VPN
+    # protocols. It is NOT a probe duration — for timeout-failing
+    # probes RTT will be milliseconds while Elapsed is up to 15 s.
+    table.add_column("Elapsed", justify="right", width=10)
     table.add_column("RTT", justify="right", width=10)
     # Client-side throughput as observed by curl through the SOCKS
     # tunnel. Populated only for SS / VLESS / Hy2 (the three protocols
@@ -709,14 +731,15 @@ def _print_results(results: dict[str, ProbeResult], server_host: str) -> None:
     for name, r in results.items():
         color = verdict_colors.get(r.verdict, "white")
         v_str = f"[{color}]{r.verdict}[/{color}]"
-        rtt_str = f"{r.rtt_ms:.0f}ms" if r.rtt_ms else "—"
+        elapsed_str = f"{r.elapsed_ms:.0f}ms" if r.elapsed_ms is not None else "—"
+        rtt_str = f"{r.rtt_ms:.0f}ms" if r.rtt_ms is not None else "—"
         if r.throughput_throttled:
             tp_str = "[red]throttled[/red]"
         elif r.throughput_mbps is not None:
             tp_str = f"{r.throughput_mbps:,.1f} Mbps"
         else:
             tp_str = "[dim]—[/dim]"
-        table.add_row(name, v_str, rtt_str, tp_str, r.error or "")
+        table.add_row(name, v_str, elapsed_str, rtt_str, tp_str, r.error or "")
         if r.verdict in (Verdict.OK, Verdict.HANDSHAKE_ONLY):
             ok_count += 1
 

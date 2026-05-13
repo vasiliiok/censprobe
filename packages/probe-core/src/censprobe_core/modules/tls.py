@@ -36,6 +36,7 @@ from typing import Any
 import httpx
 
 from censprobe_core.models import BlockingMethod, TestResult, Verdict
+from censprobe_core.utils import stamp_test_elapsed
 
 # Process-wide DoH client. Instantiating httpx.AsyncClient per resolve()
 # call meant a fresh TLS handshake to 1.1.1.1 every time, which inflated
@@ -615,6 +616,7 @@ async def _fetch_ech_config(domain: str) -> str | None:
     return None
 
 
+@stamp_test_elapsed
 async def _test_ech(domain: str) -> TestResult | None:
     """
     Test ECH (Encrypted Client Hello) via curl --ech.

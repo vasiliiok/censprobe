@@ -99,7 +99,18 @@ class TestResult(BaseModel):
     method: BlockingMethod | None = None
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     evidence: dict[str, Any] = Field(default_factory=dict)
+    # Protocol-/module-specific latency signal (e.g. TCP-connect for tcp/tls
+    # probes, first-byte for http, query-RTT for DNS). Semantics vary by
+    # module — see the module that produced the result. For the canonical
+    # "how long did this test take" number, use ``elapsed_ms`` below.
     rtt_ms: float | None = None
+    # Total wall-clock time of the probe (ms), from module entry to result
+    # construction. Always set when the probe ran. Distinct from rtt_ms
+    # because some modules' rtt_ms is a sub-measurement (e.g. just TCP
+    # connect), so on a probe that fails partway through, elapsed_ms is
+    # the only true "total time spent" signal. Display layers should
+    # prefer this over rtt_ms for "(Xms)" labels next to verdicts.
+    elapsed_ms: float | None = None
     attempts: int = 1
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     notes: str | None = None

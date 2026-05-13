@@ -64,6 +64,18 @@
       "title": "Confidence",
       "type": "number"
     },
+    "elapsed_ms": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Elapsed Ms"
+    },
     "evidence": {
       "additionalProperties": true,
       "title": "Evidence",
