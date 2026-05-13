@@ -24,32 +24,17 @@
       }
     },
     {
-      "id": 100,
-      "type": "text",
-      "gridPos": {
-        "x": 0,
-        "y": 2,
-        "w": 24,
-        "h": 2
-      },
-      "title": "",
-      "options": {
-        "mode": "markdown",
-        "content": "**11 — Matrix Heatmap.** Полная картина 96-теста кампании в одном экране. Верхняя матрица: серверы × протоколы, цвет = вердикт. Нижняя: серверы × тип клиентской сети, цвет = overall_score. Фильтры в верхнем баре сужают набор; пусто = всё."
-      }
-    },
-    {
       "id": 1,
       "type": "table",
       "title": "Protocol verdicts per server (worst-blocked first)",
-      "description": "Каждая строка — один test_id, каждая колонка — VPN-протокол. Ячейка показывает ХУДШИЙ вердикт по всем сессиям этого сервера на этом протоколе (BLOCKED > HANDSHAKE_ONLY > OK по приоритету); если протокол вообще не пробовался — пустая ячейка. Серверы отсортированы по убыванию числа BLOCKED ячеек. Учитывает фильтры company и client_network в верхнем баре.",
+      "description": "Worst-of-session per (server, protocol). Sorted by BLOCKED count.",
       "datasource": {
         "type": "postgres",
         "uid": "DS_CENSPROBE_PG"
       },
       "gridPos": {
         "x": 0,
-        "y": 4,
+        "y": 2,
         "w": 24,
         "h": 18
       },
@@ -166,14 +151,14 @@
       "id": 2,
       "type": "table",
       "title": "Protocols OK (%) per server × client network",
-      "description": "Доля протоколов с вердиктом OK для каждого сервера, разрезанная по типу клиентской сети. Если сервер тестировался с mobile, white и regular — видно где обходные сети помогают, а где блок системный. Пустая ячейка = этой комбинации нет в данных.",
+      "description": "% of protocols verdict=OK per server, split by mobile/whitelist/regular client networks.",
       "datasource": {
         "type": "postgres",
         "uid": "DS_CENSPROBE_PG"
       },
       "gridPos": {
         "x": 0,
-        "y": 22,
+        "y": 20,
         "w": 24,
         "h": 14
       },
