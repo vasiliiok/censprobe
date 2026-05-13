@@ -256,8 +256,7 @@
         },
         "query": "SELECT DISTINCT server_meta->'asn'->>'org' FROM test_runs WHERE server_meta->'asn'->>'org' IS NOT NULL",
         "multi": true,
-        "includeAll": true,
-        "allValue": "ALL"
+        "includeAll": true
       },
       {
         "name": "var_client_network",
@@ -288,8 +287,7 @@
           ]
         },
         "multi": true,
-        "includeAll": true,
-        "allValue": "ALL"
+        "includeAll": true
       }
     ]
   },

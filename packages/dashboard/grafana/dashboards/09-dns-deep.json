@@ -24,8 +24,7 @@
         "query": "SELECT test_id FROM test_runs ORDER BY created_at DESC",
         "refresh": 2,
         "multi": true,
-        "includeAll": true,
-        "allValue": "ALL"
+        "includeAll": true
       }
     ]
   },
@@ -132,7 +131,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT verdict, COUNT(*) AS count FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE (\\'ALL\\' IN (${test_id:singlequote}) OR run.test_id IN (${test_id:singlequote})) AND category = 'dns' GROUP BY verdict ORDER BY count DESC",
+          "rawSql": "SELECT verdict, COUNT(*) AS count FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE (run.test_id IN (${test_id:singlequote})) AND category = 'dns' GROUP BY verdict ORDER BY count DESC",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -161,7 +160,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT run.test_id AS server, test, target, verdict, method, rtt_ms, notes FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE (\\'ALL\\' IN (${test_id:singlequote}) OR run.test_id IN (${test_id:singlequote})) AND subcategory = 'doh' ORDER BY test",
+          "rawSql": "SELECT run.test_id AS server, test, target, verdict, method, rtt_ms, notes FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE (run.test_id IN (${test_id:singlequote})) AND subcategory = 'doh' ORDER BY test",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -243,7 +242,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT run.test_id AS server, test, target, verdict, method, notes FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE (\\'ALL\\' IN (${test_id:singlequote}) OR run.test_id IN (${test_id:singlequote})) AND category = 'dns' AND verdict IN ('DNS_POISONING','DNS_BLOCKED','BLOCKED') ORDER BY verdict, target",
+          "rawSql": "SELECT run.test_id AS server, test, target, verdict, method, notes FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE (run.test_id IN (${test_id:singlequote})) AND category = 'dns' AND verdict IN ('DNS_POISONING','DNS_BLOCKED','BLOCKED') ORDER BY verdict, target",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -317,7 +316,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT run.test_id AS server, test, target, verdict, rtt_ms, method, notes FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE (\\'ALL\\' IN (${test_id:singlequote}) OR run.test_id IN (${test_id:singlequote})) AND category = 'dns' ORDER BY verdict DESC, test",
+          "rawSql": "SELECT run.test_id AS server, test, target, verdict, rtt_ms, method, notes FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE (run.test_id IN (${test_id:singlequote})) AND category = 'dns' ORDER BY verdict DESC, test",
           "format": "table",
           "refId": "A",
           "editorMode": "code",

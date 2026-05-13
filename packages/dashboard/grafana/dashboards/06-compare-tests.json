@@ -61,8 +61,7 @@
         },
         "query": "SELECT DISTINCT server_meta->'asn'->>'org' FROM test_runs WHERE server_meta->'asn'->>'org' IS NOT NULL",
         "multi": true,
-        "includeAll": true,
-        "allValue": "ALL"
+        "includeAll": true
       },
       {
         "name": "var_asn",
@@ -74,8 +73,7 @@
         },
         "query": "SELECT DISTINCT 'AS' || (server_meta->'asn'->>'asn') FROM test_runs WHERE server_meta->'asn'->>'asn' IS NOT NULL",
         "multi": true,
-        "includeAll": true,
-        "allValue": "ALL"
+        "includeAll": true
       },
       {
         "name": "var_datacenter",
@@ -87,8 +85,7 @@
         },
         "query": "SELECT DISTINCT COALESCE(server_meta->'datacenter'->>'name', 'No DC') FROM test_runs",
         "multi": true,
-        "includeAll": true,
-        "allValue": "ALL"
+        "includeAll": true
       },
       {
         "name": "var_country",
@@ -100,8 +97,7 @@
         },
         "query": "SELECT DISTINCT server_meta->'location'->>'country_code' FROM test_runs WHERE server_meta->'location'->>'country_code' IS NOT NULL",
         "multi": true,
-        "includeAll": true,
-        "allValue": "ALL"
+        "includeAll": true
       },
       {
         "name": "var_test_id",
@@ -113,8 +109,7 @@
         },
         "query": "SELECT test_id FROM test_runs",
         "multi": true,
-        "includeAll": true,
-        "allValue": "ALL"
+        "includeAll": true
       },
       {
         "name": "var_client_network",
@@ -145,8 +140,7 @@
           ]
         },
         "multi": true,
-        "includeAll": true,
-        "allValue": "ALL"
+        "includeAll": true
       },
       {
         "name": "var_protocol",

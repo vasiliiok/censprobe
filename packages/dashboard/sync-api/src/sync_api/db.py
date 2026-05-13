@@ -28,6 +28,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -316,27 +317,55 @@ def _is_invalid_password_error(exc: BaseException) -> bool:
     return isinstance(orig, asyncpg.exceptions.InvalidPasswordError)
 
 
+# Idempotent additive-column migration list. Each entry is one
+# Postgres-side ``ALTER TABLE ... ADD COLUMN IF NOT EXISTS`` that brings
+# an existing DB up to the current model shape on container start. The
+# guard makes re-runs safe (no-op on already-current schemas). Use this
+# ONLY for backwards-compatible additions where the new column is
+# NULLable / has a default — drops and renames still require an
+# operator-driven volume reset (``docker compose down -v``). Importer
+# re-populates fresh rows from ``reports/`` (source-of-truth).
+_ADDITIVE_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    # (table, column, ddl_type) — added 2026-05 (commit edf6b0a)
+    ("test_results", "elapsed_ms", "DOUBLE PRECISION"),
+    # added 2026-05 (commit 8023a36) for ProtocolResult.note round-trip
+    ("protocol_results", "note", "TEXT"),
+)
+
+
 async def init_db() -> None:
-    """Create all tables (if missing).
+    """Create all tables (if missing) and apply additive-column migrations.
 
     Schema is single-source-of-truth via the SQLAlchemy models above.
-    create_all() is a no-op for tables that already exist with the
-    declared shape; on a fresh DB it stamps the full schema in one shot.
+    create_all() stamps fresh tables on first start; for in-place upgrades
+    on existing DBs we run ``ALTER TABLE ADD COLUMN IF NOT EXISTS`` for
+    every entry in ``_ADDITIVE_COLUMNS`` so column additions land without
+    requiring an operator-side volume wipe.
 
-    Schema migrations note: create_all() does NOT alter existing tables
-    on column rename/drop. After a model change that removes columns
-    (e.g. the IPv4 redaction refactor), drop the dev `db_data` volume
-    and re-run import:
-
-        docker compose --profile dashboard down -v
-        docker compose --profile dashboard up -d
-
-    Reports on disk are the source of truth and re-import populates
-    every column from scratch.
+    Migration policy:
+      * **Additive columns** (NULLable / defaulted) — automatic via this
+        function. Safe to add entries here in the same commit that updates
+        the model class above.
+      * **Column drops, renames, type changes, NOT-NULL retrofits** — still
+        require ``docker compose --profile dashboard down -v`` + re-import.
+        Workspace ``reports/`` directory is source-of-truth.
     """
     try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+            for table_name, column_name, ddl_type in _ADDITIVE_COLUMNS:
+                # ``IF NOT EXISTS`` is Postgres-specific (12+); safe across
+                # all supported versions for this project's pinned 16.x.
+                await conn.execute(
+                    text(
+                        f"ALTER TABLE {table_name} "
+                        f"ADD COLUMN IF NOT EXISTS {column_name} {ddl_type}"
+                    )
+                )
+            logger.info(
+                "DB tables initialized; %d additive-column migration(s) checked",
+                len(_ADDITIVE_COLUMNS),
+            )
     except Exception as exc:  # noqa: BLE001 - re-raised below; we only sniff for one type to log a hint
         if _is_invalid_password_error(exc):
             logger.error(_DB_AUTH_FAILURE_HINT)
