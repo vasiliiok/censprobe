@@ -29,6 +29,8 @@ import asyncio
 import contextlib
 import logging
 import socket
+import tempfile
+from pathlib import Path
 
 from censprobe_core.models import LiveSnapshot
 
@@ -37,6 +39,10 @@ from censprobe_listener._iptables_counter import (
     read_counter,
     read_counter_sync,
     remove_counter,
+)
+from censprobe_listener.preflight import (
+    probe_all_proxy_multi_upstreams,
+    write_pruned_proxy_multi_conf,
 )
 
 logger = logging.getLogger(__name__)
@@ -93,8 +99,79 @@ class MTProxyOrigResponder:
         # the port so multiple mtproto_orig instances on the same host
         # (different ports) don't share a counter.
         self._counter_comment = f"censprobe-mtorig-{self.port}"
+        # Set to True by start() when proxy-multi.conf's upstream IPs
+        # are all unreachable from the listener's vantage — typically
+        # an RU host where ТСПУ drops TCP/8888 to Telegram's proxy
+        # fleet (91.108.4.0/24, 149.154.0.0/16). In that state we
+        # deliberately do NOT spawn ``mtproto-proxy``: with zero alive
+        # upstreams the C binary enters a 145 connect/s reconnect
+        # storm that starves accept() and produces every session's
+        # mtproto_orig verdict as a false BLOCKED. Skipping the spawn
+        # costs 35% CPU we'd otherwise burn for nothing and surfaces
+        # a clean "upstream unreachable" diagnostic instead.
+        self.unavailable: bool = False
+        # Diagnostic counts populated by start() so main.py can render
+        # an accurate preflight line ("8/16 upstreams reachable",
+        # "0/16 — protocol skipped") without re-probing.
+        self.upstream_alive_count: int = 0
+        self.upstream_total_count: int = 0
+        # tempfile we wrote the pruned proxy-multi.conf into; tracked
+        # so stop() can unlink it (without leaking /tmp entries across
+        # repeated listener launches in long-running CI hosts).
+        self._pruned_conf_path: Path | None = None
 
     async def start(self) -> None:
+        # Prune unreachable upstreams BEFORE spawning the daemon. See
+        # the ``unavailable`` field's docstring for the censorship-
+        # vantage rationale: launching mtproto-proxy with a config
+        # full of unreachable IPs guarantees a 100% CPU reconnect
+        # storm and starved accept queue.
+        alive, unreachable = await probe_all_proxy_multi_upstreams()
+        self.upstream_alive_count = len(alive)
+        self.upstream_total_count = len(alive) + len(unreachable)
+        if self.upstream_total_count == 0:
+            # proxy-multi.conf missing entirely — image built without
+            # the mtproxy-orig stage. Mark unavailable but with a
+            # different diagnostic shape so the operator knows it's
+            # an image issue, not a network issue.
+            self.unavailable = True
+            logger.warning(
+                "mtproto_orig responder skipped: proxy-multi.conf missing or empty "
+                "(image built without mtproxy-orig stage); responder will not start"
+            )
+            return
+        if not alive:
+            self.unavailable = True
+            unreachable_sample = ", ".join(f"{ip}:{p}" for ip, p, _ in unreachable[:5])
+            logger.warning(
+                "mtproto_orig responder skipped: 0/%d upstream IPs reachable on TCP/8888 "
+                "(sample: %s%s) — Telegram proxy fleet not reachable from this vantage. "
+                "Launching mtproto-proxy in this state would trigger a ~145 connect/s "
+                "auth_cluster reconnect storm and starve accept(); sessions for this "
+                "protocol will report ERROR with the same 'upstream unreachable' note.",
+                self.upstream_total_count,
+                unreachable_sample,
+                "..." if len(unreachable) > 5 else "",
+            )
+            return
+
+        # K>0 alive: write a pruned proxy-multi.conf into a per-process
+        # tempfile and point mtproto-proxy at it. Original file on disk
+        # is left untouched so the next launch re-probes from scratch.
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            prefix="proxy-multi-pruned-",
+            suffix=".conf",
+            delete=False,
+        ) as tmp:
+            self._pruned_conf_path = Path(tmp.name)
+        write_pruned_proxy_multi_conf(alive, self._pruned_conf_path)
+        logger.info(
+            "mtproto_orig: pruned proxy-multi.conf — %d/%d upstreams reachable",
+            self.upstream_alive_count,
+            self.upstream_total_count,
+        )
+
         stats_port = _pick_free_loopback_port()
         cmd = [
             "mtproto-proxy",
@@ -108,7 +185,7 @@ class MTProxyOrigResponder:
             self._secret_for_argv,
             "--aes-pwd",
             _PROXY_SECRET_PATH,
-            _PROXY_MULTI_CONF_PATH,
+            str(self._pruned_conf_path),
             "-M",
             "1",
         ]
@@ -138,6 +215,20 @@ class MTProxyOrigResponder:
         await install_counter("OUTPUT", self._counter_rule_args(), self._counter_comment)
 
     async def stop(self) -> None:
+        if self.unavailable:
+            # start() never installed the iptables counter rule nor
+            # launched a subprocess — nothing to tear down. Still log
+            # a tidy stop line so the session-summary output reads the
+            # same shape as the OK path.
+            logger.info(
+                "mtproto_orig responder on port %d stopped (skipped: %d/%d upstreams reachable)",
+                self.port,
+                self.upstream_alive_count,
+                self.upstream_total_count,
+            )
+            self._unlink_pruned_conf()
+            return
+
         # Read the iptables packet counter BEFORE we tear down — the
         # ``-D`` in ``remove_counter`` drops the rule and its counter
         # together. Sums across iptables + ip6tables so an IPv6 client
@@ -168,11 +259,20 @@ class MTProxyOrigResponder:
                     await self._proc.wait()
             self._proc = None
 
+        self._unlink_pruned_conf()
+
         logger.info(
             "mtproto_orig responder on port %d stopped (connections: %d)",
             self.port,
             self.connection_count,
         )
+
+    def _unlink_pruned_conf(self) -> None:
+        if self._pruned_conf_path is None:
+            return
+        with contextlib.suppress(OSError):
+            self._pruned_conf_path.unlink()
+        self._pruned_conf_path = None
 
     async def _monitor_output(self) -> None:
         """Drain mtproto-proxy stdout for diagnostic purposes only.
@@ -242,6 +342,10 @@ class MTProxyOrigResponder:
 
     @property
     def is_running(self) -> bool:
+        # ``unavailable`` responders never spawned a subprocess in the
+        # first place, so "running" is unambiguously False for them.
+        if self.unavailable:
+            return False
         return self._proc is not None and self._proc.returncode is None
 
     @property
@@ -260,8 +364,15 @@ class MTProxyOrigResponder:
         ``mtproto-proxy`` (C) emits no per-connection stdout marker
         at default verbosity, so the iptables PSH-ACK counter is the
         ONLY ground-truth signal — pre-stop we read it sync.
+
+        For ``unavailable`` responders (proxy fleet unreachable from
+        this vantage), counters stay zero and ``responder_self_test_ok``
+        is False — ``ProtocolResult.finalize()`` downgrades the resulting
+        BLOCKED→ERROR shape with the diagnostic note. main.py also
+        sets ``responder_self_test_ok=False`` explicitly so the client-
+        side cross-verification table sees the same downgrade.
         """
-        if self._proc is None:
+        if self.unavailable or self._proc is None:
             return LiveSnapshot(
                 handshake_count=self.connection_count,
                 data_transfer_ok=self.connection_count > 0,

@@ -83,6 +83,17 @@ _PROXY_MULTI_CONF_PATH = Path("/usr/local/share/mtproxy-orig/proxy-multi.conf")
 # "all unreachable" (0/6 succeed) from "one DC migrated" (1-2 fail).
 _PROXY_MULTI_PROBE_SAMPLE = 6
 
+# Per-IP TCP-connect budget when pruning proxy-multi.conf at responder
+# startup. 1.5 s is long enough for a clean SYN/SYN-ACK across a normal
+# RU↔EU/US WAN path but short enough that probing all ~25 IPs in
+# parallel finishes well inside the 2 s responder-settle window.
+_PROXY_MULTI_PRUNE_TIMEOUT_S = 1.5
+# Concurrency cap for the prune probe — keeps the listener from opening
+# 25+ simultaneous sockets at boot. proxy-multi.conf typically has
+# fewer than 30 unique IPs, so this barely throttles anything in
+# practice.
+_PROXY_MULTI_PRUNE_PARALLEL = 16
+
 
 @dataclass(frozen=True)
 class CheckResult:
@@ -616,6 +627,100 @@ async def _check_mtproxy_orig_upstream_reach(
         "ok",
         f"{reachable}/{total} mtproto-proxy upstream IPs reachable on port 8888",
     )
+
+
+async def probe_all_proxy_multi_upstreams(
+    path: Path | None = None,
+    *,
+    timeout_s: float = _PROXY_MULTI_PRUNE_TIMEOUT_S,
+    parallel: int = _PROXY_MULTI_PRUNE_PARALLEL,
+) -> tuple[list[tuple[str, int, str]], list[tuple[str, int, str]]]:
+    """TCP-probe every (ip, port, cluster) listed in proxy-multi.conf in
+    parallel and split them into ``(alive, unreachable)``.
+
+    Unlike :func:`_check_mtproxy_orig_upstream_reach` (which probes one
+    IP per cluster to produce a single preflight WARN/OK signal), this
+    function is the input to the **responder-side prune**: we want to
+    know exactly which IPs the C MTProxy binary can talk to, so we can
+    rewrite its config to contain only those IPs before launching the
+    daemon. Otherwise the binary's auth_cluster reconnect logic hammers
+    every dead IP in a hot ``connect()``→ECONNREFUSED→retry loop
+    (observed at 145 connect/s on RU-blocked hosts), starving its
+    single accept() worker and producing every session-time mtproto_orig
+    verdict as a false BLOCKED.
+
+    Order in ``alive`` preserves config-file order so the rewriter can
+    re-emit ``proxy_for`` lines that look as close to the original as
+    possible. ``path`` defaults to the module-level constant at call
+    time so tests can monkeypatch ``_PROXY_MULTI_CONF_PATH`` and have
+    this function pick up the override.
+    """
+    upstreams = _parse_proxy_multi_upstreams(path)
+    if not upstreams:
+        return [], []
+
+    sem = asyncio.Semaphore(parallel)
+
+    async def _probe(ip: str, port: int) -> bool:
+        async with sem:
+            try:
+                _, writer = await asyncio.wait_for(
+                    asyncio.open_connection(ip, port), timeout=timeout_s
+                )
+            except (TimeoutError, OSError):
+                return False
+            with contextlib.suppress(Exception):
+                writer.close()
+                await writer.wait_closed()
+            return True
+
+    results = await asyncio.gather(*(_probe(ip, port) for ip, port, _ in upstreams))
+    alive: list[tuple[str, int, str]] = []
+    unreachable: list[tuple[str, int, str]] = []
+    for upstream, ok in zip(upstreams, results, strict=True):
+        (alive if ok else unreachable).append(upstream)
+    return alive, unreachable
+
+
+def write_pruned_proxy_multi_conf(
+    alive: list[tuple[str, int, str]],
+    dest: Path,
+    *,
+    source: Path | None = None,
+) -> None:
+    """Write a minimal proxy-multi.conf containing only the alive IPs.
+
+    Preserves the ``default <cluster>;`` directive from the source file
+    (mtproto-proxy refuses to start without one) and re-emits each
+    ``proxy_for <cluster> <ip>:<port>;`` line from ``alive`` in
+    config-file order. Other directives in the source (e.g. the
+    commented ``force_probability``) are intentionally dropped — the
+    pruned config is meant to be a minimal valid replacement, not a
+    full mirror of the upstream-provided file.
+
+    Caller is responsible for handling the empty-alive case BEFORE
+    invoking this function. We assert non-empty so a mistake at the
+    call site fails loudly rather than silently writing a config that
+    the C binary parses then crashes on.
+    """
+    assert alive, "write_pruned_proxy_multi_conf requires at least one alive upstream"
+    if source is None:
+        source = _PROXY_MULTI_CONF_PATH
+
+    default_line = "default 2;\n"
+    if source.exists():
+        # Mirror whatever "default <cluster>;" the upstream sent. Falls
+        # back to "default 2;" (a Frankfurt-routed DC, normally the
+        # most-reachable cluster) if no default line exists.
+        for raw in source.read_text().splitlines():
+            line = raw.strip()
+            if line.startswith("default "):
+                default_line = raw if raw.endswith("\n") else raw + "\n"
+                break
+
+    lines = [default_line]
+    lines.extend(f"proxy_for {cluster} {ip}:{port};\n" for ip, port, cluster in alive)
+    dest.write_text("".join(lines))
 
 
 async def run_mtproxy_orig_self_test(

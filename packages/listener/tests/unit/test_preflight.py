@@ -442,3 +442,92 @@ class TestMtproxyOrigSelfTest:
         )
         assert r.status == "warn"
         assert "wedged" in r.message.lower() or "timeout" in r.message.lower()
+
+
+class TestProbeAllProxyMultiUpstreams:
+    """``probe_all_proxy_multi_upstreams`` enumerates ALL upstreams, not a sample."""
+
+    def test_partitions_alive_and_unreachable(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # Two clusters, three IPs total; the rigged TCP-probe stub says
+        # the middle one is alive, the outer two are dead. The function
+        # must return them split into ([alive], [unreachable]) with the
+        # original config-file order preserved within each list.
+        p = tmp_path / "proxy-multi.conf"
+        p.write_text(
+            "proxy_for 1 1.2.3.4:8888;\nproxy_for 2 5.6.7.8:8888;\nproxy_for 3 9.10.11.12:8888;\n"
+        )
+        monkeypatch.setattr(preflight, "_PROXY_MULTI_CONF_PATH", p)
+
+        async def _probe(host: str, port: int) -> tuple:  # type: ignore[type-arg]
+            if host == "5.6.7.8":
+                # _probe inside the helper calls open_connection() and
+                # only inspects the writer, so a tuple shape that works
+                # for `_, writer = await ...` is enough.
+                class _W:
+                    def close(self) -> None:
+                        pass
+
+                    async def wait_closed(self) -> None:
+                        pass
+
+                return (None, _W())
+            raise OSError("rejected")
+
+        monkeypatch.setattr(preflight.asyncio, "open_connection", _probe)
+
+        import asyncio
+
+        alive, dead = asyncio.run(preflight.probe_all_proxy_multi_upstreams(timeout_s=0.05))
+        assert alive == [("5.6.7.8", 8888, "2")]
+        assert dead == [("1.2.3.4", 8888, "1"), ("9.10.11.12", 8888, "3")]
+
+    def test_empty_when_conf_missing(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        # No proxy-multi.conf — return ([], []) so caller can distinguish
+        # "image missing the binary" from "0/N alive due to censorship".
+        monkeypatch.setattr(preflight, "_PROXY_MULTI_CONF_PATH", tmp_path / "absent.conf")
+
+        import asyncio
+
+        alive, dead = asyncio.run(preflight.probe_all_proxy_multi_upstreams())
+        assert alive == [] and dead == []
+
+
+class TestWritePrunedProxyMultiConf:
+    """``write_pruned_proxy_multi_conf`` emits a minimal valid config."""
+
+    def test_emits_proxy_for_lines_in_order(self, tmp_path: Path) -> None:
+        src = tmp_path / "src.conf"
+        src.write_text("# force_probability 10 10\ndefault 4;\nproxy_for 1 a:b:8888;\n")
+        dest = tmp_path / "out.conf"
+
+        preflight.write_pruned_proxy_multi_conf(
+            [("1.2.3.4", 8888, "2"), ("5.6.7.8", 443, "203")],
+            dest,
+            source=src,
+        )
+        body = dest.read_text()
+        assert "default 4;" in body  # mirrored from source
+        # Lines preserved in the order they were passed in.
+        i_pf1 = body.find("proxy_for 2 1.2.3.4:8888;")
+        i_pf2 = body.find("proxy_for 203 5.6.7.8:443;")
+        assert 0 < i_pf1 < i_pf2
+
+    def test_fallback_default_when_source_has_no_default(self, tmp_path: Path) -> None:
+        src = tmp_path / "src.conf"
+        src.write_text("# nothing useful here\n")
+        dest = tmp_path / "out.conf"
+        preflight.write_pruned_proxy_multi_conf([("1.2.3.4", 8888, "1")], dest, source=src)
+        body = dest.read_text()
+        # Falls back to DC 2 (Frankfurt-routed cluster, normally most-
+        # reachable). The C binary refuses to start without a default,
+        # so this fallback is load-bearing.
+        assert body.startswith("default 2;")
+
+    def test_rejects_empty_alive_list(self, tmp_path: Path) -> None:
+        # Caller is supposed to handle 0-alive specially (skip launching
+        # mtproto-proxy entirely). Asserting here protects against a
+        # caller mistake silently writing an unparseable config.
+        with pytest.raises(AssertionError):
+            preflight.write_pruned_proxy_multi_conf([], tmp_path / "out.conf")

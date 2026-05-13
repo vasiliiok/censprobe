@@ -70,3 +70,90 @@ def test_per_port_counter_comments_are_unique() -> None:
     a = MTProxyOrigResponder(port=2080, secret="dd" + "00" * 16)
     b = MTProxyOrigResponder(port=4080, secret="dd" + "11" * 16)
     assert a._counter_comment != b._counter_comment
+
+
+class TestStartSkipsWhenAllUpstreamsUnreachable:
+    """Regression for the auth_cluster reconnect-storm bug.
+
+    When proxy-multi.conf's upstream Telegram IPs are all unreachable
+    (the typical RU-vantage case behind ТСПУ), launching mtproto-proxy
+    triggers ~145 connect/s reconnect storm that starves accept() and
+    produces every session as false BLOCKED. start() MUST detect this
+    via probe_all_proxy_multi_upstreams + skip the subprocess spawn.
+    """
+
+    @pytest.mark.asyncio
+    async def test_start_does_not_spawn_when_zero_alive(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import censprobe_listener.mtproto_orig_responder as mod
+
+        async def _all_dead(*_a: object, **_kw: object) -> tuple[list, list]:  # type: ignore[type-arg]
+            return [], [("1.2.3.4", 8888, "1"), ("5.6.7.8", 8888, "2")]
+
+        spawn_calls: list[object] = []
+
+        async def _fake_spawn(*args: object, **kwargs: object) -> object:
+            spawn_calls.append(args)
+            raise AssertionError("subprocess MUST NOT be spawned when 0 alive")
+
+        monkeypatch.setattr(mod, "probe_all_proxy_multi_upstreams", _all_dead)
+        monkeypatch.setattr(mod.asyncio, "create_subprocess_exec", _fake_spawn)
+
+        r = MTProxyOrigResponder(port=2080, secret="dd" + "00" * 16)
+        await r.start()
+        assert r.unavailable is True
+        assert r.upstream_alive_count == 0
+        assert r.upstream_total_count == 2
+        assert spawn_calls == []
+        assert r.is_running is False  # mirrors the unavailable state
+
+    @pytest.mark.asyncio
+    async def test_start_does_not_spawn_when_conf_missing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Image built without the mtproxy-orig stage: probe returns
+        # ([], []) (empty total). Different diagnostic shape — the
+        # operator's fix is "rebuild the image", not "use a different
+        # vantage" — but the responder's behaviour is the same: skip
+        # subprocess spawn, mark unavailable.
+        import censprobe_listener.mtproto_orig_responder as mod
+
+        async def _empty(*_a: object, **_kw: object) -> tuple[list, list]:  # type: ignore[type-arg]
+            return [], []
+
+        async def _fail_spawn(*args: object, **kwargs: object) -> object:
+            raise AssertionError("subprocess MUST NOT be spawned when conf missing")
+
+        monkeypatch.setattr(mod, "probe_all_proxy_multi_upstreams", _empty)
+        monkeypatch.setattr(mod.asyncio, "create_subprocess_exec", _fail_spawn)
+
+        r = MTProxyOrigResponder(port=2080, secret="dd" + "00" * 16)
+        await r.start()
+        assert r.unavailable is True
+        assert r.upstream_total_count == 0
+        assert r.is_running is False
+
+    @pytest.mark.asyncio
+    async def test_stop_is_noop_when_unavailable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # An unavailable responder never installed an iptables rule
+        # and never spawned a subprocess. stop() MUST short-circuit
+        # before touching either — otherwise we'd attempt to remove
+        # a rule that doesn't exist (causing iptables ERROR spam) and
+        # awaiting a None process.
+        import censprobe_listener.mtproto_orig_responder as mod
+
+        async def _all_dead(*_a: object, **_kw: object) -> tuple[list, list]:  # type: ignore[type-arg]
+            return [], [("1.2.3.4", 8888, "1")]
+
+        async def _fail_counter(*args: object, **kwargs: object) -> object:
+            raise AssertionError("install_counter / remove_counter MUST NOT run")
+
+        monkeypatch.setattr(mod, "probe_all_proxy_multi_upstreams", _all_dead)
+        monkeypatch.setattr(mod, "install_counter", _fail_counter)
+        monkeypatch.setattr(mod, "remove_counter", _fail_counter)
+
+        r = MTProxyOrigResponder(port=2080, secret="dd" + "00" * 16)
+        await r.start()
+        # stop() should not touch counters and not error.
+        await r.stop()

@@ -433,12 +433,37 @@ async def _async_main(
     self_test_results: dict[str, bool] = {}
     post_preflight: list[CheckResult] = []
     if "mtproto_orig" in responders:
-        st = await run_mtproxy_orig_self_test(
-            port=creds.mtproxy_orig_port,
-            secret_hex=creds.mtproxy_orig_secret,
-        )
-        post_preflight.append(st)
-        self_test_results["mtproto_orig"] = st.status == "ok"
+        mt_orig = responders["mtproto_orig"]
+        if getattr(mt_orig, "unavailable", False):
+            # Responder deliberately skipped its subprocess launch
+            # because the C MTProxy binary's upstream Telegram fleet is
+            # unreachable from this vantage (typical RU host). Running
+            # the loopback self-test would just time out for 12 s and
+            # land in the same "False" branch — skip the wait and
+            # surface the diagnostic now.
+            alive = getattr(mt_orig, "upstream_alive_count", 0)
+            total = getattr(mt_orig, "upstream_total_count", 0)
+            post_preflight.append(
+                CheckResult(
+                    "mtproxy-orig-self-test",
+                    "warn",
+                    (
+                        f"skipped: mtproto-proxy not launched ({alive}/{total} "
+                        f"proxy-multi.conf upstreams reachable on TCP/8888). "
+                        f"mtproto_orig sessions WILL report ERROR with the "
+                        f"diagnostic 'upstream unreachable' note — not a network "
+                        f"block of the obfuscated2 protocol itself."
+                    ),
+                )
+            )
+            self_test_results["mtproto_orig"] = False
+        else:
+            st = await run_mtproxy_orig_self_test(
+                port=creds.mtproxy_orig_port,
+                secret_hex=creds.mtproxy_orig_secret,
+            )
+            post_preflight.append(st)
+            self_test_results["mtproto_orig"] = st.status == "ok"
     if post_preflight:
         _print_preflight(post_preflight)
 
@@ -536,6 +561,25 @@ async def _async_main(
             responder,
             self_test_ok=self_test_results.get(name),
         )
+        # Override the generic "self-test failed" note with a more
+        # specific diagnostic for responders that were skipped because
+        # the upstream Telegram proxy fleet wasn't reachable. The
+        # responder_self_test_ok=False signal still drove the
+        # BLOCKED→ERROR downgrade inside finalize(); we just want the
+        # operator to read the actual reason in the report rather
+        # than the generic "loopback probe failed" wording.
+        if getattr(responder, "unavailable", False):
+            alive = getattr(responder, "upstream_alive_count", 0)
+            total = getattr(responder, "upstream_total_count", 0)
+            pr.note = (
+                f"mtproto-proxy not launched: {alive}/{total} proxy-multi.conf "
+                f"upstreams reachable on TCP/8888 — Telegram's proxy fleet is "
+                f"unreachable from this vantage (typical for RU hosts behind "
+                f"ТСПУ). The protocol cannot be tested end-to-end here; this "
+                f"is NOT evidence of the obfuscated2 protocol itself being "
+                f"blocked, just that the C MTProxy responder needs upstream "
+                f"reachability to operate."
+            )
         results[name] = pr
 
     # Print final table
@@ -865,7 +909,17 @@ def _print_responder_status(
         port_value = getattr(creds, attr)
         port_str = f"{transport}/{port_value}"
         if spec.name in responders:
-            table.add_row(spec.name, port_str, "[green]Running[/green]")
+            responder = responders[spec.name]
+            if getattr(responder, "unavailable", False):
+                alive = getattr(responder, "upstream_alive_count", 0)
+                total = getattr(responder, "upstream_total_count", 0)
+                table.add_row(
+                    spec.name,
+                    port_str,
+                    f"[yellow]Skipped ({alive}/{total} upstreams)[/yellow]",
+                )
+            else:
+                table.add_row(spec.name, port_str, "[green]Running[/green]")
         else:
             err = errors.get(spec.name, "unknown error")
             table.add_row(spec.name, port_str, f"[red]Failed: {err[:40]}[/red]")
