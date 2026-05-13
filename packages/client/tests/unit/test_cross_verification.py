@@ -153,3 +153,43 @@ class TestAsymmetricDpiDetection:
         final, note = _agreed_verdict(Verdict.BLOCKED, Verdict.OK)
         assert final == Verdict.OK
         assert "listener saw data" in note.lower()
+
+    def test_listener_handshake_only_client_blocked_with_timeout_fires_asymmetric_note(
+        self,
+    ) -> None:
+        # Verified live on MTS RU 2026-05-13: client@google-cloud probing
+        # listener@MTS for mtg faketls — listener's iptables OUTPUT
+        # counter ticked exactly once (SERVER_HELLO), no return traffic,
+        # so listener.finalize() landed HANDSHAKE_ONLY (handshake_count=1,
+        # data_transfer_ok=False). Client got
+        # ``welcome_read_timeout_record0`` because the TSPU on MTS
+        # ingress dropped the server→client return leg. The final
+        # verdict stays HANDSHAKE_ONLY, but the note must surface the
+        # asymmetric-DPI attribution instead of the generic
+        # ``client=BLOCKED`` fall-through, otherwise the operator
+        # cannot distinguish this from a regular HANDSHAKE_ONLY-with-
+        # client-error shape.
+        final, note = _agreed_verdict(
+            Verdict.BLOCKED,
+            Verdict.HANDSHAKE_ONLY,
+            client_error="welcome_read_timeout_record0",
+        )
+        assert final == Verdict.HANDSHAKE_ONLY
+        assert "asymmetric" in note.lower()
+        assert "server replied" in note.lower()
+
+    def test_listener_handshake_only_client_blocked_no_timeout_falls_through(
+        self,
+    ) -> None:
+        # Without an asymmetric-DPI marker, the listener-HANDSHAKE_ONLY +
+        # client-BLOCKED disagreement must keep the legacy ``client=X``
+        # fall-through note — the asymmetric branch must not over-
+        # claim attribution when the client never even reached the
+        # listener's bind port.
+        final, note = _agreed_verdict(
+            Verdict.BLOCKED,
+            Verdict.HANDSHAKE_ONLY,
+            client_error="connection_refused",
+        )
+        assert final == Verdict.HANDSHAKE_ONLY
+        assert "client=BLOCKED" in note

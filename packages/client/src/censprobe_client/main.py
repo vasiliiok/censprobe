@@ -827,16 +827,18 @@ def _agreed_verdict(
         view). Canonical Docker Desktop netstack-spoof quirk where
         ICMP/UDP responses appear locally even though nothing
         reached the server.
-      * ``asymmetric_dpi`` (since 2026-05-13): listener says OK,
+      * ``asymmetric_dpi`` (since 2026-05-13, broadened 2026-05-14):
         client says BLOCKED with a read-timeout-after-handshake error
-        marker (see ``_ASYMMETRIC_DPI_ERROR_MARKERS``). Confirmed on
-        MTS RU vantage: mtg's faketls SERVER_HELLO went out and the
-        listener counted ≥1 PSH-ACK, but the client never received
-        it before its 5-s deadline. TSPU dropped the server→client
-        leg. From an operator's perspective the protocol is NOT
-        usable, so we downgrade to HANDSHAKE_ONLY (the protocol
-        started but data plane is blocked) rather than masking it
-        as OK based purely on the server-side counter.
+        marker (see ``_ASYMMETRIC_DPI_ERROR_MARKERS``), and the
+        listener saw at least the handshake leave the wire — either
+        OK (the daemon completed the full server-side flow) or
+        HANDSHAKE_ONLY (the daemon emitted SERVER_HELLO but no
+        client reply ever came back because the return leg was
+        dropped). Both shapes mean "server replied, return path
+        filtered" — final = HANDSHAKE_ONLY with the explicit
+        attribution note. Verified on MTS RU 2026-05-13 for mtg
+        faketls: server PSH-ACK ticked, client got
+        ``welcome_read_timeout_record0``.
       * ``listener_overconfident`` (other shapes): listener=OK,
         client=BLOCKED but with a NON-timeout error (e.g.
         ``connection_refused`` from a Docker-loopback artefact).
@@ -847,15 +849,23 @@ def _agreed_verdict(
     # Both sides disagree — listener wins by default, but flag it.
     if client == Verdict.OK:
         return str(listener), "client overread (listener saw less)"
+    # Asymmetric DPI: client got a read-timeout-after-handshake while
+    # the listener saw the server side complete its part of the dance
+    # (full OK, or HANDSHAKE_ONLY when the daemon got SERVER_HELLO out
+    # but the symmetric response never came back from the client). In
+    # both cases the network dropped the server→client return leg, so
+    # the protocol is NOT usable from this client vantage — final
+    # collapses to HANDSHAKE_ONLY with the same explicit note.
+    if (
+        client == Verdict.BLOCKED
+        and listener in (Verdict.OK, Verdict.HANDSHAKE_ONLY)
+        and _is_asymmetric_dpi_error(client_error)
+    ):
+        return (
+            str(Verdict.HANDSHAKE_ONLY),
+            "asymmetric DPI: server replied but client did not receive",
+        )
     if listener == Verdict.OK:
-        if client == Verdict.BLOCKED and _is_asymmetric_dpi_error(client_error):
-            # Asymmetric DPI: server replied, client didn't receive.
-            # Downgrade to HANDSHAKE_ONLY so the operator sees that
-            # the protocol is NOT usable from this client vantage.
-            return (
-                str(Verdict.HANDSHAKE_ONLY),
-                "asymmetric DPI: server replied but client did not receive",
-            )
         return str(listener), "listener saw data the client missed"
     # Both non-OK but different (e.g. HANDSHAKE_ONLY vs BLOCKED).
     return str(listener), f"client={client}"
