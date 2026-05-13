@@ -720,15 +720,11 @@ def write_pruned_proxy_multi_conf(
 
     lines = [default_line]
     lines.extend(f"proxy_for {cluster} {ip}:{port};\n" for ip, port, cluster in alive)
-    # Sonar S2083 flags ``dest.write_text`` as a path-traversal sink
-    # because it can't statically prove the ``dest`` parameter is safe.
-    # The only production caller (``MTProxyOrigResponder.start``) builds
+    # S2083: production caller (``MTProxyOrigResponder.start``) builds
     # ``dest`` from ``Path(tempfile.gettempdir()) / f"proxy-multi-pruned-
-    # {secrets.token_hex(8)}.conf"`` — no user input flows in. Test
-    # callers pass pytest's ``tmp_path`` fixture, also caller-side
-    # provably-safe. NOSONAR is the right tool here — refactoring to
-    # accept a "safe path" subtype would be ceremony for no benefit.
-    dest.write_text("".join(lines))  # NOSONAR(pythonsecurity:S2083)
+    # {secrets.token_hex(8)}.conf"`` — provably caller-side safe (no
+    # user input). Tests pass pytest's ``tmp_path`` fixture, also safe.
+    dest.write_text("".join(lines))  # NOSONAR S2083
 
 
 async def run_mtproxy_orig_self_test(
