@@ -3,7 +3,7 @@
   "uid": "censprobe-01",
   "tags": ["censprobe"],
   "schemaVersion": 39,
-  "version": 3,
+  "version": 4,
   "refresh": "30s",
   "time": {"from": "now-30d", "to": "now"},
   "templating": {
@@ -216,6 +216,7 @@
       "options": {"colorMode": "value"},
       "fieldConfig": {
         "defaults": {
+          "noValue": "—",
           "mappings": [
             {
               "type": "value",
@@ -241,7 +242,7 @@
       "datasource": {"type": "postgres", "uid": "DS_CENSPROBE_PG"},
       "targets": [
         {
-          "rawSql": "SELECT array_to_string(recommended_protocols, ', ') AS \"Protocols\" FROM test_runs WHERE test_id = ${test_id:sqlstring} LIMIT 1",
+          "rawSql": "SELECT COALESCE(NULLIF(array_to_string(recommended_protocols, ', '), ''), 'none') AS \"Protocols\" FROM test_runs WHERE test_id = ${test_id:sqlstring} LIMIT 1",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -249,7 +250,12 @@
           "datasource": {"type": "postgres", "uid": "DS_CENSPROBE_PG"}
         }
       ],
-      "options": {"colorMode": "none"}
+      "options": {"colorMode": "none"},
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "—"
+        }
+      }
     },
     {
       "id": 9,

@@ -5,7 +5,7 @@
     "censprobe"
   ],
   "schemaVersion": 39,
-  "version": 5,
+  "version": 6,
   "refresh": "30s",
   "time": {
     "from": "now-30d",
@@ -223,8 +223,15 @@
                 "value": "—"
               },
               {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "auto",
+                  "wrapText": true
+                }
+              },
+              {
                 "id": "custom.width",
-                "value": 360
+                "value": 520
               }
             ]
           }

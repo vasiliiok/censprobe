@@ -15,6 +15,9 @@ build/
 # Docker volumes (local dev)
 pgdata/
 
+# Local-only compose overlays (image-renderer for dashboard verification, etc.)
+docker-compose.override.yml
+
 # Stray secrets — defensive guardrail; censprobe itself never writes these
 *.pem
 *.key
