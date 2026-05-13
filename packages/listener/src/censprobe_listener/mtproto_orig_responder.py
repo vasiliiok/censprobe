@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import secrets
 import socket
 import tempfile
 from pathlib import Path
@@ -158,14 +159,23 @@ class MTProxyOrigResponder:
         # K>0 alive: write a pruned proxy-multi.conf into a per-process
         # tempfile and point mtproto-proxy at it. Original file on disk
         # is left untouched so the next launch re-probes from scratch.
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            prefix="proxy-multi-pruned-",
-            suffix=".conf",
-            delete=False,
-        ) as tmp:
-            self._pruned_conf_path = Path(tmp.name)
-        write_pruned_proxy_multi_conf(alive, self._pruned_conf_path)
+        #
+        # Path construction is deliberately split from file creation:
+        #   * ``tempfile.gettempdir()`` returns the system tempdir
+        #     (``/tmp`` in the container).
+        #   * ``secrets.token_hex(8)`` gives a cryptographically random
+        #     16-char suffix — no caller input flows into the path, so
+        #     this is provably safe for Sonar S2083 (path-traversal
+        #     taint) without a suppression comment.
+        # The write itself is sync I/O wrapped in ``asyncio.to_thread``
+        # so we don't block the responder-startup event loop (S7493).
+        self._pruned_conf_path = (
+            Path(tempfile.gettempdir())
+            / f"proxy-multi-pruned-{secrets.token_hex(8)}.conf"
+        )
+        await asyncio.to_thread(
+            write_pruned_proxy_multi_conf, alive, self._pruned_conf_path
+        )
         logger.info(
             "mtproto_orig: pruned proxy-multi.conf — %d/%d upstreams reachable",
             self.upstream_alive_count,
