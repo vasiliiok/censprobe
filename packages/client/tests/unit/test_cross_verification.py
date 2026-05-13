@@ -97,3 +97,59 @@ class TestAgreedVerdict:
         final, note = _agreed_verdict(Verdict.ERROR, Verdict.BLOCKED)
         assert final == Verdict.BLOCKED
         assert "client=ERROR" in note
+
+
+class TestAsymmetricDpiDetection:
+    """``_agreed_verdict`` downgrades listener=OK + client=BLOCKED to
+    HANDSHAKE_ONLY when client error matches a "server replied but
+    return-path filtered" marker. Confirmed on MTS RU 2026-05-13:
+    listener sent the mtg faketls SERVER_HELLO (iptables PSH-ACK
+    counter ticked), but the client never received it — TSPU dropped
+    the server→client leg. From the operator's perspective the
+    protocol is NOT usable, so masking it as OK based purely on the
+    listener counter would be wrong."""
+
+    def test_listener_ok_client_blocked_with_welcome_timeout_is_handshake_only(
+        self,
+    ) -> None:
+        final, note = _agreed_verdict(
+            Verdict.BLOCKED,
+            Verdict.OK,
+            client_error="welcome_read_timeout_record0",
+        )
+        assert final == Verdict.HANDSHAKE_ONLY
+        assert "asymmetric" in note.lower()
+        assert "server replied" in note.lower()
+
+    def test_listener_ok_client_blocked_with_orig_respq_timeout_is_handshake_only(
+        self,
+    ) -> None:
+        # mtproto_orig (C MTProxy obfuscated2 path) version of the
+        # same return-path-dropped signature.
+        final, note = _agreed_verdict(
+            Verdict.BLOCKED,
+            Verdict.OK,
+            client_error="orig_resPQ_len_timeout_post_init",
+        )
+        assert final == Verdict.HANDSHAKE_ONLY
+        assert "asymmetric" in note.lower()
+
+    def test_listener_ok_client_blocked_with_other_error_stays_ok(self) -> None:
+        # ``connection_refused`` does NOT indicate a server reply was
+        # dropped — it indicates the client never reached the server
+        # at all (Docker loopback artefact, host-firewall, etc.). In
+        # that state the listener's OK reading is still authoritative.
+        final, note = _agreed_verdict(
+            Verdict.BLOCKED,
+            Verdict.OK,
+            client_error="connection_refused",
+        )
+        assert final == Verdict.OK
+        assert "listener saw data" in note.lower()
+
+    def test_listener_ok_client_blocked_with_no_error_stays_ok(self) -> None:
+        # Backward compatibility with callers that don't pass
+        # ``client_error``. Should never apply the downgrade.
+        final, note = _agreed_verdict(Verdict.BLOCKED, Verdict.OK)
+        assert final == Verdict.OK
+        assert "listener saw data" in note.lower()

@@ -782,7 +782,32 @@ def _listener_verdict(snap: LiveSnapshot) -> Verdict:
     return pr.verdict
 
 
-def _agreed_verdict(client: Verdict, listener: Verdict) -> tuple[str, str]:
+# Probe-side error markers that mean "the SERVER successfully responded
+# (or at least started to) but the response payload didn't reach us
+# before the read-deadline". Strongly suggests asymmetric DPI on the
+# return path — confirmed on MTS RU vantage 2026-05-13 for both
+# mtg variants (welcome_read_timeout_record + orig_resPQ_len_*).
+# Any other client error ("connection_refused", "tcp_timeout", network
+# errors at write time, etc.) is NOT asymmetric DPI — those mean the
+# client never reached the server at all, and listener=OK in that
+# state is a Docker-loopback/host-netstack quirk, not censorship.
+_ASYMMETRIC_DPI_ERROR_MARKERS = (
+    "welcome_read_timeout",
+    "orig_resPQ_len_timeout",
+    "orig_resPQ_body_timeout",
+    "orig_resPQ_truncated",
+)
+
+
+def _is_asymmetric_dpi_error(error: str | None) -> bool:
+    if not error:
+        return False
+    return any(marker in error for marker in _ASYMMETRIC_DPI_ERROR_MARKERS)
+
+
+def _agreed_verdict(
+    client: Verdict, listener: Verdict, client_error: str | None = None
+) -> tuple[str, str]:
     """Combine client + listener verdicts into a final + comment.
 
     The listener is authoritative — it's the one running the kernel
@@ -790,24 +815,43 @@ def _agreed_verdict(client: Verdict, listener: Verdict) -> tuple[str, str]:
     each protocol; whether anything actually arrived at the server
     is the listener's call.
 
-    Three outcomes:
+    Outcomes:
       * ``agree``: both sides report the same verdict. Final =
         either side, comment empty.
       * ``client_overconfident``: client says OK, listener says
         BLOCKED/HANDSHAKE_ONLY. Final = listener's (the strict
-        view). This is the canonical Windows Docker Desktop quirk
-        where ICMP/UDP responses get spoofed locally even though
-        nothing reached the server.
-      * ``listener_overconfident``: listener says OK, client
-        BLOCKED/HANDSHAKE_ONLY. Final = listener's (data did reach
-        server, client measurement underread).
+        view). Canonical Docker Desktop netstack-spoof quirk where
+        ICMP/UDP responses appear locally even though nothing
+        reached the server.
+      * ``asymmetric_dpi`` (since 2026-05-13): listener says OK,
+        client says BLOCKED with a read-timeout-after-handshake error
+        marker (see ``_ASYMMETRIC_DPI_ERROR_MARKERS``). Confirmed on
+        MTS RU vantage: mtg's faketls SERVER_HELLO went out and the
+        listener counted ≥1 PSH-ACK, but the client never received
+        it before its 5-s deadline. TSPU dropped the server→client
+        leg. From an operator's perspective the protocol is NOT
+        usable, so we downgrade to HANDSHAKE_ONLY (the protocol
+        started but data plane is blocked) rather than masking it
+        as OK based purely on the server-side counter.
+      * ``listener_overconfident`` (other shapes): listener=OK,
+        client=BLOCKED but with a NON-timeout error (e.g.
+        ``connection_refused`` from a Docker-loopback artefact).
+        Listener's OK reading is still trusted as authoritative.
     """
     if client == listener:
         return str(listener), ""
-    # Both sides disagree — listener wins, but flag it.
+    # Both sides disagree — listener wins by default, but flag it.
     if client == Verdict.OK:
         return str(listener), "client overread (listener saw less)"
     if listener == Verdict.OK:
+        if client == Verdict.BLOCKED and _is_asymmetric_dpi_error(client_error):
+            # Asymmetric DPI: server replied, client didn't receive.
+            # Downgrade to HANDSHAKE_ONLY so the operator sees that
+            # the protocol is NOT usable from this client vantage.
+            return (
+                str(Verdict.HANDSHAKE_ONLY),
+                "asymmetric DPI: server replied but client did not receive",
+            )
         return str(listener), "listener saw data the client missed"
     # Both non-OK but different (e.g. HANDSHAKE_ONLY vs BLOCKED).
     return str(listener), f"client={client}"
@@ -858,7 +902,7 @@ def _print_cross_verification(
             snap = LiveSnapshot()
 
         listener_v = _listener_verdict(snap)
-        final, note = _agreed_verdict(client_r.verdict, listener_v)
+        final, note = _agreed_verdict(client_r.verdict, listener_v, client_r.error)
         if note:
             disagreements += 1
 
