@@ -30,6 +30,7 @@
 | `censprobe_core.modules.telegram._test_dc_port` | `test_telegram_frame.py` | 1 | байт-точная сверка MTProto abridged-transport frame |
 | `censprobe_core.modules.telegram` (DC enumeration) | `test_telegram_enumerate.py` | 6 | DC × IP-family × port matrix expansion |
 | `censprobe_core.utils.validate_id` | `test_utils_validate_id.py` | 27 | path-traversal (`..`, `/`, `\`), `\x00`, U+200B, empty, max length, valid IDs |
+| `censprobe_core.protocol_probes._stamp_elapsed`, `censprobe_core.utils.stamp_test_elapsed` | `test_elapsed_ms_stamping.py` | 7 | decorator stamps `elapsed_ms` on `ProbeResult`/`TestResult` for both OK and error returns (regression: pre-2026-05 `(10ms)` display rendered TCP-connect time, not probe duration), preserves caller-supplied `elapsed_ms`, no-op on `None` return, exceptions propagate without stamp |
 | `censprobe_core.modules.dns._cert_san_covers_domain_family` | `test_dns_cert_san.py` | 18 | wildcard-apex relaxation, single-label match, RFC 6125 |
 | `censprobe_core.modules.tls._pick_neutral_sni` | `test_tls_neutral_sni.py` | 17 | per-IP-family neutral SNI selection (Cloudflare/Akamai/AWS prefixes) |
 | `censprobe_core.modules.http._verdict_from_response` (basic) | `test_http_classify.py` | 7 | 200/expected_status, 403/451 + valid_tls → `GEOBLOCK_NOT_CENSORSHIP` |
@@ -58,7 +59,7 @@
 | `censprobe_core.subcategories.derive` | `test_subcategories_property.py` | 4 | для любого test_name результат непуст и принадлежит замкнутому множеству |
 | `censprobe_core.utils.validate_id` | `test_validate_id_property.py` | 4 | accept-set / reject-set дискриминируются |
 
-**Probe-core total: 28 файлов, 373 теста.**
+**Probe-core total: 29 файлов, 385 тестов.**
 
 ---
 
@@ -79,15 +80,16 @@
 | `censprobe_listener` (whole pkg) | `unit/test_smoke_imports.py` | 1 | submodule import |
 | `censprobe_listener.credentials._awg_magic_headers`, `_apply_ports` | `unit/test_credentials_constraints.py` | 153 | H1..H4 pairwise distinct + не в `{1,2,3,4}`, S1+56 ≠ S2, `_apply_ports` complete-map требование (heavily parametrized — 50 итераций × несколько inv проверок) |
 | `censprobe_listener.credentials.creds_to_yaml`, `ProtocolCredentials` | `unit/test_credentials_yaml_roundtrip.py` | 14 | round-trip всех секций (включая `mtproto_proxy_alt` и `mtproto_orig` с `dd<32-hex>` секретом без SNI hex-suffix) без `wg`/`xray`/`openvpn` (synthetic creds), `enabled_protocols` filter, server-private fields НЕ leak в YAML, `_protocols_enabled` echo, alt-секрет независим от primary, mtproto_orig секрет независим от обоих mtg |
-| `censprobe_listener.preflight` | `unit/test_preflight.py` | 14 | conntrack health (`_check_conntrack` low-max + NOTRACK downgrade, high-water warn, missing /proc skip), `_check_iptables_capability` (no PATH = warn, rule-absent = ok proves CAP_NET_ADMIN, EPERM = warn with hint), `_cleanup_orphan_rules` (no rules → ok, orphans deleted via `-A→-D` conversion), `_check_telegram_dc_reach` (3 DC parallel TCP, all-unreachable warn), `run_preflight` orchestrator order |
+| `censprobe_listener.preflight` | `unit/test_preflight.py` | 29 | conntrack health (`_check_conntrack` low-max + NOTRACK downgrade, high-water warn, missing /proc skip), `_check_iptables_capability` (no PATH = warn, rule-absent = ok proves CAP_NET_ADMIN, EPERM = warn with hint), `_cleanup_orphan_rules` (no rules → ok, orphans deleted via `-A→-D` conversion), `_check_telegram_dc_reach` (3 DC parallel TCP, all-unreachable warn), `_check_mtproxy_orig_upstream_reach` (one-IP-per-cluster sample), `_parse_proxy_multi_upstreams` (canonical + malformed + dedup), `probe_all_proxy_multi_upstreams` (parallel TCP-probe of all upstreams, partitions alive/unreachable), `write_pruned_proxy_multi_conf` (mirrors default + emits proxy_for lines + asserts non-empty), `run_mtproxy_orig_self_test` (OK / BLOCKED→warn / timeout→warn), `run_preflight` orchestrator order |
 | `censprobe_listener.cred_server.CredServer` (snapshot endpoint) | `unit/test_cred_server_snapshot.py` | 9 | `/snapshot` bearer-token auth (401 / 403 / 200 paths), lifecycle (503 before `attach_responders` and after `detach_responders`), multi-serve (no exhaustion), per-protocol error surfacing (one responder's `live_snapshot` raising → typed `error` field, others still serialised), 404 on unrelated paths |
 | `censprobe_listener.openvpn_responder` | `unit/test_openvpn_status_parsing.py` | 18 | scanner-noise + tun-noise rejection (only `Auth read bytes` is unforgeable), 1500-byte fallback for hosts without iptables, **iptables INPUT counter AND-gated against `handshake_count > 0`** (Bug B regression: `data_pkts=8 + Auth=0 → not data_transfer_ok`), **`_max_auth_bytes_seen` latch** (real handshake captured before peer aged out via `keepalive 60` → counter zeroed → latched value still surfaces handshake) |
-| `censprobe_listener.mtproto_orig_responder` | `unit/test_mtproto_orig_responder.py` | 5 | secret parsing (dd-prefix stripped for `-S` argv), iptables OUTPUT PSH+ACK rule shape, idempotent re-install path |
+| `censprobe_listener.mtproto_orig_responder` | `unit/test_mtproto_orig_responder.py` | 8 | secret parsing (dd-prefix stripped for `-S` argv), iptables OUTPUT PSH+ACK rule shape, idempotent re-install path, **prune-storm guard**: `start()` does NOT spawn subprocess when 0/N upstreams alive (`TestStartSkipsWhenAllUpstreamsUnreachable`), `unavailable=True` flag surfaces upstream counts, `stop()` is no-op when responder skipped |
+| `censprobe_listener.main._mtproto_orig_failure_note` | `unit/test_mtproto_orig_failure_note.py` | 5 | per-vantage diagnostic note: passes through `None` for OK self-test / unconfigured; "not launched: 0/N upstreams" when `unavailable=True`; "launched with K/N alive but loopback self-test still timed out — likely L7 censor on auth_cluster RPC" when daemon wedged despite reachable upstreams (verified on Yandex Cloud RU, 2026-05-13) |
 | `censprobe_listener` handshake-pattern snapshot | `unit/test_handshake_pattern_snapshot.py` | 6 | regression: each responder uses the documented kernel-counter shape (mtproto-orig PSH+ACK iptables rule, openvpn UDP length filter, mtg PSH+ACK on OUTPUT) — guards against silent regression on rule semantics |
 | `censprobe_listener.main._generate_session_id` | `unit/test_session_id_generation.py` | 8 | prefix encoding for `--mobile`/`--white` flag combos (`plain-`, `mob-`, `white-`, `mob-white-`), 4-uppercase-hex suffix shape, distinct IDs across calls, SAFE_ID_RE contract for filesystem + FastAPI path |
 | `censprobe_listener.credentials._awg_magic_headers` | `property/test_credentials_property.py` | 4 | Hypothesis @settings(derandomize=True, max_examples=500) на AWG header invariants + S-сравнение |
 
-**Listener total: 10 файлов, 236 collected tests.** Большая часть — `parametrize`-расширения в `test_credentials_constraints.py`. Subprocess-respondery (ss/vless/hysteria/openvpn/wg) verifyются via `e2e-dashboard` или ручной запуск. `cred_server.CredServer` POW покрывает только snapshot endpoint; `_serve_creds` остаётся покрытым только E2E.
+**Listener total: 11 файлов, 259 collected tests.** Большая часть — `parametrize`-расширения в `test_credentials_constraints.py`. Subprocess-respondery (ss/vless/hysteria/openvpn/wg) verifyются via `e2e-dashboard` или ручной запуск. `cred_server.CredServer` POW покрывает только snapshot endpoint; `_serve_creds` остаётся покрытым только E2E.
 
 ---
 
@@ -170,14 +172,14 @@
 
 | Tree | Файлы | Тестов (collected) | Покрытие |
 |------|-------:|-------:|----------|
-| `packages/probe-core/tests` | 28 | 373 | плотное (config, scoring, subcategories, runner, все 8 модулей измерений, credentials_reader, protocol_probes helpers + ping_echo + mtproto BLOCKED-on-timeout, ProtocolResult.finalize truth table) |
+| `packages/probe-core/tests` | 29 | 385 | плотное (config, scoring, subcategories, runner, все 8 модулей измерений, credentials_reader, protocol_probes helpers + ping_echo + mtproto BLOCKED-on-timeout, `_stamp_elapsed`/`stamp_test_elapsed` decorators, ProtocolResult.finalize truth table) |
 | `packages/solo/tests` | 1 | 1 | smoke-only |
-| `packages/listener/tests` | 10 | 236 | credentials + AWG invariants (parametrize-heavy), preflight checks, openvpn AND-gate + auth-bytes latch, mtproto-orig responder, cred_server `/snapshot` endpoint, `_generate_session_id` prefix encoding + SAFE_ID contract |
+| `packages/listener/tests` | 11 | 259 | credentials + AWG invariants (parametrize-heavy), preflight checks (incl. `probe_all_proxy_multi_upstreams` + `write_pruned_proxy_multi_conf`), openvpn AND-gate + auth-bytes latch, mtproto-orig responder (incl. prune-storm guard for 0-alive vantages), `_mtproto_orig_failure_note` (per-vantage diagnostics), cred_server `/snapshot` endpoint, `_generate_session_id` prefix encoding + SAFE_ID contract |
 | `packages/client/tests` | 3 | 31 | smoke + cross-verification helpers + retry policy (transient/permanent classification) |
 | `packages/sync/tests` | 3 | 33 | smoke + cert pinning (FP normalisation, pinned TLS fetch, DER→PEM round-trip, fresh-fingerprint per session) + click CLI shape |
 | `packages/dashboard/sync-api/tests` | 8 | 105 | parser + endpoints + DB schema |
 | `tests/` (workspace) | 6 | 14 | contracts + snapshots + e2e (`e2e-dashboard` job, 2 deselected по дефолту) |
-| **Total** | **59** | **795** (после parametrize, из них 793 default + 2 deselected e2e) | — |
+| **Total** | **61** | **828** (после parametrize) | — |
 
 ---
 

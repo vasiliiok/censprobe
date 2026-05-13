@@ -561,25 +561,10 @@ async def _async_main(
             responder,
             self_test_ok=self_test_results.get(name),
         )
-        # Override the generic "self-test failed" note with a more
-        # specific diagnostic for responders that were skipped because
-        # the upstream Telegram proxy fleet wasn't reachable. The
-        # responder_self_test_ok=False signal still drove the
-        # BLOCKED→ERROR downgrade inside finalize(); we just want the
-        # operator to read the actual reason in the report rather
-        # than the generic "loopback probe failed" wording.
-        if getattr(responder, "unavailable", False):
-            alive = getattr(responder, "upstream_alive_count", 0)
-            total = getattr(responder, "upstream_total_count", 0)
-            pr.note = (
-                f"mtproto-proxy not launched: {alive}/{total} proxy-multi.conf "
-                f"upstreams reachable on TCP/8888 — Telegram's proxy fleet is "
-                f"unreachable from this vantage (typical for RU hosts behind "
-                f"ТСПУ). The protocol cannot be tested end-to-end here; this "
-                f"is NOT evidence of the obfuscated2 protocol itself being "
-                f"blocked, just that the C MTProxy responder needs upstream "
-                f"reachability to operate."
-            )
+        if name == "mtproto_orig":
+            override = _mtproto_orig_failure_note(responder, self_test_results.get(name))
+            if override is not None:
+                pr.note = override
         results[name] = pr
 
     # Print final table
@@ -772,6 +757,62 @@ def _finalize_protocol_result(
     )
     pr.finalize()
     return pr
+
+
+def _mtproto_orig_failure_note(responder: Responder, self_test_ok: bool | None) -> str | None:
+    """Return a vantage-specific diagnostic note for a failed
+    ``mtproto_orig`` session, or ``None`` if the generic note from
+    :meth:`ProtocolResult.finalize` is already accurate.
+
+    There are two distinct failure shapes that both surface as
+    ``self_test_ok=False`` but have different operator-actionable
+    root causes:
+
+    * **All upstreams unreachable** (``responder.unavailable=True``):
+      every IP in ``proxy-multi.conf`` failed TCP/8888 at prune time,
+      so the C MTProxy subprocess was never even launched. Typical for
+      RU vantages where ТСПУ drops TCP/8888 to ``91.108.4.0/24`` and
+      ``149.154.0.0/16`` outright.
+
+    * **Daemon launched but wedged anyway**
+      (``responder.unavailable=False`` AND ``self_test_ok=False``):
+      prune found ≥ 1 alive upstream and the C binary actually started,
+      but the 12-s loopback self-test still timed out. Empirically the
+      cause on Yandex Cloud RU hosts is that ТСПУ blocks the L7
+      ``auth_cluster`` RPC heartbeat *after* the TCP-handshake (so the
+      SYN-probe at prune time passes), which keeps the daemon stuck in
+      its outbound-auth phase and starves ``accept4()`` — verified on
+      2026-05-13 at 89.169.137.79 (18/19 upstreams alive, 12-s timeout).
+
+    Both produce ``Verdict.ERROR``; we just want the JSON report's
+    ``note`` field to encode which case the operator is looking at,
+    instead of ``ProtocolResult.finalize()``'s generic "self-test
+    failed at startup" string.
+    """
+    if self_test_ok is not False:
+        return None
+    alive = getattr(responder, "upstream_alive_count", 0)
+    total = getattr(responder, "upstream_total_count", 0)
+    if getattr(responder, "unavailable", False):
+        return (
+            f"mtproto-proxy not launched: {alive}/{total} proxy-multi.conf "
+            f"upstreams reachable on TCP/8888 — Telegram's proxy fleet is "
+            f"unreachable from this vantage (typical for RU hosts behind "
+            f"ТСПУ). The protocol cannot be tested end-to-end here; this "
+            f"is NOT evidence of the obfuscated2 protocol itself being "
+            f"blocked, just that the C MTProxy responder needs upstream "
+            f"reachability to operate."
+        )
+    return (
+        f"mtproto-proxy launched with {alive}/{total} upstreams alive "
+        f"but the listener-side loopback self-test still timed out "
+        f"after 12 s — the C MTProxy slave never accepted its own "
+        f"connection. Likely an L7 censor blocking the daemon's "
+        f"auth_cluster RPC heartbeat to Telegram DCs (TCP/8888 SYN "
+        f"passes but the L7 payload is filtered), or the daemon is "
+        f"wedged for an unrelated reason. The obfuscated2 protocol "
+        f"itself is NOT confirmed blocked by this verdict."
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
