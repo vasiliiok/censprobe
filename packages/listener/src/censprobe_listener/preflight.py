@@ -744,10 +744,11 @@ async def run_mtproxy_orig_self_test(
     probe window — producing the exact BLOCKED-shape failure that
     looks like DPI silent-drop but is purely server-side.
 
-    On WARN, the listener still serves sessions; ``_finalize_protocol_result``
-    will downgrade the mtproto_orig verdict from BLOCKED → ERROR with a
-    diagnostic note instead of misclassifying the responder bug as
-    censorship.
+    On WARN, the listener still serves sessions; the session-time
+    verdict will be ``BLOCKED`` with a vantage-specific diagnostic
+    note from ``_mtproto_orig_failure_note`` (L7 ТСПУ on RU vs local
+    daemon issue elsewhere) so the operator sees both the censorship
+    interpretation and the L7-vs-local attribution.
     """
     # Imported lazily to avoid pulling probe-core into the
     # listener-startup hot path when this check is skipped (e.g.
@@ -766,10 +767,12 @@ async def run_mtproxy_orig_self_test(
             "warn",
             (
                 f"loopback probe of mtproto_orig:{port} timed out after "
-                f"{timeout_s:.0f}s — responder appears wedged (likely C "
-                f"MTProxy auth_cluster reconnect loop starving accept(); "
-                f"strace the slave pid + tune -M N to confirm). Sessions "
-                f"WILL be downgraded BLOCKED→ERROR for this protocol."
+                f"{timeout_s:.0f}s — responder appears wedged (likely L7 "
+                f"ТСПУ filtering the C MTProxy auth_cluster RPC heartbeat "
+                f"on RU vantages, starving accept(); strace the slave pid + "
+                f"tune -M N to disambiguate from a local daemon issue). "
+                f"Sessions will report BLOCKED with a diagnostic note "
+                f"explaining the L7-vs-local attribution."
             ),
         )
     except Exception as e:
@@ -798,8 +801,9 @@ async def run_mtproxy_orig_self_test(
         "warn",
         (
             f"loopback probe returned {result.verdict} (note: {note_str}) — "
-            f"responder cannot handshake against itself; session BLOCKED "
-            f"verdicts for mtproto_orig will be downgraded to ERROR."
+            f"responder cannot handshake against itself; sessions will "
+            f"report BLOCKED with a diagnostic note disambiguating L7 "
+            f"ТСПУ (likely on RU) from a local daemon issue."
         ),
     )
 

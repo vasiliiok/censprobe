@@ -422,7 +422,11 @@ class TestMtproxyOrigSelfTest:
             preflight.run_mtproxy_orig_self_test(port=2080, secret_hex="dd" + "00" * 16)
         )
         assert r.status == "warn"
-        assert "ERROR" in r.message  # explains the downgrade behaviour
+        # New design (2026-05-14): the warning explains that sessions
+        # will surface BLOCKED with a diagnostic note instead of being
+        # downgraded to ERROR. Pin the BLOCKED + diagnostic-note hint.
+        assert "BLOCKED" in r.message
+        assert "diagnostic note" in r.message
 
     def test_warn_when_probe_hangs(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import asyncio

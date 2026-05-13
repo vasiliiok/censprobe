@@ -767,11 +767,15 @@ def _listener_verdict(snap: LiveSnapshot) -> Verdict:
 
     Same predicates the listener will use when committing the JSON
     report at session end — delegated to ``ProtocolResult.finalize()``
-    so the BLOCKED→ERROR downgrade for failed-self-test responders
-    fires consistently on both sides of the cross-verification. Without
-    delegating, the cross-verification table would still print BLOCKED
-    while the JSON report (and Grafana, via sync-api) showed ERROR for
-    the same row — confusing operators about which signal to trust.
+    so client + listener agree on the verdict shape on both sides of
+    the cross-verification.
+
+    Since 2026-05-14 ``finalize()`` no longer downgrades BLOCKED→ERROR
+    on a failed self-test — a wedged listener responder produces the
+    same end-to-end failure the client sees, so both sides report
+    BLOCKED and the operator gets a single coherent verdict. The
+    per-protocol failure-note on the listener side carries the L7-vs-
+    local attribution for the operator.
     """
     pr = ProtocolResult(
         handshake_count=snap.handshake_count,

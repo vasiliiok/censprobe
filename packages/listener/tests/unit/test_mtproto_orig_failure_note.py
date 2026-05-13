@@ -1,7 +1,8 @@
 """
 Tests for ``_mtproto_orig_failure_note`` — the per-vantage diagnostic
-note that overrides :meth:`ProtocolResult.finalize`'s generic
-"self-test failed at startup" wording on mtproto_orig ERROR results.
+note that the listener attaches to a failed mtproto_orig session so
+the operator sees WHY the protocol failed instead of just a bare
+BLOCKED verdict.
 
 Two failure shapes verified live on 2026-05-13:
 
@@ -15,10 +16,11 @@ Two failure shapes verified live on 2026-05-13:
     the C MTProxy ``auth_cluster`` RPC stream rather than a TCP-level
     block.
 
-Both already drive the BLOCKED→ERROR downgrade. These tests just
-verify that the operator-facing ``ProtocolResult.note`` string tells
-them which shape they are looking at, instead of the generic
-ProtocolResult.finalize() wording.
+Since 2026-05-14 both shapes produce ``Verdict.BLOCKED`` (no longer
+ERROR — the operator experience and client verdict both match the
+"protocol doesn't work" reading). The note tells them which shape
+they're looking at so they can attribute L7 ТСПУ vs local daemon
+without re-running the session.
 """
 
 from __future__ import annotations
@@ -65,9 +67,9 @@ class TestMtprotoOrigFailureNote:
         assert note is not None
         assert "0/16" in note
         assert "not launched" in note
-        # Reassure the operator that the obfuscated2 protocol itself
-        # is NOT what's being reported as blocked here.
-        assert "NOT evidence" in note
+        # The prune-zero-alive case is positive network-block evidence —
+        # the note must explicitly say so to justify the BLOCKED verdict.
+        assert "confirmed unreachable" in note
 
     def test_launched_but_wedged_note(self) -> None:
         # Shape 2: prune found upstreams (subprocess WAS launched), but
@@ -82,8 +84,9 @@ class TestMtprotoOrigFailureNote:
         # The L7 / auth_cluster pointer is the load-bearing diagnostic
         # — without it the operator can't distinguish this from shape 1.
         assert "auth_cluster" in note
-        # Same "NOT confirmed blocked" reassurance as shape 1.
-        assert "NOT confirmed blocked" in note
+        # Operators need the L7-vs-local hint to interpret the BLOCKED
+        # verdict — on RU it's TSPU, on non-RU it's likely a daemon issue.
+        assert "non-RU" in note
 
     def test_unavailable_overrides_alive_count_when_both_set(self) -> None:
         # Defensive: if upstream_alive_count > 0 but unavailable=True

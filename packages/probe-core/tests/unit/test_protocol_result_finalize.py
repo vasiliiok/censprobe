@@ -64,26 +64,36 @@ def test_live_snapshot_default_fields() -> None:
     assert snap.bytes_received is None
 
 
-class TestSelfTestDowngrade:
-    """``finalize()`` reclassifies BLOCKED → ERROR when the listener
-    self-test confirmed the responder couldn't even handshake against
-    itself, preserving the strict "BLOCKED ≡ confirmed block" invariant.
+class TestSelfTestNoLongerDowngradesVerdict:
+    """Since 2026-05-14 ``finalize()`` does NOT downgrade BLOCKED→ERROR
+    on a failed self-test. The wedged-responder scenario on RU
+    vantages is empirically a downstream effect of TSPU L7-filtering
+    the C MTProxy auth_cluster RPC heartbeat — same end-to-end
+    blocking the client experiences — so the operator-facing verdict
+    matches the client's BLOCKED. The L7-vs-local attribution is
+    surfaced via the per-protocol failure-note in listener main.
+
+    These tests pin the verdict truth table — verdict depends ONLY on
+    the data-flow signals (data_transfer_ok, handshake_count). The
+    ``responder_self_test_ok`` field is diagnostic-only.
     """
 
-    def test_blocked_downgraded_to_error_when_self_test_failed(self) -> None:
+    def test_blocked_stays_blocked_when_self_test_failed(self) -> None:
+        # Self-test failed → wedged responder. Client probes will hit the
+        # same end-to-end blocking, so listener reports BLOCKED to match
+        # client. Attribution (L7 censor vs local daemon) lives in the
+        # per-protocol failure-note that listener main attaches afterwards.
         pr = ProtocolResult(
             handshake_count=0,
             data_transfer_ok=False,
             responder_self_test_ok=False,
         )
         pr.finalize()
-        assert pr.verdict == Verdict.ERROR
-        assert pr.note is not None and "responder self-test" in pr.note
+        assert pr.verdict == Verdict.BLOCKED
+        assert pr.note is None
 
-    def test_blocked_preserved_when_self_test_passed(self) -> None:
-        """If the responder DID handshake against itself, a session-time
-        BLOCKED is a confirmed network block — the downgrade must NOT
-        fire and the verdict must stay BLOCKED."""
+    def test_blocked_stays_blocked_when_self_test_passed(self) -> None:
+        # Self-test passed — pure network-side BLOCKED. Unchanged.
         pr = ProtocolResult(
             handshake_count=0,
             data_transfer_ok=False,
@@ -93,9 +103,9 @@ class TestSelfTestDowngrade:
         assert pr.verdict == Verdict.BLOCKED
         assert pr.note is None
 
-    def test_blocked_preserved_when_no_self_test_configured(self) -> None:
-        """Protocols without a self-test (None) must follow the
-        unmodified truth table — the field is purely additive."""
+    def test_blocked_stays_blocked_when_no_self_test_configured(self) -> None:
+        # Protocols without a self-test (most of them) follow the same
+        # truth table — verdict comes from the data signals only.
         pr = ProtocolResult(
             handshake_count=0,
             data_transfer_ok=False,
@@ -105,9 +115,9 @@ class TestSelfTestDowngrade:
         assert pr.verdict == Verdict.BLOCKED
         assert pr.note is None
 
-    def test_ok_not_downgraded_even_if_self_test_failed(self) -> None:
-        """If real data did flow, the responder clearly recovered after
-        the startup self-test — never reclassify OK on a stale signal."""
+    def test_ok_unaffected_by_self_test(self) -> None:
+        # If real data flowed, verdict is OK regardless of self-test
+        # state (responder clearly recovered after the startup probe).
         pr = ProtocolResult(
             handshake_count=1,
             data_transfer_ok=True,
@@ -116,10 +126,8 @@ class TestSelfTestDowngrade:
         pr.finalize()
         assert pr.verdict == Verdict.OK
 
-    def test_handshake_only_not_downgraded(self) -> None:
-        """HANDSHAKE_ONLY implies handshake_count > 0 — the responder is
-        clearly accepting connections, so the self-test must have been
-        a transient glitch. Don't rewrite the verdict."""
+    def test_handshake_only_unaffected_by_self_test(self) -> None:
+        # HANDSHAKE_ONLY implies handshake_count > 0 — also unaffected.
         pr = ProtocolResult(
             handshake_count=2,
             data_transfer_ok=False,

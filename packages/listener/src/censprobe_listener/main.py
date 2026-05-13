@@ -450,9 +450,11 @@ async def _async_main(
                     (
                         f"skipped: mtproto-proxy not launched ({alive}/{total} "
                         f"proxy-multi.conf upstreams reachable on TCP/8888). "
-                        f"mtproto_orig sessions WILL report ERROR with the "
-                        f"diagnostic 'upstream unreachable' note — not a network "
-                        f"block of the obfuscated2 protocol itself."
+                        f"mtproto_orig sessions WILL report BLOCKED — the "
+                        f"prune itself is positive evidence that Telegram's "
+                        f"DC fleet is unreachable from this vantage (typical "
+                        f"for RU hosts behind ТСПУ on TCP/8888 to "
+                        f"91.108.4.0/24 and 149.154.0.0/16)."
                     ),
                 )
             )
@@ -720,9 +722,12 @@ def _finalize_protocol_result(
     ``self_test_ok`` is the listener-side startup loopback-probe outcome
     for this protocol — ``True`` when the responder successfully
     handshook against itself, ``False`` when it didn't, ``None`` when
-    no self-test was configured. ``ProtocolResult.finalize()`` consumes
-    this signal to downgrade a False-test BLOCKED → ERROR with a note,
-    preserving the strict "BLOCKED ≡ confirmed block" invariant.
+    no self-test was configured. As of 2026-05-14 the field is
+    diagnostic-only: it's stored on the result for the per-protocol
+    failure-note formatter (``_mtproto_orig_failure_note``) and the
+    client's cross-verification snapshot, but does NOT change the
+    verdict. A wedged responder still produces BLOCKED — operator
+    experience matches client experience.
     """
     # Different responders expose the field under different historical
     # names; prefer `connection_count` (the canonical one) and fall back
@@ -761,33 +766,33 @@ def _finalize_protocol_result(
 
 def _mtproto_orig_failure_note(responder: Responder, self_test_ok: bool | None) -> str | None:
     """Return a vantage-specific diagnostic note for a failed
-    ``mtproto_orig`` session, or ``None`` if the generic note from
-    :meth:`ProtocolResult.finalize` is already accurate.
+    ``mtproto_orig`` session, or ``None`` if the responder reported OK.
 
-    There are two distinct failure shapes that both surface as
-    ``self_test_ok=False`` but have different operator-actionable
-    root causes:
+    Two distinct failure shapes both surface as ``self_test_ok=False``
+    AND a session-time BLOCKED verdict (handshake_count=0, no data):
 
     * **All upstreams unreachable** (``responder.unavailable=True``):
       every IP in ``proxy-multi.conf`` failed TCP/8888 at prune time,
       so the C MTProxy subprocess was never even launched. Typical for
       RU vantages where ТСПУ drops TCP/8888 to ``91.108.4.0/24`` and
-      ``149.154.0.0/16`` outright.
+      ``149.154.0.0/16`` outright. The prune itself is **positive
+      network-block evidence** — the Telegram DC fleet is confirmed
+      unreachable from this vantage, which IS the censorship signal.
 
     * **Daemon launched but wedged anyway**
       (``responder.unavailable=False`` AND ``self_test_ok=False``):
       prune found ≥ 1 alive upstream and the C binary actually started,
-      but the 12-s loopback self-test still timed out. Empirically the
-      cause on Yandex Cloud RU hosts is that ТСПУ blocks the L7
-      ``auth_cluster`` RPC heartbeat *after* the TCP-handshake (so the
-      SYN-probe at prune time passes), which keeps the daemon stuck in
-      its outbound-auth phase and starves ``accept4()`` — verified on
-      2026-05-13 at 89.169.137.79 (18/19 upstreams alive, 12-s timeout).
+      but the 12-s loopback self-test still timed out. On RU hosts the
+      empirical cause is that ТСПУ filters the L7 ``auth_cluster`` RPC
+      heartbeat *after* the TCP-handshake (so the SYN-probe at prune
+      time passes), starving ``accept4()`` — verified on 2026-05-13
+      at 89.169.137.79 (18/19 upstreams alive, 12-s timeout). On non-RU
+      hosts this can also be a local daemon issue; the operator
+      interprets the note against vantage location.
 
-    Both produce ``Verdict.ERROR``; we just want the JSON report's
-    ``note`` field to encode which case the operator is looking at,
-    instead of ``ProtocolResult.finalize()``'s generic "self-test
-    failed at startup" string.
+    Both produce ``Verdict.BLOCKED`` (per the 2026-05-14 design — the
+    protocol genuinely does not work end-to-end from this vantage; the
+    note disambiguates the L7 vs local cause for the rare non-RU case).
     """
     if self_test_ok is not False:
         return None
@@ -797,21 +802,20 @@ def _mtproto_orig_failure_note(responder: Responder, self_test_ok: bool | None) 
         return (
             f"mtproto-proxy not launched: {alive}/{total} proxy-multi.conf "
             f"upstreams reachable on TCP/8888 — Telegram's proxy fleet is "
-            f"unreachable from this vantage (typical for RU hosts behind "
-            f"ТСПУ). The protocol cannot be tested end-to-end here; this "
-            f"is NOT evidence of the obfuscated2 protocol itself being "
-            f"blocked, just that the C MTProxy responder needs upstream "
-            f"reachability to operate."
+            f"confirmed unreachable from this vantage (typical for RU hosts "
+            f"behind ТСПУ which drops TCP/8888 to 91.108.4.0/24 and "
+            f"149.154.0.0/16). The prune itself is the network-block "
+            f"signal — mtproto_orig cannot work end-to-end here."
         )
     return (
         f"mtproto-proxy launched with {alive}/{total} upstreams alive "
         f"but the listener-side loopback self-test still timed out "
         f"after 12 s — the C MTProxy slave never accepted its own "
-        f"connection. Likely an L7 censor blocking the daemon's "
-        f"auth_cluster RPC heartbeat to Telegram DCs (TCP/8888 SYN "
-        f"passes but the L7 payload is filtered), or the daemon is "
-        f"wedged for an unrelated reason. The obfuscated2 protocol "
-        f"itself is NOT confirmed blocked by this verdict."
+        f"connection. On RU vantages this is consistently caused by "
+        f"L7 ТСПУ filtering of the daemon's auth_cluster RPC heartbeat "
+        f"(TCP/8888 SYN passes prune but the RPC payload is dropped). "
+        f"On non-RU vantages it can also be a local daemon issue — "
+        f"strace the slave pid + tune -M N to disambiguate."
     )
 
 
