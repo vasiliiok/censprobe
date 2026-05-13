@@ -549,7 +549,7 @@ Postgres + Grafana образы pinned по digest (`postgres:16@sha256:...`, `g
 | **01 — Test Overview** | — | Censorship Resistance Score, DNS/TLS/Telegram, техники цензуры, рекомендуемые протоколы. Точка входа со ссылками на drill-down |
 | **02 — Blocking Matrix** | — | Полная матрица всех тестов с цветовой раскраской по вердикту |
 | **03 — Telegram Deep Dive** | ✓ | Telegram-health bar chart по серверам, досягаемость DC, verdict distribution, RTT-гистограмма |
-| **04 — Protocol Reachability** | ✓ | Матрица досягаемости протоколов по клиентским сессиям с колонкой `server` + ASN сетей клиентов |
+| **04 — Protocol Reachability** | ✓ | Матрица досягаемости протоколов по клиентским сессиям с колонкой `server` + ASN сетей клиентов + колонка `Diagnostic` (per-протокол note: self-test downgrade либо vantage-specific mtproto_orig prune/wedged шапка) |
 | **05 — Technique Attribution** | — | Атрибуция техник цензуры (DNS poisoning, RST injection, throttling, middlebox) |
 | **06 — Analytics & Compare** | ✓ (`var_test_id`) | N-way сравнение по 7 осям: company / ASN / DC / country / city / test_id / **client_network** (mobile/whitelist/regular). Ranked панели «худшие N серверов» для telegram_health / DNS / TLS integrity. Per-protocol ranked: top-N компаний по выбранному протоколу |
 | **07 — Cloudflare & WARP** | — | WARP control plane (TCP 443), MASQUE и WireGuard UDP fallback-порты, Cloudflare CDN/HTTP |
@@ -571,7 +571,7 @@ FastAPI на `127.0.0.1:8080`:
 - `GET /results/{id}` — все результаты для теста.
 - `GET /protocols/{id}` — все `ProtocolResult` для сессии (listener report).
 
-Schema создаётся при первом старте через SQLAlchemy `create_all` (без alembic — single-developer project). Таблицы: `test_runs`, `test_results`, `listener_sessions`, `protocol_results`. Cascade delete при удалении `TestRun`.
+Schema создаётся при первом старте через SQLAlchemy `create_all` (без alembic — single-developer project). Таблицы: `test_runs`, `test_results`, `listener_sessions`, `protocol_results`. Cascade delete при удалении `TestRun`. `test_results.elapsed_ms` (NULLable Float, 2026-05) хранит uniform wall-clock пробы; `protocol_results.note` (NULLable Text, 2026-05) хранит per-протокол diagnostic из listener `ProtocolResult.note` — surfaced в дашборде 04 как колонка `Diagnostic`.
 
 > **Миграции при изменении модели** — `create_all()` no-op для существующих таблиц. После добавления/удаления колонок (например `test_runs.listener_session_count`) prod-DB не подхватит изменение само. Pattern проекта: `docker compose --profile dashboard down -v` → `up -d` → пайплайн импорта восстанавливает данные из `reports/` (single source of truth). Альтернатива — ручной `ALTER TABLE` под конкретную правку.
 

@@ -176,6 +176,12 @@ def parse_listener_report(
                     default=None,
                 ),
                 "throughput_throttled": bool(pr.get("throughput_throttled", False)),
+                # Per-protocol free-text diagnostic from the listener
+                # (self-test downgrade or mtproto_orig prune/wedged
+                # branches). Older reports predate the field — the
+                # explicit ``or None`` keeps the column NULL instead of
+                # writing an empty string into the DB.
+                "note": (str(pr["note"]) if isinstance(pr.get("note"), str) else None),
             }
         )
 

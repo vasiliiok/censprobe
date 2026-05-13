@@ -271,6 +271,16 @@ class ProtocolResult(Base):
     # dashboards as an operator signal; NEVER used by scoring.
     avg_throughput_mbps: Mapped[float | None] = mapped_column(Float, nullable=True)
     throughput_throttled: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Free-text diagnostic from the listener's ProtocolResult.note. Two
+    # producers populate it today: (a) the listener-side self-test
+    # downgrade ("listener-side responder self-test failed at startup —
+    # this BLOCKED-shape result is not a confirmed network block …"),
+    # and (b) the per-vantage `_mtproto_orig_failure_note` ("mtproto-proxy
+    # not launched: 0/19 …" vs "launched with K/N upstreams alive but the
+    # listener-side loopback self-test still timed out …"). Surfacing
+    # this in the dashboard turns a bare BLOCKED/ERROR tile into an
+    # operator-actionable diagnosis without re-running the test.
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     session = relationship("ListenerSession", back_populates="protocol_results")
 

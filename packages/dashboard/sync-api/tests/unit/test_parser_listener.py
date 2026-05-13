@@ -95,6 +95,70 @@ class TestParseListenerReport:
         assert protos[0]["avg_throughput_mbps"] == pytest.approx(5.6)
         assert protos[0]["throughput_throttled"] is True
 
+    def test_note_field_threaded_through(self, tmp_path: Path) -> None:
+        # Listener writes ProtocolResult.note for two real producers
+        # (self-test downgrade and mtproto_orig prune/wedged branches).
+        # The parser must surface it so the dashboard's Diagnostic column
+        # actually has the per-vantage text — without this, the operator
+        # sees a bare BLOCKED/ERROR tile with no clue why.
+        note_text = (
+            "mtproto-proxy not launched: 0/19 proxy-multi.conf upstreams reachable on TCP/8888"
+        )
+        path = _write(
+            tmp_path / "server-listener-x.json",
+            {
+                "results": {
+                    "mtproto_orig": {
+                        "verdict": "ERROR",
+                        "handshake_count": 0,
+                        "data_transfer_ok": False,
+                        "note": note_text,
+                    }
+                }
+            },
+        )
+        _, protos = parse_listener_report(path)
+        assert protos[0]["note"] == note_text
+
+    def test_note_missing_falls_back_to_none(self, tmp_path: Path) -> None:
+        # Older listener reports predate ``note`` — column must be NULL,
+        # not an empty string, so the dashboard's noValue placeholder
+        # (`—`) renders instead of a blank cell.
+        path = _write(
+            tmp_path / "server-listener-x.json",
+            {
+                "results": {
+                    "wireguard": {
+                        "verdict": "OK",
+                        "handshake_count": 1,
+                        "data_transfer_ok": True,
+                    }
+                }
+            },
+        )
+        _, protos = parse_listener_report(path)
+        assert protos[0]["note"] is None
+
+    def test_note_wrong_type_coerced_to_none(self, tmp_path: Path) -> None:
+        # A defensive guard against future schema drift — if a producer
+        # somehow writes a non-string into ``note`` it must NOT crash
+        # the importer or land as a stringified dict in the DB.
+        path = _write(
+            tmp_path / "server-listener-x.json",
+            {
+                "results": {
+                    "openvpn": {
+                        "verdict": "BLOCKED",
+                        "handshake_count": 0,
+                        "data_transfer_ok": False,
+                        "note": {"unexpected": "object"},
+                    }
+                }
+            },
+        )
+        _, protos = parse_listener_report(path)
+        assert protos[0]["note"] is None
+
     def test_client_connected_inferred_from_client_meta(self, tmp_path: Path) -> None:
         # Older reports predate client_connected — fall back to
         # "did the listener produce any client meta?".

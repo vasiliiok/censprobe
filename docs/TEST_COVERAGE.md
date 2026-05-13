@@ -98,7 +98,7 @@
 | Src-модуль | Тест-файл | Тестов | Что покрыто |
 |------------|-----------|-------:|-------------|
 | `censprobe_client` (whole pkg) | `unit/test_smoke_imports.py` | 1 | submodule import |
-| `censprobe_client.main` (cross-verification helpers) | `unit/test_cross_verification.py` | 10 | `_listener_verdict` mirrors `ProtocolResult.finalize` — `data_transfer_ok=True ⇒ OK` (cryptographic ground truth wins over log-parsed handshake counter), handshake-only-no-data ⇒ HANDSHAKE_ONLY, neither signal ⇒ BLOCKED; `_agreed_verdict` listener-wins matrix — both-OK no note, client-overconfident → "client overread", listener-OK + client-not → "listener saw data", other disagreements → `client=X` note |
+| `censprobe_client.main` (cross-verification helpers) | `unit/test_cross_verification.py` | 14 | `_listener_verdict` mirrors `ProtocolResult.finalize` — `data_transfer_ok=True ⇒ OK` (cryptographic ground truth wins over log-parsed handshake counter), handshake-only-no-data ⇒ HANDSHAKE_ONLY, neither signal ⇒ BLOCKED; `_agreed_verdict` listener-wins matrix — both-OK no note, client-overconfident → "client overread", listener-OK + client-not → "listener saw data", other disagreements → `client=X` note; asymmetric-DPI detection: listener=OK + client=BLOCKED with read-timeout-after-handshake marker (`welcome_read_timeout`, `orig_resPQ_len_timeout`, `orig_resPQ_body_timeout`, `orig_resPQ_truncated`) → final=HANDSHAKE_ONLY with note "asymmetric DPI: server replied but client did not receive"; other client errors (`connection_refused`, `tcp_timeout`) bypass downgrade |
 | `censprobe_client.main` (retry policy) | `unit/test_retry.py` | 20 | `_pinned_get_with_retry`: first-attempt success no retry, transient-then-success, exhausted retries propagate `_TransientEndpointError`, permanent (`_PermanentEndpointError`) short-circuits on first attempt, `ValueError` (cert-format input error) propagates without retry; HTTP status classification matrix (5xx + 408 → transient; 4xx → permanent; malformed status line → permanent; non-numeric → permanent) |
 
 **Client total: 3 файла, 31 тест.** Probe-dispatch и main CLI orchestration domain-тестами не покрыты — verifycaция via end-to-end run.
@@ -119,25 +119,25 @@
 
 ### `packages/dashboard/sync-api/`
 
-#### Unit (`tests/unit/`, 5 файлов, 70 тестов)
+#### Unit (`tests/unit/`, 5 файлов, 74 теста)
 
 | Src-модуль | Тест-файл | Тестов | Что покрыто |
 |------------|-----------|-------:|-------------|
 | `sync_api` (whole pkg) | `test_smoke_imports.py` | 1 | submodule import (`monkeypatch.setenv("DATABASE_URL", "sqlite:///")` до импорта) |
-| `sync_api.parser` (`_to_float`, `_to_int`, `_parse_dt`, `is_solo_report`, `is_listener_report`) | `test_parser_coercions.py` | 12 | None/str/int/float/dict combos, malformed datetime, filename predicates |
-| `sync_api.parser.parse_listener_report` | `test_parser_listener.py` | 10 | listener report → `ListenerSession` + `ProtocolResult` rows, missing keys, schema-drift defence |
+| `sync_api.parser` (`_to_float`, `_to_int`, `_parse_dt`, `is_solo_report`, `is_listener_report`) | `test_parser_coercions.py` | 41 | None/str/int/float/dict combos, malformed datetime, filename predicates, parametrize-heavy edge cases |
+| `sync_api.parser.parse_listener_report` | `test_parser_listener.py` | 13 | listener report → `ListenerSession` + `ProtocolResult` rows, missing keys, schema-drift defence, `ProtocolResult.note` propagation (self-test downgrade + `_mtproto_orig_failure_note` text → DB), `note` absent → NULL fallback, non-string `note` → coerced to NULL |
 | `sync_api.parser.load_json` | `test_parser_load_json_security.py` | 8 | symlink reject + log warn, oversize file (51 MB) → None + tracemalloc < 10 MB, malformed JSON → None |
-| `sync_api.parser.parse_solo_report` | `test_parser_solo.py` | 10 | solo report → `TestRun` + `TestResult` rows, subcategory derivation propagation, missing keys |
+| `sync_api.parser.parse_solo_report` | `test_parser_solo.py` | 11 | solo report → `TestRun` + `TestResult` rows, subcategory derivation propagation, `elapsed_ms` round-trip, missing keys |
 
-#### Integration (`tests/integration/`, 3 файла, 29 тестов; требуют Postgres)
+#### Integration (`tests/integration/`, 3 файла, 41 тест; требуют Postgres)
 
 | Src-модуль | Тест-файл | Тестов | Что покрыто |
 |------------|-----------|-------:|-------------|
-| `sync_api.main` (FastAPI app) + `sync_api.db` | `test_endpoints.py` | 14 | `GET /health` / `/test-runs` / `/test-runs/{id}` / `/results/{id}` / `/protocols/{id}` через `httpx.AsyncClient(transport=ASGITransport(app))` против реального Postgres |
-| `sync_api.main._import_once`, `parser`, `db` | `test_import_pipeline.py` | 8 | disk reports → DB rows + UPSERT-by-session, path-traversal/symlink guards |
+| `sync_api.main` (FastAPI app) + `sync_api.db` | `test_endpoints.py` | 20 | `GET /health` / `/test-runs` / `/test-runs/{id}` / `/results/{id}` / `/protocols/{id}` через `httpx.AsyncClient(transport=ASGITransport(app))` против реального Postgres |
+| `sync_api.main._import_once`, `parser`, `db` | `test_import_pipeline.py` | 14 | disk reports → DB rows + UPSERT-by-session, path-traversal/symlink guards, reconciliation (delete file/folder → cascade) |
 | `sync_api.db` (engine, ORM models) | `test_schema_round_trip.py` | 7 | `init_db()` создаёт все 4 таблицы, unique constraints (`uq_test_results_run_file_test_target`, `uq_listener_sessions_run_file`), индексы (`ix_test_results_run_file`), cascade delete `TestRun` → `TestResult`/`ListenerSession`/`ProtocolResult` |
 
-**Sync-api total: 8 файлов, 105 тестов.** Самое плотное покрытие после probe-core.
+**Sync-api total: 8 файлов, 115 тестов** (74 unit + 41 integration под Postgres). Самое плотное покрытие после probe-core.
 
 ---
 
@@ -175,11 +175,11 @@
 | `packages/probe-core/tests` | 29 | 385 | плотное (config, scoring, subcategories, runner, все 8 модулей измерений, credentials_reader, protocol_probes helpers + ping_echo + mtproto BLOCKED-on-timeout, `_stamp_elapsed`/`stamp_test_elapsed` decorators, ProtocolResult.finalize truth table) |
 | `packages/solo/tests` | 1 | 1 | smoke-only |
 | `packages/listener/tests` | 11 | 259 | credentials + AWG invariants (parametrize-heavy), preflight checks (incl. `probe_all_proxy_multi_upstreams` + `write_pruned_proxy_multi_conf`), openvpn AND-gate + auth-bytes latch, mtproto-orig responder (incl. prune-storm guard for 0-alive vantages), `_mtproto_orig_failure_note` (per-vantage diagnostics), cred_server `/snapshot` endpoint, `_generate_session_id` prefix encoding + SAFE_ID contract |
-| `packages/client/tests` | 3 | 31 | smoke + cross-verification helpers + retry policy (transient/permanent classification) |
+| `packages/client/tests` | 3 | 35 | smoke + cross-verification helpers (incl. asymmetric-DPI downgrade — listener=OK + client=BLOCKED with read-timeout-after-handshake marker → final=HANDSHAKE_ONLY, verified live MTS RU 2026-05-13) + retry policy (transient/permanent classification) |
 | `packages/sync/tests` | 3 | 33 | smoke + cert pinning (FP normalisation, pinned TLS fetch, DER→PEM round-trip, fresh-fingerprint per session) + click CLI shape |
-| `packages/dashboard/sync-api/tests` | 8 | 105 | parser + endpoints + DB schema |
+| `packages/dashboard/sync-api/tests` | 8 | 115 | parser (74 unit) + endpoints + DB schema (41 integration), incl. `ProtocolResult.note` round-trip from listener-JSON → DB → dashboard 04 `Diagnostic` column |
 | `tests/` (workspace) | 6 | 14 | contracts + snapshots + e2e (`e2e-dashboard` job, 2 deselected по дефолту) |
-| **Total** | **61** | **828** (после parametrize) | — |
+| **Total** | **61** | **842** (после parametrize) | — |
 
 ---
 

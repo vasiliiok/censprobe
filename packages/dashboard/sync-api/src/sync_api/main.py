@@ -81,7 +81,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 # Single source of truth for the API/version metadata. Used in both the FastAPI
 # constructor and /health, and surfaced in pyproject.toml. Bumping here is the
 # only change required to keep them in lockstep.
-SERVICE_VERSION = "0.4.0"
+SERVICE_VERSION = "0.5.0"
 
 WORKSPACE = Path("/workspace")
 # Single source of truth: .env (committed) + docker-compose env injection.

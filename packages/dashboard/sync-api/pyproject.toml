@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 name = "censprobe-sync-api"
 # Keep in sync with sync_api.main.SERVICE_VERSION (surfaced via /health and
 # the FastAPI app metadata).
-version = "0.4.0"
+version = "0.5.0"
 requires-python = ">=3.11"
 # Minimal runtime deps. The schema is created by SQLAlchemy `create_all`
 # on first start; there is currently no migration story (see db.py docstring).
