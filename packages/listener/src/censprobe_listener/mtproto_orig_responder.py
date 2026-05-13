@@ -170,12 +170,9 @@ class MTProxyOrigResponder:
         # The write itself is sync I/O wrapped in ``asyncio.to_thread``
         # so we don't block the responder-startup event loop (S7493).
         self._pruned_conf_path = (
-            Path(tempfile.gettempdir())
-            / f"proxy-multi-pruned-{secrets.token_hex(8)}.conf"
+            Path(tempfile.gettempdir()) / f"proxy-multi-pruned-{secrets.token_hex(8)}.conf"
         )
-        await asyncio.to_thread(
-            write_pruned_proxy_multi_conf, alive, self._pruned_conf_path
-        )
+        await asyncio.to_thread(write_pruned_proxy_multi_conf, alive, self._pruned_conf_path)
         logger.info(
             "mtproto_orig: pruned proxy-multi.conf — %d/%d upstreams reachable",
             self.upstream_alive_count,
