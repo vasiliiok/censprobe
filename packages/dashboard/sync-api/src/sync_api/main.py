@@ -29,6 +29,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
 
+from censprobe_core.config import load_config
 from censprobe_core.models import (
     ListenerReport as CoreListenerReport,
 )
@@ -103,6 +104,13 @@ IMPORT_INTERVAL_SEC = float(os.environ["CENSPROBE_IMPORT_INTERVAL_SEC"])
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Initialize DB tables and start the background importer."""
+    # Load censprobe.yaml at startup so ``compute_scores`` (called per
+    # imported run) can read ScoringConfig weights without raising
+    # "Config not loaded" — without this, every TestRun's score columns
+    # end up NULL and every score-driven dashboard panel renders empty.
+    # The config file is the same one solo/listener/client read; sync-api
+    # mounts ./:/workspace so the on-disk path matches.
+    load_config(WORKSPACE)
     await init_db()
     logger.info("DB tables initialized")
     importer_task = asyncio.create_task(_import_loop())
