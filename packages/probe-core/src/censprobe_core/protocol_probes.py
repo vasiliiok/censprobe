@@ -397,31 +397,64 @@ async def ping_echo(
     )
     if code != 0:
         return False, None
-    # iputils-ping summary line:
-    #   "<count> packets transmitted, <received> received, 0% packet loss, ..."
-    # Exit code 0 means ≥1 reply received, but we need a stricter
-    # threshold to filter the single-shot quirk above.
-    received = 0
-    avg_rtt: float | None = None
+    received = _parse_ping_received(out)
+    avg_rtt = _parse_ping_avg_rtt(out)
+    return received >= min_received, avg_rtt
+
+
+def _parse_ping_received(out: str) -> int:
+    """Extract ``N received`` from iputils-ping's summary line.
+
+    Format::
+
+        <count> packets transmitted, <received> received, 0% packet loss, ...
+
+    Exit code 0 from ``ping`` means ≥1 reply was received, but the
+    ``ping_echo`` data-plane gate requires a stricter ``min_received``
+    threshold to filter Docker-Desktop / nested-VPN host-network quirks
+    that fake a single ICMP reply even when the tunnel never came up.
+    Returns 0 if the summary line is missing or unparseable — caller
+    treats that the same as "no replies".
+    """
     for line in out.splitlines():
         stripped = line.strip()
-        if "packets transmitted" in stripped and " received" in stripped:
-            parts = stripped.split(",")
-            if len(parts) >= 2:
-                tokens = parts[1].strip().split()
-                if tokens and tokens[0].isdigit():
-                    received = int(tokens[0])
-        elif stripped.startswith("rtt ") and "/" in stripped:
-            # "rtt min/avg/max/mdev = 0.067/0.094/0.123/0.024 ms"
-            # Extract the avg field (index 1 of the four-slash group).
-            try:
-                values = stripped.split("=", 1)[1].strip().split()[0]
-                fields = values.split("/")
-                if len(fields) >= 2:
-                    avg_rtt = float(fields[1])
-            except (IndexError, ValueError):
-                avg_rtt = None
-    return received >= min_received, avg_rtt
+        if "packets transmitted" not in stripped or " received" not in stripped:
+            continue
+        parts = stripped.split(",")
+        if len(parts) < 2:
+            continue
+        tokens = parts[1].strip().split()
+        if tokens and tokens[0].isdigit():
+            return int(tokens[0])
+        return 0
+    return 0
+
+
+def _parse_ping_avg_rtt(out: str) -> float | None:
+    """Extract the ``avg`` from iputils-ping's RTT summary line.
+
+    Format::
+
+        rtt min/avg/max/mdev = 0.067/0.094/0.123/0.024 ms
+
+    Returned to surface honest data-plane round-trip latency in the
+    WG/AWG probe display path (replaces the previous "time to first
+    non-zero handshakes timestamp" reading, which was a polling-
+    resolution artifact). Returns ``None`` if the line is missing or
+    malformed.
+    """
+    for line in out.splitlines():
+        stripped = line.strip()
+        if not (stripped.startswith("rtt ") and "/" in stripped):
+            continue
+        try:
+            values = stripped.split("=", 1)[1].strip().split()[0]
+            fields = values.split("/")
+            if len(fields) >= 2:
+                return float(fields[1])
+        except (IndexError, ValueError):
+            return None
+    return None
 
 
 async def _wg_peer_rx_bytes(tool: str, iface: str) -> int:
