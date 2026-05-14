@@ -70,6 +70,12 @@ _WORKSPACE = Path("/workspace")
 # source of truth.
 _TELEGRAM_YAML_PATH = Path("targets/telegram.yaml")
 
+# Cap on how many DCs to probe at preflight. The full canonical list
+# has 5 DCs (pluto/venus/aurora/vesta/flora across Miami/Amsterdam/
+# Singapore); three is enough to distinguish "all blocked" from
+# "one DC moved" without 5× SYN budget at startup.
+_TELEGRAM_DC_PROBE_LIMIT = 3
+
 # Hardcoded fallback if ``targets/telegram.yaml`` is missing or
 # unparseable (image built without the workspace, dev workspace
 # moved). Listener boot never aborts on a missing yaml — we degrade
@@ -107,6 +113,7 @@ def _load_telegram_dc_probes() -> tuple[tuple[str, int, str], ...]:
     # the import graph shallow.
     import yaml as _yaml
     from censprobe_core.targets import TargetFile
+    from pydantic import ValidationError
 
     yaml_path = _WORKSPACE / _TELEGRAM_YAML_PATH
     if not yaml_path.exists():
@@ -119,7 +126,11 @@ def _load_telegram_dc_probes() -> tuple[tuple[str, int, str], ...]:
     try:
         raw = _yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
         tf = TargetFile.model_validate(raw)
-    except Exception as e:
+    except (OSError, UnicodeDecodeError, _yaml.YAMLError, ValidationError) as e:
+        # OSError — file disappears between exists() and read(), or perms.
+        # UnicodeDecodeError — yaml saved with non-UTF8 BOM/encoding.
+        # YAMLError — operator typo, mismatched braces, etc.
+        # ValidationError — schema violation (e.g. missing required ports).
         logger.warning(
             "preflight: could not parse %s (%s) — falling back to hardcoded DC list",
             yaml_path,
@@ -156,12 +167,6 @@ def _load_telegram_dc_probes() -> tuple[tuple[str, int, str], ...]:
         return _TELEGRAM_DC_PROBES_FALLBACK
     return tuple(probes)
 
-
-# Cap on how many DCs to probe at preflight. The full canonical list
-# has 5 DCs (pluto/venus/aurora/vesta/flora across Miami/Amsterdam/
-# Singapore); three is enough to distinguish "all blocked" from
-# "one DC moved" without 5× SYN budget at startup.
-_TELEGRAM_DC_PROBE_LIMIT = 3
 
 # The C MTProxy binary upstreams to Telegram DCs on TCP/8888 (not 443).
 # proxy-multi.conf is downloaded at image build time from
@@ -602,8 +607,10 @@ async def _check_telegram_dc_reach(
     surfacing it here at startup distinguishes "client-side DPI"
     from "my listener can't reach DCs".
 
-    We probe 3 DCs in parallel. ``warn`` if 0/3 reachable; ``ok``
-    otherwise (Telegram load-balances across all 5 DCs, so partial
+    We probe up to ``_TELEGRAM_DC_PROBE_LIMIT`` DCs in parallel — the
+    list is read from ``targets/telegram.yaml`` (single source of truth)
+    and capped to keep the SYN budget small. ``warn`` if zero reachable;
+    ``ok`` otherwise (Telegram load-balances across all 5 DCs, so partial
     reachability is normally fine).
     """
 

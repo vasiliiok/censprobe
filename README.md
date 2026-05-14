@@ -372,7 +372,7 @@ Sustained-data probe через SOCKS-routed протоколы (Shadowsocks, VL
 | `targets/messengers.yaml` | Мессенджеры (`signal.org`, `whatsapp.com`, `web.whatsapp.com`, `discord.com`, ...) | dns/tcp/tls/http |
 | `targets/vpn.yaml` | VPN-провайдеры (`nordvpn.com`, `protonvpn.com`, `expressvpn.com`, `mullvad.net`) | dns/tcp/tls/http |
 | `targets/neutral.yaml` | Нейтральные (`vk.com`, `yandex.ru`, `wikipedia.org`, `google.com`) + anycast TCP-цели на 443/853 | dns/tcp/tls/http (negative control) |
-| `targets/telegram.yaml` | DC IPv4/IPv6 + ports, web/aux/CDN-домены, `owned_cert_patterns`, `health_weights` | **только `modules.telegram`** (`module_owned`) |
+| `targets/telegram.yaml` | DC IPv4/IPv6 + ports, web/aux/CDN-домены, `owned_cert_patterns`, `health_weights` | `modules.telegram` (исключён из generic dns/tcp/tls/http через `module_owned`) **+** `listener.preflight` читает `api_datacenters[]` для DC-reach check — single source of truth |
 | `targets/cloudflare.yaml` | QUIC/WARP TCP/WARP UDP/HTTP цели Cloudflare | **только `modules.cloudflare`** (`module_owned`) |
 
 **Как добавить новый сайт**: открыть нужный файл (например `targets/news.yaml`), добавить запись с полями `domain`, `urls` (list), `expected_status`, `category`, `ech_advertised`, `notes`. Pydantic провалидирует, runner подхватит автоматически.
