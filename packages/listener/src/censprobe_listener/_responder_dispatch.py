@@ -93,16 +93,17 @@ class SelfTestCapable(Protocol):
     Protocol is ``runtime_checkable`` so per-protocol main-loop branches
     can do ``isinstance(responder, SelfTestCapable)`` instead of
     string-comparing protocol names.
+
+    Fields are declared as plain attributes (not ``@property``) so a
+    future class that explicitly inherits SelfTestCapable can still
+    mutate ``self.unavailable = True`` at preflight time —
+    ``@property`` would make mypy reject the assignment since the
+    Protocol's property declaration has no setter.
     """
 
-    @property
-    def unavailable(self) -> bool: ...
-
-    @property
-    def upstream_alive_count(self) -> int: ...
-
-    @property
-    def upstream_total_count(self) -> int: ...
+    unavailable: bool
+    upstream_alive_count: int
+    upstream_total_count: int
 
 
 # Each factory takes (creds, echo_server) and returns a fresh, unstarted

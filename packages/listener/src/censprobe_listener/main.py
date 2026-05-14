@@ -866,7 +866,7 @@ def _finalize_protocol_result(
     # error-prone: any future helper that called _finalize_protocol_result
     # without the trailing note block would silently drop the
     # attribution context.
-    if cap_at is Verdict.HANDSHAKE_ONLY:
+    if cap_at == Verdict.HANDSHAKE_ONLY:
         pr.note = NOTE_LISTENER_DC_UNREACHABLE_LONG
 
     return pr

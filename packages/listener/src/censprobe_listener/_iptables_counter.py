@@ -53,24 +53,17 @@ class InstallStatus:
     cause cleanup to invoke ``ip6tables -D`` on a non-existent rule
     and log spurious "rule does not exist" errors. Also makes
     ``bool(status)`` meaningful: True iff at least one family is live.
+
+    Cleanup-only call sites (no original InstallStatus, e.g.
+    :func:`preflight._cleanup_orphan_rules`) pass ``status=None`` to
+    :func:`remove_counter` which falls back to iterating every known
+    family — same pre-2026-05 behaviour, no factory needed.
     """
 
     installed_families: frozenset[str] = field(default_factory=frozenset)
 
     def __bool__(self) -> bool:
         return bool(self.installed_families)
-
-    @classmethod
-    def all(cls) -> InstallStatus:
-        """Pretend both families are installed.
-
-        Used by ``remove_counter`` callers that don't have an
-        :class:`InstallStatus` from the original :func:`install_counter`
-        call (e.g. cleanup-only paths, tests). Falls back to the
-        pre-2026-05 behaviour: attempt removal on every family and
-        suppress per-family errors.
-        """
-        return cls(frozenset(_IPTABLES_FAMILIES))
 
 
 # Per-call subprocess timeout. iptables operations on a healthy
