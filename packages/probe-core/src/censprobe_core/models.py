@@ -288,16 +288,19 @@ class LiveSnapshot(BaseModel):
     # responders doesn't have to learn a new field.
     responder_self_test_ok: bool | None = None
     # Listener-egress reachability to Telegram DCs (149.154.0.0/16:443)
-    # at preflight time. ``True`` = at least one DC pingable, ``False``
-    # = 0/N reachable (typical for RU/BY listener vantages behind ТСПУ),
-    # ``None`` = check not run or not relevant to this protocol.
-    # Populated only on mtproto_proxy / mtproto_proxy_alt / mtproto_orig
-    # snapshots — for these protocols the field distinguishes
-    # "client-side DPI filtered data plane" (dc_reach_ok=True, client
-    # times out on resPQ) from "listener can't relay to DC so no
-    # session is possible regardless of client path" (dc_reach_ok=False,
-    # same observable, totally different attribution). Other protocols
-    # leave it None.
+    # at preflight time. Three states:
+    #   * True  — at least one DC pingable from listener egress.
+    #   * False — 0/N reachable (RU/BY vantages behind ТСПУ; canonical
+    #     dual-vantage signal that "client DPI" attribution is wrong).
+    #   * None  — no signal: either preflight didn't run (older listener,
+    #     test stub) OR the field doesn't apply to this protocol (only
+    #     Telegram-flavoured snapshots carry it; see
+    #     :data:`ProtocolSpec.requires_telegram_dc`). Both no-signal
+    #     cases are handled identically downstream: don't override
+    #     verdict, don't rewrite the cross-verify note. The semantic
+    #     ambiguity is intentional — distinguishing the two cases gives
+    #     no actionable signal to either operator or the cross-verifier,
+    #     so collapsing them keeps the consumer-side branching simple.
     dc_reach_ok: bool | None = None
 
 

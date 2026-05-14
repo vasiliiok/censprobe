@@ -25,6 +25,7 @@ import contextlib
 import logging
 import time
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 
 # Canonical home of the echo-port contract is probe-core (it is shared
 # with the client-side probe via :mod:`censprobe_core.protocol_probes`,
@@ -51,7 +52,28 @@ _WIRE_THROUGHPUT_QUIESCE_MAX_SEC = 30.0
 _WIRE_THROUGHPUT_POLL_INTERVAL_SEC = 0.1
 _WIRE_THROUGHPUT_QUIESCE_SAMPLES = 3
 
-__all__ = ["ECHO_PORTS", "EchoServer"]
+
+@dataclass(frozen=True)
+class ThroughputMeasurement:
+    """Outcome of one wire-counter throughput probe.
+
+    Replaces the prior ``tuple[bool, float | None]`` sentinel returned
+    by ``_measure_throughput_via_counter``. Two shapes:
+
+    * ``measured=True``: the counter delivered a final delta.
+      ``mbps`` is the Mbps reading (or ``None`` for "no wire bytes
+      flowed, but that IS the answer" — caller stores None, does NOT
+      fall back to wait_closed).
+    * ``measured=False``: the counter chain broke mid-poll (iptables
+      binary disappeared, ip6tables out of sync). Caller falls back
+      to wait_closed timing. ``mbps`` is always ``None`` in this case.
+    """
+
+    measured: bool
+    mbps: float | None
+
+
+__all__ = ["ECHO_PORTS", "EchoServer", "ThroughputMeasurement"]
 
 logger = logging.getLogger(__name__)
 
@@ -392,14 +414,14 @@ class EchoServer:
         # (possibly None=no delta)" — distinct from "the counter chain
         # was broken" where we want the legacy fallback.
         if reader is not None and bytes_before is not None:
-            measured, mbps = await self._measure_throughput_via_counter(
+            result = await self._measure_throughput_via_counter(
                 proto=proto,
                 reader=reader,
                 bytes_before=bytes_before,
                 t0=t0,
             )
-            if measured:
-                self.throughput_mbps[proto] = mbps
+            if result.measured:
+                self.throughput_mbps[proto] = result.mbps
                 return
             # Counter read returned None mid-poll — fall through to the
             # wait_closed-based methodology below as a backup. The
@@ -418,17 +440,10 @@ class EchoServer:
         reader: ThroughputReader,
         bytes_before: int,
         t0: float,
-    ) -> tuple[bool, float | None]:
+    ) -> ThroughputMeasurement:
         """Poll the WAN byte counter until quiesce; compute Mbps from delta.
 
-        Returns ``(measured, mbps)``:
-          * ``(True, mbps)`` — counter delivered a final delta; ``mbps``
-            is the computed value or ``None`` if the delta was zero
-            (legitimate "tunnel emitted no wire bytes" outcome — caller
-            stores None, does NOT fall back to wait_closed).
-          * ``(False, None)`` — the counter chain broke mid-poll
-            (iptables binary disappeared, ip6tables out of sync, etc).
-            Caller falls back to wait_closed timing.
+        See :class:`ThroughputMeasurement` for the return-shape semantics.
 
         The quiesce window is `_WIRE_THROUGHPUT_QUIESCE_SAMPLES ×
         _WIRE_THROUGHPUT_POLL_INTERVAL_SEC` of no-growth — small enough
@@ -452,13 +467,13 @@ class EchoServer:
                     proto,
                     e,
                 )
-                return False, None
+                return ThroughputMeasurement(measured=False, mbps=None)
             if current is None:
                 logger.info(
                     "throughput[%s] counter no longer available — falling back",
                     proto,
                 )
-                return False, None
+                return ThroughputMeasurement(measured=False, mbps=None)
             last_t = time.monotonic()
             last_total = current
             if current == prev:
@@ -480,7 +495,7 @@ class EchoServer:
                 proto,
                 elapsed,
             )
-            return True, None
+            return ThroughputMeasurement(measured=True, mbps=None)
         mbps = (delta_bytes * 8) / elapsed / 1_000_000
         logger.info(
             "throughput[%s]: %.2f Mbps (wire-counter: %d bytes over %.2fs) — "
@@ -490,7 +505,7 @@ class EchoServer:
             delta_bytes,
             elapsed,
         )
-        return True, mbps
+        return ThroughputMeasurement(measured=True, mbps=mbps)
 
     def _record_wait_closed_throughput(
         self,

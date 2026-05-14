@@ -95,18 +95,18 @@ class TestMeasureThroughputViaCounter:
                 8_388_608,  # final value, repeated by reader
             ]
         )
-        measured, mbps = await srv._measure_throughput_via_counter(
+        result = await srv._measure_throughput_via_counter(
             proto="shadowsocks",
             reader=reader,
             bytes_before=0,
             t0=fake_clock[0],
         )
-        assert measured is True
-        assert mbps is not None
+        assert result.measured is True
+        assert result.mbps is not None
         # 8388608 bytes / ~0.6 s ≈ 100 Mbps — the exact value depends on
         # the fake-clock advance, just sanity-check it's a positive
         # plausible number.
-        assert 1.0 < mbps < 10_000.0
+        assert 1.0 < result.mbps < 10_000.0
 
     @pytest.mark.asyncio
     async def test_zero_delta_returns_measured_none(self, fake_clock: list[float]) -> None:
@@ -114,19 +114,19 @@ class TestMeasureThroughputViaCounter:
         # but None mbps; caller stores None and does NOT fall back.
         srv = EchoServer()
         reader = _CountingReader([100, 100])
-        measured, mbps = await srv._measure_throughput_via_counter(
+        result = await srv._measure_throughput_via_counter(
             proto="shadowsocks",
             reader=reader,
             bytes_before=100,
             t0=fake_clock[0],
         )
-        assert measured is True
-        assert mbps is None
+        assert result.measured is True
+        assert result.mbps is None
 
     @pytest.mark.asyncio
     async def test_reader_returning_none_triggers_fallback(self, fake_clock: list[float]) -> None:
         # Counter became unavailable mid-poll (iptables binary
-        # disappeared) — return (False, None) so the caller falls back
+        # disappeared) — return measured=False so the caller falls back
         # to wait_closed.
         srv = EchoServer()
 
@@ -134,14 +134,14 @@ class TestMeasureThroughputViaCounter:
             async def __call__(self) -> int | None:
                 return None
 
-        measured, mbps = await srv._measure_throughput_via_counter(
+        result = await srv._measure_throughput_via_counter(
             proto="vless_reality",
             reader=_BrokenReader(),
             bytes_before=42,
             t0=fake_clock[0],
         )
-        assert measured is False
-        assert mbps is None
+        assert result.measured is False
+        assert result.mbps is None
 
     @pytest.mark.asyncio
     async def test_reader_raising_triggers_fallback(self, fake_clock: list[float]) -> None:
@@ -151,14 +151,14 @@ class TestMeasureThroughputViaCounter:
             async def __call__(self) -> int | None:
                 raise RuntimeError("iptables binary missing")
 
-        measured, mbps = await srv._measure_throughput_via_counter(
+        result = await srv._measure_throughput_via_counter(
             proto="hysteria2",
             reader=_RaisingReader(),
             bytes_before=0,
             t0=fake_clock[0],
         )
-        assert measured is False
-        assert mbps is None
+        assert result.measured is False
+        assert result.mbps is None
 
 
 class TestRegisterReader:

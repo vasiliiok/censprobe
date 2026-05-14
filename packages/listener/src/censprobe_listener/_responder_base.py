@@ -36,11 +36,12 @@ import logging
 import tempfile
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from censprobe_core._privsep import chown_tree, setpriv_available, with_privsep
 from censprobe_core.echo_ports import ECHO_PORTS
 from censprobe_core.models import LiveSnapshot
+from censprobe_core.protocol_registry import get_protocol
 from censprobe_core.utils import graceful_terminate, write_secret
 
 from censprobe_listener._iptables_counter import (
@@ -65,14 +66,6 @@ class SubprocessResponder(ABC):
     startup_settle_sec: float = 1.0
     tempdir_prefix: str = "censprobe_resp_"
     log_prefix: str = ""  # what to print in DEBUG logs ("[xray] ...")
-    # WAN-facing transport ("tcp" for SS / VLESS+Reality; "udp" for
-    # Hysteria 2 = QUIC). Drives the iptables --protocol filter on the
-    # throughput accounting rule installed in :meth:`start`. TCP rules
-    # additionally constrain to PSH+ACK so scanner SYN-FINs don't
-    # contaminate the byte counter; UDP has no equivalent flag, so the
-    # filter is port-only and we rely on the responder running on a
-    # dedicated port.
-    transport: str = "tcp"
 
     def __init__(self, port: int, echo_port: int | None = None) -> None:
         self.port = port
@@ -290,6 +283,18 @@ class SubprocessResponder(ABC):
             return False
         return self.echo_server.data_ok(self.proto_label)
 
+    def _transport(self) -> Literal["tcp", "udp"]:
+        """WAN-facing transport for this responder.
+
+        Sourced from :class:`ProtocolSpec.transport` so a typo or drift
+        between the registry and the responder is impossible. Falls back
+        to ``"tcp"`` only if the registry doesn't know the protocol
+        (which would be a programming error — callers downstream already
+        validated against ``known_names()``).
+        """
+        spec = get_protocol(self.proto_label)
+        return "tcp" if spec is None else spec.transport
+
     def _throughput_counter_rule_args(self) -> list[str]:
         """iptables match args for the WAN-side byte counter.
 
@@ -309,7 +314,7 @@ class SubprocessResponder(ABC):
         No ``-j`` target — the rule is accounting-only, falling through
         to host firewall rules; see ``_iptables_counter`` module docstring.
         """
-        if self.transport == "udp":
+        if self._transport() == "udp":
             return [
                 "-p",
                 "udp",
