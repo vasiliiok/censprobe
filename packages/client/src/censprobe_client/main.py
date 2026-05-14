@@ -682,79 +682,154 @@ def _pinned_get(
     if "\r" in host or "\n" in host or "\r" in path or "\n" in path:
         raise ValueError(f"host/path must not contain CR or LF: host={host!r}, path={path!r}")
 
-    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-
     # Open the TLS connection ourselves (rather than letting urllib do it)
     # so we can hash the peer cert before sending the bearer token. Without
     # this order, the secret would land at a possibly-MitM'd peer.
     try:
-        with socket.create_connection((host, port), timeout=_FETCH_TIMEOUT_SEC) as raw:
-            # ``create_connection`` set the timeout on the raw socket
-            # only for the connect() syscall. ``wrap_socket`` does NOT
-            # carry that over to subsequent recv() loops, so an
-            # unresponsive peer after the TLS handshake would block on
-            # ``tls.recv`` until OS keepalive (~2 hours on Linux). Set
-            # the deadline explicitly on the wrapped socket below so
-            # the recv loop has a bounded budget.
-            with ctx.wrap_socket(raw, server_hostname=host) as tls:
-                tls.settimeout(_FETCH_TIMEOUT_SEC)
-                peer_der = tls.getpeercert(binary_form=True)
-                if not peer_der:
-                    # No cert == server didn't actually negotiate TLS;
-                    # treat as transient (server may be mid-startup).
-                    raise _TransientEndpointError("listener did not present a TLS certificate")
-                actual = hashlib.sha256(peer_der).hexdigest()
-                if not _hex_eq(actual, expected):
-                    raise _PermanentEndpointError(
-                        f"cert fingerprint mismatch: listener presented {actual}, "
-                        f"expected {expected}"
-                    )
-                # Pinning passed — now safe to ship the bearer token.
-                # POST carries an optional JSON body (currently only
-                # /stop ships one, with the per-protocol client_throughput
-                # map). GET never has a body. The Content-Length header
-                # is emitted for any POST regardless of body size so a
-                # zero-length body still parses cleanly on the server.
-                if method == "POST":
-                    headers_extra = f"Content-Length: {len(body)}\r\n"
-                    if body:
-                        headers_extra += "Content-Type: application/json; charset=utf-8\r\n"
-                else:
-                    headers_extra = ""
-                request = (
-                    f"{method} {path} HTTP/1.1\r\n"
-                    f"Host: {host}:{port}\r\n"
-                    f"Authorization: Bearer {token}\r\n"
-                    f"{headers_extra}"
-                    f"Connection: close\r\n"
-                    f"User-Agent: censprobe-client\r\n"
-                    f"\r\n"
-                )
-                tls.sendall(request.encode("ascii"))
-                if body:
-                    tls.sendall(body)
-                buf = b""
-                while True:
-                    chunk = tls.recv(65536)
-                    if not chunk:
-                        break
-                    buf += chunk
-                    if len(buf) > _MAX_RESPONSE_BYTES:
-                        # Defence-in-depth against an unbounded
-                        # response (compromised listener, server-side
-                        # bug). Real payloads are tiny — see
-                        # _MAX_RESPONSE_BYTES docstring.
-                        raise _PermanentEndpointError(
-                            f"response exceeded {_MAX_RESPONSE_BYTES} byte ceiling"
-                        )
+        buf = _connect_and_exchange(
+            host=host,
+            port=port,
+            expected=expected,
+            request=_build_http_request(
+                host=host, port=port, path=path, method=method, token=token, body_len=len(body)
+            ),
+            body=body,
+        )
     except (TimeoutError, ConnectionError, OSError, ssl.SSLError) as e:
         # ConnectionError covers refused / reset / aborted; OSError is
         # the supertype that also covers DNS / unreachable. SSLError
         # surfaces handshake-time interruptions (server mid-restart).
         raise _TransientEndpointError(f"endpoint I/O error: {type(e).__name__}: {e}") from e
 
+    return _decode_http_response(buf)
+
+
+def _build_pinned_ssl_context() -> ssl.SSLContext:
+    """Build an SSL context with hostname + chain validation OFF.
+
+    Pinning is the trust mechanism — ``_verify_peer_cert_pin`` runs
+    BEFORE we send the bearer token, so the standard hostname/chain
+    checks are intentionally disabled (the listener's cert is
+    self-signed and won't anchor to any public CA). This helper exists
+    so the unsafe configuration is centralised and obvious in code
+    review.
+    """
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+
+def _build_http_request(
+    *,
+    host: str,
+    port: int,
+    path: str,
+    method: str,
+    token: str,
+    body_len: int,
+) -> bytes:
+    """Format the HTTP/1.1 request line + headers as on-wire bytes.
+
+    POST carries Content-Length unconditionally (the listener parses
+    it; zero-length bodies stay valid). Content-Type only when there's
+    an actual body — currently only POST /stop with the per-protocol
+    ``client_throughput`` map. GET never has a body.
+    """
+    if method == "POST":
+        headers_extra = f"Content-Length: {body_len}\r\n"
+        if body_len > 0:
+            headers_extra += "Content-Type: application/json; charset=utf-8\r\n"
+    else:
+        headers_extra = ""
+    request = (
+        f"{method} {path} HTTP/1.1\r\n"
+        f"Host: {host}:{port}\r\n"
+        f"Authorization: Bearer {token}\r\n"
+        f"{headers_extra}"
+        f"Connection: close\r\n"
+        f"User-Agent: censprobe-client\r\n"
+        f"\r\n"
+    )
+    return request.encode("ascii")
+
+
+def _connect_and_exchange(
+    *,
+    host: str,
+    port: int,
+    expected: str,
+    request: bytes,
+    body: bytes,
+) -> bytes:
+    """TCP+TLS connect, verify pin, send request, read response.
+
+    Returns the raw concatenated response bytes (status line + headers
+    + body still wrapped in a single buffer; caller parses via
+    :func:`_decode_http_response`). Raises only the standard I/O
+    exception family — ``_pinned_get``'s outer try maps those to
+    ``_TransientEndpointError``.
+
+    Why split out: the explicit ``with socket.create_connection`` ×
+    ``with ctx.wrap_socket`` pair plus the recv loop made the parent
+    function long enough that Sonar accumulated a CC=24. Extracting
+    keeps the I/O surface co-located while bringing the parent's CC
+    well under 15.
+    """
+    ctx = _build_pinned_ssl_context()
+    with socket.create_connection((host, port), timeout=_FETCH_TIMEOUT_SEC) as raw:
+        # ``create_connection`` set the timeout on the raw socket only
+        # for the connect() syscall. ``wrap_socket`` does NOT carry
+        # that over to subsequent recv() loops, so an unresponsive
+        # peer after the TLS handshake would block on ``tls.recv``
+        # until OS keepalive (~2 hours on Linux). Set the deadline
+        # explicitly on the wrapped socket below so the recv loop
+        # has a bounded budget.
+        with ctx.wrap_socket(raw, server_hostname=host) as tls:
+            tls.settimeout(_FETCH_TIMEOUT_SEC)
+            _verify_peer_cert_pin(tls.getpeercert(binary_form=True), expected)
+            # Pinning passed — now safe to ship the bearer token.
+            tls.sendall(request)
+            if body:
+                tls.sendall(body)
+            return _read_response_bytes(tls)
+
+
+def _read_response_bytes(tls: ssl.SSLSocket) -> bytes:
+    """Drain the TLS socket up to ``_MAX_RESPONSE_BYTES``.
+
+    Raises ``_PermanentEndpointError`` if the peer keeps sending past
+    the cap — defence-in-depth against a compromised listener or a
+    server-side bug. Real payloads are tiny (a few KB of YAML for
+    ``/creds``, a few tens of KB JSON for ``/snapshot``, ~30 bytes
+    for ``/stop`` ack); 10 MiB ceiling leaves four orders of magnitude
+    of headroom.
+    """
+    buf = b""
+    while True:
+        chunk = tls.recv(65536)
+        if not chunk:
+            break
+        buf += chunk
+        if len(buf) > _MAX_RESPONSE_BYTES:
+            raise _PermanentEndpointError(f"response exceeded {_MAX_RESPONSE_BYTES} byte ceiling")
+    return buf
+
+
+def _decode_http_response(buf: bytes) -> str:
+    """Parse the raw HTTP/1.1 response: status line + body.
+
+    Returns the body decoded as UTF-8 for 200/202 responses. Raises:
+      * ``_PermanentEndpointError`` for malformed status lines, non-
+        numeric status codes, and 4xx codes that won't recover on
+        retry (401/403/410/...).
+      * ``_TransientEndpointError`` for 5xx and 408 (request-timeout
+        in HTTP semantics) — retry wrapper handles these.
+
+    Extracted from ``_pinned_get`` so the HTTP parser sits at module
+    scope, where its 4 distinct failure modes are visible without
+    deep indentation.
+    """
     head, _, body = buf.partition(b"\r\n\r\n")
     status_line = head.split(b"\r\n", 1)[0].decode("latin-1", errors="replace")
     parts = status_line.split(maxsplit=2)
@@ -843,6 +918,40 @@ def _hex_eq(a: str, b: str) -> bool:
     nothing and keeps reviewers from second-guessing.
     """
     return hmac.compare_digest(a.lower(), b.lower())
+
+
+def _verify_peer_cert_pin(peer_der: bytes | None, expected_sha256_hex: str) -> None:
+    """Pin the peer cert by SHA-256 fingerprint or raise.
+
+    Security boundary: this is the ONLY thing standing between the
+    pasted bearer token and a MitM. ``_pinned_get`` deliberately turns
+    off chain validation (``CERT_NONE``) because the listener uses a
+    self-signed cert that won't anchor to any public CA — pinning is
+    the trust mechanism.
+
+    Raises:
+      * ``_TransientEndpointError`` when no cert was returned at all
+        (server mid-startup, TLS handshake mid-flight). Retrying may
+        recover, so the caller's retry wrapper should try again.
+      * ``_PermanentEndpointError`` when a cert WAS presented but its
+        hash doesn't match ``expected_sha256_hex``. Retrying won't
+        help — operator must verify the CREDS_CERT_SHA256 they pasted.
+
+    ``expected_sha256_hex`` must already be normalised (64 lowercase
+    hex chars, no colons). Caller is responsible for normalisation —
+    the input-validation in ``_pinned_get`` does that before this
+    function runs.
+    """
+    if not peer_der:
+        # No cert == server didn't actually negotiate TLS;
+        # treat as transient (server may be mid-startup).
+        raise _TransientEndpointError("listener did not present a TLS certificate")
+    actual = hashlib.sha256(peer_der).hexdigest()
+    if not _hex_eq(actual, expected_sha256_hex):
+        raise _PermanentEndpointError(
+            f"cert fingerprint mismatch: listener presented {actual}, "
+            f"expected {expected_sha256_hex}"
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
