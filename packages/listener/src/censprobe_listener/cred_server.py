@@ -276,216 +276,245 @@ class CredServer:
             Path(self._tmpdir).rmdir()
 
     def _make_handler(self) -> type[http.server.BaseHTTPRequestHandler]:
-        srv = self  # closure for handler
+        """Bind this CredServer instance into a fresh handler subclass.
 
-        class _Handler(http.server.BaseHTTPRequestHandler):
-            # Silence the default "code 200, message OK" stderr noise —
-            # the Rich console is doing the user-facing logging.
-            def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
+        The base ``_CredHandler`` is module-level so each per-method CC
+        is measured in isolation by Sonar (instead of being summed into
+        a single closure's CC budget). Per-request CredServer access is
+        threaded via a class variable on the dynamic subclass.
+        """
+        srv = self
+
+        class _BoundHandler(_CredHandler):
+            _srv = srv
+
+        return _BoundHandler
+
+
+class _CredHandler(http.server.BaseHTTPRequestHandler):
+    """Module-level handler for the four cred-server routes.
+
+    Subclassed in :meth:`CredServer._make_handler` with a per-instance
+    ``_srv`` class attribute pointing at the owning CredServer. Lifted
+    out of the previous closure (2026-05-14) so each handler method's
+    cognitive complexity is bounded individually rather than rolling
+    up into a multi-hundred-line closure factory.
+    """
+
+    # Filled in by the dynamic subclass returned from _make_handler.
+    # Typed as Any because the forward reference to CredServer would
+    # create a circular type cycle (CredServer defines this handler).
+    # Runtime contract: never None when the handler is actually wired up.
+    _srv: Any = None
+
+    # Silence the default "code 200, message OK" stderr noise —
+    # the Rich console is doing the user-facing logging.
+    def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
+        return
+
+    def _read_request_body(self, max_bytes: int) -> bytes:
+        """Read up to ``max_bytes`` from the request body.
+
+        Returns ``b""`` for unparseable / missing ``Content-Length``
+        so the caller can no-op on absent bodies (the /stop
+        endpoint accepts empty bodies). Caps the read at
+        ``max_bytes`` so an abusive client can't OOM the
+        listener by streaming gigabytes.
+        """
+        try:
+            n = int(self.headers.get("Content-Length", "0"))
+        except (TypeError, ValueError):
+            return b""
+        if n <= 0:
+            return b""
+        n = min(n, max_bytes)
+        try:
+            return self.rfile.read(n) or b""
+        except OSError:
+            return b""
+
+    def _reject(self, code: int, reason: str, *, allow: str | None = None) -> None:
+        self.send_response(code)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        # RFC 7231 §6.5.5: a 405 response MUST advertise the
+        # methods the resource supports via the ``Allow`` header.
+        # Surfaces "use POST" to an operator who curls /stop by
+        # mistake without them having to read the source.
+        if allow is not None:
+            self.send_header("Allow", allow)
+        self.end_headers()
+        self.wfile.write(reason.encode("utf-8"))
+
+    def _check_bearer(self) -> bool:
+        auth = self.headers.get("Authorization", "")
+        if not auth.startswith("Bearer "):
+            self._reject(401, "missing bearer token")
+            return False
+        presented = auth[len("Bearer ") :]
+        if not hmac.compare_digest(presented, self._srv.token):
+            self._reject(403, "invalid token")
+            return False
+        return True
+
+    def do_GET(self) -> None:  # noqa: N802 — http.server method name
+        if self.path == "/creds":
+            self._serve_creds()
+            return
+        if self.path == "/snapshot":
+            self._serve_snapshot()
+            return
+        if self.path == "/stop":
+            # /stop exists but only as POST — return 405 (with
+            # Allow: POST) rather than 404 so the operator gets
+            # an actionable diagnostic. Mirror of the do_POST
+            # branch that rejects GET-only paths.
+            self._reject(405, "method not allowed", allow="POST")
+            return
+        self._reject(404, "not found")
+
+    def do_POST(self) -> None:  # noqa: N802
+        if self.path == "/stop":
+            self._serve_stop()
+            return
+        # /creds and /snapshot are GET-only — emit Allow: GET so
+        # an operator who curls them with -X POST sees the
+        # actual supported verb.
+        if self.path in ("/creds", "/snapshot"):
+            self._reject(405, "method not allowed", allow="GET")
+            return
+        self._reject(404, "not found")
+
+    def _serve_creds(self) -> None:
+        if not self._check_bearer():
+            return
+        srv = self._srv
+        with srv._lock:
+            if srv._serves_remaining <= 0:
+                self._reject(410, "credentials exhausted")
                 return
+            srv._serves_remaining -= 1
+            # Record the first authenticated client. Subsequent
+            # successful fetches (slow client retrying inside
+            # _MAX_SERVES) keep the original; we want the
+            # endpoint identity, not the latest replay.
+            if srv._client_ip is None:
+                # client_address is (ip, port); take the IP only.
+                srv._client_ip = self.client_address[0]
 
-            def _read_request_body(self, max_bytes: int) -> bytes:
-                """Read up to ``max_bytes`` from the request body.
+        self.send_response(200)
+        self.send_header("Content-Type", "application/yaml; charset=utf-8")
+        self.send_header("Content-Length", str(len(srv.creds_bytes)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(srv.creds_bytes)
 
-                Returns ``b""`` for unparseable / missing ``Content-Length``
-                so the caller can no-op on absent bodies (the /stop
-                endpoint accepts empty bodies). Caps the read at
-                ``max_bytes`` so an abusive client can't OOM the
-                listener by streaming gigabytes.
-                """
-                try:
-                    n = int(self.headers.get("Content-Length", "0"))
-                except (TypeError, ValueError):
-                    return b""
-                if n <= 0:
-                    return b""
-                n = min(n, max_bytes)
-                try:
-                    return self.rfile.read(n) or b""
-                except OSError:
-                    return b""
+    def _serve_snapshot(self) -> None:
+        """Per-protocol counter snapshot for cross-verification.
 
-            def _reject(self, code: int, reason: str, *, allow: str | None = None) -> None:
-                self.send_response(code)
-                self.send_header("Content-Type", "text/plain; charset=utf-8")
-                # RFC 7231 §6.5.5: a 405 response MUST advertise the
-                # methods the resource supports via the ``Allow`` header.
-                # Surfaces "use POST" to an operator who curls /stop by
-                # mistake without them having to read the source.
-                if allow is not None:
-                    self.send_header("Allow", allow)
-                self.end_headers()
-                self.wfile.write(reason.encode("utf-8"))
+        Authenticates with the same bearer token as ``/creds`` —
+        anyone who fetched credentials already knows it, and
+        snapshots are read-only state, so we don't need a
+        separate auth scope.
 
-            def do_GET(self) -> None:  # noqa: N802 — http.server method name
-                if self.path == "/creds":
-                    self._serve_creds()
-                    return
-                if self.path == "/snapshot":
-                    self._serve_snapshot()
-                    return
-                if self.path == "/stop":
-                    # /stop exists but only as POST — return 405 (with
-                    # Allow: POST) rather than 404 so the operator gets
-                    # an actionable diagnostic. Mirror of the do_POST
-                    # branch that rejects GET-only paths.
-                    self._reject(405, "method not allowed", allow="POST")
-                    return
-                self._reject(404, "not found")
+        Semantics change (2026-05): the snapshot is no longer a
+        live read of running responders. The client first POSTs
+        ``/stop`` to ask the listener to tear down, then polls
+        ``/snapshot`` (with retries) until ``commit_final_snapshots``
+        has been called — at which point this endpoint returns
+        the SAME per-protocol counters that ``stop()`` captured
+        for the JSON report. That eliminates the race seen with
+        amneziawg-go where a live read mid-session could see
+        rx_bytes>0 while ``stop()`` minutes later saw rx=0 once
+        the userspace daemon GC'd the unhandshaked peer.
+        """
+        if not self._check_bearer():
+            return
+        srv = self._srv
+        with srv._lock:
+            final = srv._final_snapshots
+        if final is None:
+            self._reject(
+                503,
+                "session not finalized — POST /stop first, then retry",
+            )
+            return
 
-            def _check_bearer(self) -> bool:
-                auth = self.headers.get("Authorization", "")
-                if not auth.startswith("Bearer "):
-                    self._reject(401, "missing bearer token")
-                    return False
-                presented = auth[len("Bearer ") :]
-                if not hmac.compare_digest(presented, srv.token):
-                    self._reject(403, "invalid token")
-                    return False
-                return True
+        payload = json.dumps(final, separators=(",", ":")).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(payload)
+        # Tell main.py the client has its data — it can now safely
+        # shut down the cred-server without truncating a polling
+        # client. Idempotent: ``Event.set()`` is no-op after first.
+        srv._snapshot_drained.set()
+        # Operator-facing INFO so a diagnostician reading logs
+        # can confirm the client successfully pulled the post-
+        # session counter state. ``self.client_address`` is
+        # (ip, port) per http.server convention.
+        logger.info(
+            "snapshot served to %s (%d protocols)",
+            self.client_address[0],
+            len(final),
+        )
 
-            def _serve_creds(self) -> None:
-                if not self._check_bearer():
-                    return
-                with srv._lock:
-                    if srv._serves_remaining <= 0:
-                        self._reject(410, "credentials exhausted")
-                        return
-                    srv._serves_remaining -= 1
-                    # Record the first authenticated client. Subsequent
-                    # successful fetches (slow client retrying inside
-                    # _MAX_SERVES) keep the original; we want the
-                    # endpoint identity, not the latest replay.
-                    if srv._client_ip is None:
-                        # client_address is (ip, port); take the IP only.
-                        srv._client_ip = self.client_address[0]
+    def _serve_stop(self) -> None:
+        """Client-driven shutdown trigger.
 
-                self.send_response(200)
-                self.send_header("Content-Type", "application/yaml; charset=utf-8")
-                self.send_header("Content-Length", str(len(srv.creds_bytes)))
-                self.send_header("Cache-Control", "no-store")
-                self.end_headers()
-                self.wfile.write(srv.creds_bytes)
+        Authenticated POST that flips an asyncio Event main.py
+        is awaiting alongside SIGINT/SIGTERM, so the listener
+        can stop on a client request as soon as probes finish
+        instead of relying on the operator hitting Ctrl+C on
+        the server terminal. Multi-serve and idempotent — the
+        Event is set once; further calls return 200 cheaply.
 
-            def _serve_snapshot(self) -> None:
-                """Per-protocol counter snapshot for cross-verification.
+        We respond BEFORE flipping the event so the client
+        doesn't hold the TCP connection open while the
+        listener tears down (responder.stop() can take 30+s
+        for openvpn/wg).
+        """
+        if not self._check_bearer():
+            return
+        srv = self._srv
 
-                Authenticates with the same bearer token as ``/creds`` —
-                anyone who fetched credentials already knows it, and
-                snapshots are read-only state, so we don't need a
-                separate auth scope.
+        # Read the optional JSON body before responding so we
+        # don't truncate a client mid-PUT on slow links. The
+        # body is small (a flat {protocol: mbps} map ≤ 9 entries
+        # so a few hundred bytes); cap at 64 KiB to bound abuse.
+        body = self._read_request_body(max_bytes=64 * 1024)
+        client_throughput = _parse_client_throughput(body)
+        if client_throughput:
+            with srv._lock:
+                # Merge — defensive against the client retrying
+                # /stop with an overlapping but-not-identical
+                # map (e.g. amneziawg re-measured but other
+                # protocols already had a value).
+                srv._client_throughput.update(client_throughput)
 
-                Semantics change (2026-05): the snapshot is no longer a
-                live read of running responders. The client first POSTs
-                ``/stop`` to ask the listener to tear down, then polls
-                ``/snapshot`` (with retries) until ``commit_final_snapshots``
-                has been called — at which point this endpoint returns
-                the SAME per-protocol counters that ``stop()`` captured
-                for the JSON report. That eliminates the race seen with
-                amneziawg-go where a live read mid-session could see
-                rx_bytes>0 while ``stop()`` minutes later saw rx=0 once
-                the userspace daemon GC'd the unhandshaked peer.
-                """
-                if not self._check_bearer():
-                    return
-                with srv._lock:
-                    final = srv._final_snapshots
-                if final is None:
-                    self._reject(
-                        503,
-                        "session not finalized — POST /stop first, then retry",
-                    )
-                    return
+        with srv._lock:
+            ev = srv._stop_asyncio_event
+            loop = srv._stop_event_loop
 
-                payload = json.dumps(final, separators=(",", ":")).encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.send_header("Content-Length", str(len(payload)))
-                self.send_header("Cache-Control", "no-store")
-                self.end_headers()
-                self.wfile.write(payload)
-                # Tell main.py the client has its data — it can now safely
-                # shut down the cred-server without truncating a polling
-                # client. Idempotent: ``Event.set()`` is no-op after first.
-                srv._snapshot_drained.set()
-                # Operator-facing INFO so a diagnostician reading logs
-                # can confirm the client successfully pulled the post-
-                # session counter state. ``self.client_address`` is
-                # (ip, port) per http.server convention.
-                logger.info(
-                    "snapshot served to %s (%d protocols)",
-                    self.client_address[0],
-                    len(final),
-                )
+        self.send_response(202)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        body = b'{"status":"stop_requested"}'
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
 
-            def do_POST(self) -> None:  # noqa: N802
-                if self.path == "/stop":
-                    self._serve_stop()
-                    return
-                # /creds and /snapshot are GET-only — emit Allow: GET so
-                # an operator who curls them with -X POST sees the
-                # actual supported verb.
-                if self.path in ("/creds", "/snapshot"):
-                    self._reject(405, "method not allowed", allow="GET")
-                    return
-                self._reject(404, "not found")
-
-            def _serve_stop(self) -> None:
-                """Client-driven shutdown trigger.
-
-                Authenticated POST that flips an asyncio Event main.py
-                is awaiting alongside SIGINT/SIGTERM, so the listener
-                can stop on a client request as soon as probes finish
-                instead of relying on the operator hitting Ctrl+C on
-                the server terminal. Multi-serve and idempotent — the
-                Event is set once; further calls return 200 cheaply.
-
-                We respond BEFORE flipping the event so the client
-                doesn't hold the TCP connection open while the
-                listener tears down (responder.stop() can take 30+s
-                for openvpn/wg).
-                """
-                if not self._check_bearer():
-                    return
-
-                # Read the optional JSON body before responding so we
-                # don't truncate a client mid-PUT on slow links. The
-                # body is small (a flat {protocol: mbps} map ≤ 9 entries
-                # so a few hundred bytes); cap at 64 KiB to bound abuse.
-                body = self._read_request_body(max_bytes=64 * 1024)
-                client_throughput = _parse_client_throughput(body)
-                if client_throughput:
-                    with srv._lock:
-                        # Merge — defensive against the client retrying
-                        # /stop with an overlapping but-not-identical
-                        # map (e.g. amneziawg re-measured but other
-                        # protocols already had a value).
-                        srv._client_throughput.update(client_throughput)
-
-                with srv._lock:
-                    ev = srv._stop_asyncio_event
-                    loop = srv._stop_event_loop
-
-                self.send_response(202)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                body = b'{"status":"stop_requested"}'
-                self.send_header("Content-Length", str(len(body)))
-                self.send_header("Cache-Control", "no-store")
-                self.end_headers()
-                self.wfile.write(body)
-
-                # Flip the asyncio Event from inside the http.server
-                # thread via call_soon_threadsafe — the event is owned
-                # by main.py's loop, which is on a different thread.
-                # No-op if main.py hasn't bound the event yet (race
-                # against responder startup); the threading mirror
-                # keeps the "client asked to stop" intent recorded so
-                # main.py can pick it up after binding.
-                srv._stop_requested.set()
-                if ev is not None and loop is not None:
-                    loop.call_soon_threadsafe(ev.set)
-
-        return _Handler
+        # Flip the asyncio Event from inside the http.server
+        # thread via call_soon_threadsafe — the event is owned
+        # by main.py's loop, which is on a different thread.
+        # No-op if main.py hasn't bound the event yet (race
+        # against responder startup); the threading mirror
+        # keeps the "client asked to stop" intent recorded so
+        # main.py can pick it up after binding.
+        srv._stop_requested.set()
+        if ev is not None and loop is not None:
+            loop.call_soon_threadsafe(ev.set)
 
 
 def _parse_client_throughput(body: bytes) -> dict[str, float]:
