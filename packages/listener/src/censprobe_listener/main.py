@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Any
 
 import click
+from censprobe_core._log_format import format_preflight_line
 from censprobe_core.config import get_config, load_config
 from censprobe_core.diagnostic_notes import NOTE_LISTENER_DC_UNREACHABLE_LONG
 from censprobe_core.models import EndpointMeta, ListenerReport, ProtocolResult, Verdict
@@ -428,7 +429,7 @@ async def _async_main(
     # with name + status + message so the same information survives a
     # plain-text copy/paste.
     for r in preflight_results:
-        logger.info("preflight[%s] %s: %s", r.status, r.name, r.message)
+        logger.info("%s", format_preflight_line(r.name, r.status, r.message))
     # Surface the telegram-dc-reach result as a kwarg threaded through
     # to ``_finalize_protocol_result`` and the cross-verify snapshot.
     # Listener can't relay client→DC if egress is blocked → mtg-based

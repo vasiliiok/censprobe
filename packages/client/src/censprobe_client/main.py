@@ -35,6 +35,7 @@ from pathlib import Path
 
 import click
 import pydantic
+from censprobe_core._log_format import format_cross_verify_line, format_probe_line
 from censprobe_core.config import load_config
 from censprobe_core.credentials_reader import parse_protocols_yaml
 from censprobe_core.diagnostic_notes import (
@@ -332,19 +333,19 @@ async def _async_main(
             # pasted log can verify each probe's verdict against the
             # underlying timings. Decoupled from the operator-facing
             # ``_print_single_result`` (Rich-formatted) so plain-text
-            # log dumps carry the same signal.
+            # log dumps carry the same signal. Format lives in
+            # probe-core._log_format so a future column change ripples
+            # in one place.
             logger.info(
-                "probe[%s] verdict=%s elapsed=%.0fms rtt=%s throughput=%s error=%s",
-                name,
-                result.verdict,
-                result.elapsed_ms if result.elapsed_ms is not None else 0.0,
-                f"{result.rtt_ms:.0f}ms" if result.rtt_ms is not None else "n/a",
-                (
-                    f"{result.throughput_mbps:.2f}Mbps"
-                    if result.throughput_mbps is not None
-                    else "n/a"
+                "%s",
+                format_probe_line(
+                    name=name,
+                    verdict=result.verdict,
+                    elapsed_ms=result.elapsed_ms,
+                    rtt_ms=result.rtt_ms,
+                    throughput_mbps=result.throughput_mbps,
+                    error=result.error,
                 ),
-                result.error or "none",
             )
         except Exception as e:
             # ``logger.exception`` auto-attaches the traceback so we
@@ -1062,17 +1063,19 @@ def _print_cross_verification(
         # plain-text logs — the table goes through Rich and loses its
         # column alignment in raw stdout dumps; the INFO line preserves
         # the exact (client, listener, dc_reach_ok) → (final, note)
-        # mapping for after-the-fact review.
+        # mapping for after-the-fact review. Format lives in
+        # probe-core._log_format alongside the per-probe line.
         logger.info(
-            "cross-verify[%s] client=%s listener=%s dc_reach_ok=%s "
-            "client_error=%s → final=%s note=%s",
-            name,
-            client_r.verdict,
-            listener_v,
-            snap.dc_reach_ok,
-            client_r.error or "none",
-            final,
-            note or "agree",
+            "%s",
+            format_cross_verify_line(
+                name=name,
+                client=client_r.verdict,
+                listener=listener_v,
+                dc_reach_ok=snap.dc_reach_ok,
+                client_error=client_r.error,
+                final=final,
+                note=note,
+            ),
         )
         if note:
             disagreements += 1
