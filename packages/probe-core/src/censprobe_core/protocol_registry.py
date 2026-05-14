@@ -69,6 +69,27 @@ class ProtocolSpec:
     False for protocols that establish a tun device and verify the data
     plane via ICMP ping (OpenVPN/WG/AWG)."""
 
+    is_mtg_protocol: bool = False
+    """True iff this protocol uses the mtg fakeTLS responder (currently
+    ``mtproto_proxy`` and ``mtproto_proxy_alt`` — same responder class,
+    different bind ports). Drives the dual-vantage DC-reach gate: when
+    the listener egress can't reach Telegram DCs, mtg accepts the
+    FakeTLS WelcomePacket locally, ticks the PSH+ACK counter, and
+    produces a misleading ``data_transfer_ok=True``. The verdict must
+    cap at HANDSHAKE_ONLY in that case (see
+    :class:`ProtocolResult.finalize`'s ``cap_at`` parameter). Not set on
+    ``mtproto_orig`` — that uses a different (C) responder with its
+    own self-test downgrade path."""
+
+    requires_telegram_dc: bool = False
+    """True iff this protocol must reach the live Telegram DC fleet
+    (149.154.0.0/16) from the listener egress for a successful
+    end-to-end session. Used by ``commit_final_snapshots`` to decide
+    which protocols' ``LiveSnapshot.dc_reach_ok`` field should be
+    populated, and by the listener verdict-cap logic above. Covers all
+    three Telegram-flavoured protocols (``mtproto_proxy`` /
+    ``mtproto_proxy_alt`` / ``mtproto_orig``)."""
+
 
 PROTOCOLS: tuple[ProtocolSpec, ...] = (
     ProtocolSpec(
@@ -112,6 +133,8 @@ PROTOCOLS: tuple[ProtocolSpec, ...] = (
         label="MTProto Proxy",
         transport="tcp",
         uses_socks_echo=False,
+        is_mtg_protocol=True,
+        requires_telegram_dc=True,
     ),
     # Sibling of mtproto_proxy on a non-443 port. Same protocol/responder,
     # different bind. Lets a single test distinguish port-keyed DPI ("TSPU
@@ -123,6 +146,8 @@ PROTOCOLS: tuple[ProtocolSpec, ...] = (
         label="MTProto Proxy (alt port)",
         transport="tcp",
         uses_socks_echo=False,
+        is_mtg_protocol=True,
+        requires_telegram_dc=True,
     ),
     # Original Telegram MTProxy (TelegramMessenger/MTProxy, written in C).
     # Speaks legacy obfuscated2 — no fakeTLS camouflage. Co-runs with the
@@ -135,6 +160,8 @@ PROTOCOLS: tuple[ProtocolSpec, ...] = (
         label="MTProto Proxy (original C)",
         transport="tcp",
         uses_socks_echo=False,
+        is_mtg_protocol=False,
+        requires_telegram_dc=True,
     ),
 )
 
@@ -175,3 +202,26 @@ def enabled_protocols(enabled_names: list[str]) -> list[ProtocolSpec]:
 def known_names() -> list[str]:
     """Names of all protocols, in declaration order — for diagnostics."""
     return [p.name for p in PROTOCOLS]
+
+
+def is_mtg_protocol(name: str) -> bool:
+    """Whether ``name`` uses the mtg fakeTLS responder.
+
+    Wraps :data:`ProtocolSpec.is_mtg_protocol`; the helper exists so
+    callers don't have to handle the ``None`` from :func:`get_protocol`
+    for unknown names (which return False — they are obviously not mtg).
+    """
+    spec = _BY_NAME.get(name)
+    return spec is not None and spec.is_mtg_protocol
+
+
+def requires_telegram_dc(name: str) -> bool:
+    """Whether ``name`` needs egress to Telegram DCs at the listener.
+
+    Wraps :data:`ProtocolSpec.requires_telegram_dc`; same null-handling
+    convention as :func:`is_mtg_protocol`. Used by the listener's
+    snapshot-injection logic to decide which protocol snapshots carry
+    the ``dc_reach_ok`` signal.
+    """
+    spec = _BY_NAME.get(name)
+    return spec is not None and spec.requires_telegram_dc

@@ -38,7 +38,7 @@ from censprobe_core.config import load_config
 from censprobe_core.credentials_reader import parse_protocols_yaml
 from censprobe_core.models import LiveSnapshot, ProtocolResult, Verdict
 from censprobe_core.protocol_probes import ASYMMETRIC_DPI_ERROR_MARKERS, ProbeResult
-from censprobe_core.protocol_registry import enabled_protocols, known_names
+from censprobe_core.protocol_registry import enabled_protocols, is_mtg_protocol, known_names
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.panel import Panel
@@ -899,9 +899,6 @@ def _is_asymmetric_dpi_error(error: str | None) -> bool:
     return any(marker in error for marker in ASYMMETRIC_DPI_ERROR_MARKERS)
 
 
-_MTG_PROTOCOLS_FOR_DC_REACH: tuple[str, ...] = ("mtproto_proxy", "mtproto_proxy_alt")
-
-
 def _agreed_verdict(
     client: Verdict,
     listener: Verdict,
@@ -976,7 +973,7 @@ def _agreed_verdict(
         # for an mtg-based protocol, prefer that explanation — it's the
         # one with positive evidence (preflight TCP SYN to 149.154.0.0/16
         # got dropped), not the speculative DPI attribution.
-        if protocol in _MTG_PROTOCOLS_FOR_DC_REACH and dc_reach_ok is False:
+        if protocol is not None and is_mtg_protocol(protocol) and dc_reach_ok is False:
             return (
                 str(Verdict.HANDSHAKE_ONLY),
                 "listener egress to Telegram DCs blocked — no DC relay possible",

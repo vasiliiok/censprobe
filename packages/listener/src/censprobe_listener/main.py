@@ -43,7 +43,12 @@ from typing import Any
 import click
 from censprobe_core.config import get_config, load_config
 from censprobe_core.models import EndpointMeta, ListenerReport, ProtocolResult, Verdict
-from censprobe_core.protocol_registry import enabled_protocols, known_names
+from censprobe_core.protocol_registry import (
+    enabled_protocols,
+    is_mtg_protocol,
+    known_names,
+    requires_telegram_dc,
+)
 from censprobe_core.server_meta import enrich_endpoint
 from censprobe_core.utils import validate_id
 from rich.console import Console
@@ -561,11 +566,13 @@ async def _async_main(
         if name in self_test_results:
             snap_dict["responder_self_test_ok"] = self_test_results[name]
         # Telegram DC reachability from listener egress at preflight
-        # time. Only relevant to mtg-based protocols — the client
-        # cross-verifier reads it to distinguish "client DPI dropped
-        # the data plane" from "listener can't relay to DC". Other
-        # protocols leave the field None.
-        if name in ("mtproto_proxy", "mtproto_proxy_alt", "mtproto_orig"):
+        # time. Only relevant to Telegram-flavoured protocols — the
+        # client cross-verifier reads it to distinguish "client DPI
+        # dropped the data plane" from "listener can't relay to DC".
+        # Other protocols leave the field None. Sourced from the
+        # protocol registry (``requires_telegram_dc``) so a future
+        # MTProto sibling is picked up automatically.
+        if requires_telegram_dc(name):
             snap_dict["dc_reach_ok"] = dc_reach_ok
         final_snapshots[name] = snap_dict
     cred_server.commit_final_snapshots(final_snapshots)
@@ -615,14 +622,14 @@ async def _async_main(
             name,
             responder,
             self_test_ok=self_test_results.get(name),
-            dc_reach_ok=dc_reach_ok if name in _MTG_PROTOCOLS else None,
+            dc_reach_ok=dc_reach_ok if is_mtg_protocol(name) else None,
         )
         pr.client_avg_throughput_mbps = client_throughput.get(name)
         if name == "mtproto_orig":
             override = _mtproto_orig_failure_note(responder, self_test_results.get(name))
             if override is not None:
                 pr.note = override
-        elif name in _MTG_PROTOCOLS and dc_reach_ok is False and pr.note is None:
+        elif is_mtg_protocol(name) and dc_reach_ok is False and pr.note is None:
             # mtg accepted the FakeTLS WelcomePacket — that flips the
             # iptables PSH+ACK counter to ≥1 → data_transfer_ok=True →
             # verdict OK by default. But with DC egress blocked the inner
@@ -784,9 +791,6 @@ async def _stop_responders(responders: dict[str, Responder], timeout: float) -> 
         await asyncio.gather(*tasks.values(), return_exceptions=True)
 
 
-_MTG_PROTOCOLS: tuple[str, ...] = ("mtproto_proxy", "mtproto_proxy_alt")
-
-
 def _finalize_protocol_result(
     name: str,
     responder: Responder,
@@ -806,13 +810,14 @@ def _finalize_protocol_result(
     experience matches client experience.
 
     ``dc_reach_ok`` is the preflight Telegram-DC-reach outcome. Only
-    consumed for ``_MTG_PROTOCOLS`` (mtproto_proxy / mtproto_proxy_alt):
-    when ``False`` (0/N reachable), the verdict is capped at
-    HANDSHAKE_ONLY even if data_transfer_ok=True — because the PSH+ACK
-    counter for these protocols can tick on just the WelcomePacket
-    emission and the inner Telegram protocol cannot complete without
-    DC relay. ``None`` is the no-signal value (check didn't run, or
-    not applicable to this protocol) — verdict logic is unchanged.
+    consumed for mtg-based protocols (see
+    :func:`censprobe_core.protocol_registry.is_mtg_protocol`): when
+    ``False`` (0/N reachable), the verdict is capped at HANDSHAKE_ONLY
+    even if data_transfer_ok=True — because the PSH+ACK counter for
+    these protocols can tick on just the WelcomePacket emission and
+    the inner Telegram protocol cannot complete without DC relay.
+    ``None`` is the no-signal value (check didn't run, or not
+    applicable to this protocol) — verdict logic is unchanged.
     """
     # Different responders expose the field under different historical
     # names; prefer `connection_count` (the canonical one) and fall back
@@ -850,7 +855,7 @@ def _finalize_protocol_result(
     # cross-verify table both reflect that the inner Telegram protocol
     # never had a chance to complete. Other protocols (and the
     # dc_reach_ok=True / dc_reach_ok=None paths) unchanged.
-    if name in _MTG_PROTOCOLS and dc_reach_ok is False:
+    if is_mtg_protocol(name) and dc_reach_ok is False:
         data_ok = False
 
     pr = ProtocolResult(
