@@ -67,6 +67,7 @@ from typing import Any
 import httpx
 
 from censprobe_core._evidence import describe_exception
+from censprobe_core._tcp_kernel_rtt import read_kernel_rtt_us
 from censprobe_core.models import BlockingMethod, TestResult, Verdict
 from censprobe_core.server_meta import is_censoring_vantage
 from censprobe_core.utils import stamp_test_elapsed
@@ -366,14 +367,23 @@ async def _test_warp_tcp(host: str, port: int, name: str) -> TestResult:
             asyncio.open_connection(host, port),
             timeout=_CONNECT_TIMEOUT,
         )
-        rtt_ms = (time.monotonic() - t0) * 1000
+        # Prefer kernel tcpi_rtt over wall-clock — wall-clock includes
+        # event-loop scheduling overhead and gets 10-100× inflated under
+        # Phase A load. See ``_tcp_kernel_rtt`` module docstring. Read
+        # BEFORE the writer.close() below — TIME_WAIT zeros tcpi_rtt.
+        kernel_rtt_us = read_kernel_rtt_us(writer)
+        wallclock_ms = (time.monotonic() - t0) * 1000
+        rtt_ms = kernel_rtt_us / 1000.0 if kernel_rtt_us is not None else wallclock_ms
         return TestResult(
             test=name,
             category="cloudflare",
             target=f"tcp://{host}:{port}",
             verdict=Verdict.OK,
             rtt_ms=rtt_ms,
-            evidence={"tcp_connect_ms": round(rtt_ms, 1)},
+            evidence={
+                "tcp_connect_ms": round(rtt_ms, 1),
+                "wallclock_ms": round(wallclock_ms, 1),
+            },
         )
     except TimeoutError:
         return TestResult(

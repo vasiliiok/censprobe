@@ -51,12 +51,6 @@ logger = logging.getLogger(__name__)
 _AttemptOutcome = tuple[Verdict, "BlockingMethod | None"]
 
 
-# Sentinel meaning "kernel RTT not available for this attempt" — caller
-# falls back to wall-clock timing. Same shape as _AttemptOutcome (tuple
-# return) so the per-attempt loop in _test_tcp stays linear.
-_NO_KERNEL_RTT: int | None = None
-
-
 async def run_tcp_tests(
     targets: list[tuple[str, int]],  # (ip, port) pairs
     repeats: int = 3,
@@ -198,14 +192,14 @@ async def _single_tcp_attempt(
         return (Verdict.OK, None), kernel_rtt_us
 
     except TimeoutError:
-        return (Verdict.BLOCKED, BlockingMethod.IP_DROPPED), _NO_KERNEL_RTT
+        return (Verdict.BLOCKED, BlockingMethod.IP_DROPPED), None
 
     except ConnectionRefusedError:
         # Real RST from the host — port closed but host is alive
         elapsed_ms = (time.monotonic() - t0) * 1000
         if elapsed_ms < cfg.fast_rst_threshold_ms:
-            return (Verdict.BLOCKED, BlockingMethod.TCP_RST_INJECTION), _NO_KERNEL_RTT
-        return (Verdict.BLOCKED, BlockingMethod.TCP_REFUSED), _NO_KERNEL_RTT
+            return (Verdict.BLOCKED, BlockingMethod.TCP_RST_INJECTION), None
+        return (Verdict.BLOCKED, BlockingMethod.TCP_REFUSED), None
 
     except OSError as e:
         # Could be ECONNRESET (RST) or other socket error
@@ -213,10 +207,10 @@ async def _single_tcp_attempt(
         err_str = str(e).lower()
         if "reset" in err_str or "refused" in err_str:
             if elapsed_ms < cfg.fast_rst_threshold_ms:
-                return (Verdict.BLOCKED, BlockingMethod.TCP_RST_INJECTION), _NO_KERNEL_RTT
-            return (Verdict.BLOCKED, BlockingMethod.TCP_REFUSED), _NO_KERNEL_RTT
+                return (Verdict.BLOCKED, BlockingMethod.TCP_RST_INJECTION), None
+            return (Verdict.BLOCKED, BlockingMethod.TCP_REFUSED), None
         logger.debug("tcp probe %s:%d OSError: %s", ip, port, e)
-        return (Verdict.ERROR, None), _NO_KERNEL_RTT
+        return (Verdict.ERROR, None), None
 
     except Exception as e:
         # Defensive catch: any unexpected exception (TypeError, etc.)
@@ -224,7 +218,7 @@ async def _single_tcp_attempt(
         # to a generic ERROR row without traceback. exc_info=True
         # produces the full stack at DEBUG level.
         logger.debug("tcp probe %s:%d unexpected: %s", ip, port, e, exc_info=True)
-        return (Verdict.ERROR, None), _NO_KERNEL_RTT
+        return (Verdict.ERROR, None), None
 
 
 # Verdict severity for tie-breaking in :func:`_majority`. Lower value =

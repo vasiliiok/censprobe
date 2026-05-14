@@ -42,6 +42,7 @@ import httpx
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 
+from censprobe_core._tcp_kernel_rtt import read_kernel_rtt_us
 from censprobe_core.models import BlockingMethod, TestResult, Verdict
 from censprobe_core.utils import stamp_test_elapsed
 
@@ -286,7 +287,15 @@ async def _test_dc_port(dc_id: int, ip_ver: str, ip: str, port: int) -> TestResu
             asyncio.open_connection(ip, port),
             timeout=_config_timeout_sec(),
         )
-        rtt_connect = (time.monotonic() - t0) * 1000
+        # Prefer kernel tcpi_rtt over wall-clock — wall-clock RTT
+        # captures asyncio event-loop scheduling overhead and gets
+        # 10-100× inflated under Phase A load (DNS + TLS + HTTP +
+        # Telegram + Cloudflare all running concurrently). See
+        # ``_tcp_kernel_rtt`` module docstring. Read BEFORE any
+        # writer.close() — TIME_WAIT resets the kernel field.
+        kernel_rtt_us = read_kernel_rtt_us(writer)
+        rtt_connect_wallclock = (time.monotonic() - t0) * 1000
+        rtt_connect = kernel_rtt_us / 1000.0 if kernel_rtt_us is not None else rtt_connect_wallclock
 
         # TCP connect succeeded → DC port is reachable. This is the primary
         # censorship signal: if ТСПУ blocks Telegram, the SYN is dropped or
@@ -340,9 +349,10 @@ async def _test_dc_port(dc_id: int, ip_ver: str, ip: str, port: int) -> TestResu
             category="telegram",
             target=target,
             verdict=verdict,
-            rtt_ms=rtt_connect,  # TCP connect latency, not probe total
+            rtt_ms=rtt_connect,  # TCP connect latency (kernel-preferred), not probe total
             evidence={
                 "tcp_connect_ms": round(rtt_connect, 1),
+                "tcp_connect_wallclock_ms": round(rtt_connect_wallclock, 1),
                 "mtproto_response": mtproto_response,
                 "response_bytes": len(response),
                 "probe_total_ms": round(rtt_total_ms, 1),
