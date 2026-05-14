@@ -78,18 +78,16 @@ async def _iptables_check(cmd: str, chain: str, rule_args: list[str], comment: s
     already exists (rc==0). Suppress process errors as False; caller logs.
     """
     try:
-        proc = await asyncio.wait_for(
-            asyncio.create_subprocess_exec(
+        async with asyncio.timeout(_IPTABLES_TIMEOUT_S):
+            proc = await asyncio.create_subprocess_exec(
                 cmd,
                 "-C",
                 chain,
                 *rule_args,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
-            ),
-            timeout=_IPTABLES_TIMEOUT_S,
-        )
-        rc = await asyncio.wait_for(proc.wait(), timeout=_IPTABLES_TIMEOUT_S)
+            )
+            rc = await proc.wait()
     except (TimeoutError, OSError) as e:
         logger.warning("%s -C %s for %r failed: %s", cmd, chain, comment, e)
         return False
@@ -102,18 +100,16 @@ async def _iptables_add(cmd: str, chain: str, rule_args: list[str], comment: str
     non-zero rc (typically EACCES from missing CAP_NET_ADMIN).
     """
     try:
-        proc = await asyncio.wait_for(
-            asyncio.create_subprocess_exec(
+        async with asyncio.timeout(_IPTABLES_TIMEOUT_S):
+            proc = await asyncio.create_subprocess_exec(
                 cmd,
                 "-A",
                 chain,
                 *rule_args,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
-            ),
-            timeout=_IPTABLES_TIMEOUT_S,
-        )
-        rc = await asyncio.wait_for(proc.wait(), timeout=_IPTABLES_TIMEOUT_S)
+            )
+            rc = await proc.wait()
     except (TimeoutError, OSError) as e:
         logger.warning("%s -A %s for %r failed: %s", cmd, chain, comment, e)
         return False
@@ -198,8 +194,8 @@ async def _iptables_list(cmd: str, chain: str, comment: str) -> str:
     broken — same behaviour as before the helper extraction).
     """
     try:
-        proc = await asyncio.wait_for(
-            asyncio.create_subprocess_exec(
+        async with asyncio.timeout(_IPTABLES_TIMEOUT_S):
+            proc = await asyncio.create_subprocess_exec(
                 cmd,
                 "-L",
                 chain,
@@ -208,10 +204,8 @@ async def _iptables_list(cmd: str, chain: str, comment: str) -> str:
                 "-x",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
-            ),
-            timeout=_IPTABLES_TIMEOUT_S,
-        )
-        out_b, _ = await asyncio.wait_for(proc.communicate(), timeout=_IPTABLES_TIMEOUT_S)
+            )
+            out_b, _ = await proc.communicate()
     except (TimeoutError, OSError) as e:
         logger.warning("%s -L %s for %r failed: %s", cmd, chain, comment, e)
         return ""
@@ -319,18 +313,16 @@ async def remove_counter(
         if shutil.which(cmd) is None:
             continue
         try:
-            proc = await asyncio.wait_for(
-                asyncio.create_subprocess_exec(
+            async with asyncio.timeout(_IPTABLES_TIMEOUT_S):
+                proc = await asyncio.create_subprocess_exec(
                     cmd,
                     "-D",
                     chain,
                     *rule_args,
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.DEVNULL,
-                ),
-                timeout=_IPTABLES_TIMEOUT_S,
-            )
-            await asyncio.wait_for(proc.wait(), timeout=_IPTABLES_TIMEOUT_S)
+                )
+                await proc.wait()
         except (TimeoutError, OSError):
             # Best-effort; SIGKILL-on-shutdown leftovers will be
             # picked up by ``preflight._cleanup_orphan_rules`` on the

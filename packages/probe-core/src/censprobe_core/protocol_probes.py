@@ -1534,10 +1534,8 @@ async def _open_mtproto_tcp(
 ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter, float] | ProbeResult:
     t0 = time.monotonic()
     try:
-        reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(host, port),
-            timeout=PROBE_TIMEOUT,
-        )
+        async with asyncio.timeout(PROBE_TIMEOUT):
+            reader, writer = await asyncio.open_connection(host, port)
     except TimeoutError:
         return _mtg_error_result("tcp_timeout", Verdict.BLOCKED)
     except ConnectionRefusedError:
@@ -1550,7 +1548,8 @@ async def _open_mtproto_tcp(
 async def _send_clienthello(writer: asyncio.StreamWriter, hello: bytearray) -> ProbeResult | None:
     writer.write(bytes(hello))
     try:
-        await asyncio.wait_for(writer.drain(), timeout=5.0)
+        async with asyncio.timeout(5.0):
+            await writer.drain()
     except (TimeoutError, ConnectionResetError, BrokenPipeError) as e:
         return _mtg_error_result(f"write_failed:{type(e).__name__}", Verdict.BLOCKED)
     return None
@@ -1572,7 +1571,8 @@ async def _read_one_welcome_record(
     cognitive-complexity ceiling.
     """
     try:
-        header = await asyncio.wait_for(reader.readexactly(5), timeout=5.0)
+        async with asyncio.timeout(5.0):
+            header = await reader.readexactly(5)
     except asyncio.IncompleteReadError:
         return _mtg_error_result(f"welcome_truncated_record{idx}", Verdict.BLOCKED)
     except TimeoutError:
@@ -1587,7 +1587,8 @@ async def _read_one_welcome_record(
     if current_total + 5 + record_len > max_total:
         return _mtg_error_result(f"welcome_oversize_record{idx}={record_len}", Verdict.BLOCKED)
     try:
-        body = await asyncio.wait_for(reader.readexactly(record_len), timeout=5.0)
+        async with asyncio.timeout(5.0):
+            body = await reader.readexactly(record_len)
     except asyncio.IncompleteReadError:
         return _mtg_error_result(f"welcome_short_body_record{idx}", Verdict.BLOCKED)
     except TimeoutError:
@@ -2085,9 +2086,8 @@ class _TlsRecordReader:
         """
         while len(self._buf) < n:
             try:
-                hdr = await asyncio.wait_for(
-                    self._reader.readexactly(self._RECORD_HDR_LEN), timeout=timeout
-                )
+                async with asyncio.timeout(timeout):
+                    hdr = await self._reader.readexactly(self._RECORD_HDR_LEN)
             except asyncio.IncompleteReadError:
                 return _mtg_error_result("orig_resPQ_truncated_len", Verdict.BLOCKED)
             except TimeoutError:
@@ -2120,7 +2120,8 @@ class _TlsRecordReader:
                     f"orig_resPQ_bad_tls_record_len={record_len}", Verdict.BLOCKED
                 )
             try:
-                body = await asyncio.wait_for(self._reader.readexactly(record_len), timeout=timeout)
+                async with asyncio.timeout(timeout):
+                    body = await self._reader.readexactly(record_len)
             except asyncio.IncompleteReadError:
                 return _mtg_error_result(
                     f"orig_resPQ_truncated_record_body_expected={record_len}",
@@ -2202,7 +2203,8 @@ async def _exchange_obfuscated2_respq(
 
     writer.write(on_wire)
     try:
-        await asyncio.wait_for(writer.drain(), timeout=5.0)
+        async with asyncio.timeout(5.0):
+            await writer.drain()
     except (TimeoutError, ConnectionResetError, BrokenPipeError) as e:
         return _mtg_error_result(f"orig_write_failed:{type(e).__name__}", Verdict.BLOCKED)
 
@@ -2221,7 +2223,8 @@ async def _exchange_obfuscated2_respq(
         length_ct = length_or_err
     else:
         try:
-            length_ct = await asyncio.wait_for(reader.readexactly(4), timeout=PROBE_TIMEOUT)
+            async with asyncio.timeout(PROBE_TIMEOUT):
+                length_ct = await reader.readexactly(4)
         except asyncio.IncompleteReadError:
             return _mtg_error_result("orig_resPQ_truncated_len", Verdict.BLOCKED)
         except TimeoutError:
@@ -2247,7 +2250,8 @@ async def _exchange_obfuscated2_respq(
         body_ct = body_or_err
     else:
         try:
-            body_ct = await asyncio.wait_for(reader.readexactly(length), timeout=PROBE_TIMEOUT)
+            async with asyncio.timeout(PROBE_TIMEOUT):
+                body_ct = await reader.readexactly(length)
         except asyncio.IncompleteReadError:
             return _mtg_error_result(
                 f"orig_resPQ_truncated_body_expected={length}", Verdict.BLOCKED
