@@ -353,7 +353,7 @@ class ProtocolResult(BaseModel):
     # where the wedge is a daemon issue rather than TSPU.
     responder_self_test_ok: bool | None = None
 
-    def finalize(self) -> None:
+    def finalize(self, cap_at: Verdict | None = None) -> None:
         """Derive verdict from the two responder signals.
 
         ``data_transfer_ok`` wins over ``handshake_count`` because it is the
@@ -381,6 +381,19 @@ class ProtocolResult(BaseModel):
         listener main reads to enrich ``self.note``. Verdict semantics
         are "did the protocol work end-to-end" — a wedged responder means
         no, regardless of whether the wedge is L7 censor or daemon bug.
+
+        ``cap_at`` (optional) constrains the derived verdict to be at
+        most ``cap_at`` on the usability ladder OK > HANDSHAKE_ONLY >
+        BLOCKED. The dual-vantage mtg case is the canonical reason: with
+        listener egress to Telegram DCs blocked, the iptables PSH+ACK
+        counter ticks on just the WelcomePacket emission →
+        data_transfer_ok=True → derived verdict OK, but the inner
+        Telegram session never had a chance to complete and OK
+        misrepresents that. ``cap_at=HANDSHAKE_ONLY`` collapses the
+        false-OK to HANDSHAKE_ONLY while leaving ``data_transfer_ok``
+        untouched (the listener really did emit bytes — we just don't
+        promote them to "session worked"). Lower or equal derived
+        verdicts pass through unchanged.
         """
         if self.data_transfer_ok:
             self.verdict = Verdict.OK
@@ -388,6 +401,26 @@ class ProtocolResult(BaseModel):
             self.verdict = Verdict.HANDSHAKE_ONLY
         else:
             self.verdict = Verdict.BLOCKED
+        if cap_at is not None and _verdict_rank(self.verdict) > _verdict_rank(cap_at):
+            self.verdict = cap_at
+
+
+# Usability ladder for :meth:`ProtocolResult.finalize`'s ``cap_at``.
+# OK is "session worked end-to-end" (rank 2); HANDSHAKE_ONLY is "L4
+# reached the server, application layer didn't complete" (rank 1);
+# BLOCKED / ERROR / SERVER_REFUSED are all "didn't work" (rank 0).
+# The cap is one-directional: it can only lower the verdict, never
+# raise it — so all rank-0 verdicts pass through unchanged regardless
+# of cap. Defined here (module-level) rather than as an enum member
+# so the model file stays free of presentation concerns.
+_VERDICT_RANK: dict[Verdict, int] = {
+    Verdict.OK: 2,
+    Verdict.HANDSHAKE_ONLY: 1,
+}
+
+
+def _verdict_rank(v: Verdict) -> int:
+    return _VERDICT_RANK.get(v, 0)
 
 
 class ListenerReport(BaseModel):

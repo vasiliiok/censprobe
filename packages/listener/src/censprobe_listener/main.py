@@ -629,23 +629,9 @@ async def _async_main(
             override = _mtproto_orig_failure_note(responder, self_test_results.get(name))
             if override is not None:
                 pr.note = override
-        elif is_mtg_protocol(name) and dc_reach_ok is False and pr.note is None:
-            # mtg accepted the FakeTLS WelcomePacket — that flips the
-            # iptables PSH+ACK counter to ≥1 → data_transfer_ok=True →
-            # verdict OK by default. But with DC egress blocked the inner
-            # Telegram protocol can never complete, so the OK is an
-            # artefact of WelcomePacket emission, not a working session.
-            # ``_finalize_protocol_result`` already capped the verdict at
-            # HANDSHAKE_ONLY for this case — surface the same context as
-            # a per-protocol note so it lands in the JSON report.
-            pr.note = (
-                "listener egress to Telegram DCs blocked at preflight "
-                "(telegram-dc-reach 0/N) — mtg accepted the FakeTLS "
-                "handshake locally but cannot relay to a real DC, so "
-                "client-side resPQ never arrives. The end-to-end protocol "
-                "is unusable from this listener vantage, independent of "
-                "any client-side DPI."
-            )
+        # mtg dual-vantage note is set INSIDE _finalize_protocol_result —
+        # see the cap_at branch there. Centralising the rewrite next to
+        # the cap eliminates the prior risk of cap+note drift.
         results[name] = pr
 
     # Print final table
@@ -851,12 +837,13 @@ def _finalize_protocol_result(
     # blocked, the iptables PSH+ACK counter can tick on just the
     # WelcomePacket emission (mtg locally completes FakeTLS before
     # attempting DC relay). data_transfer_ok=True alone is therefore
-    # over-optimistic — cap at HANDSHAKE_ONLY so the JSON report and the
-    # cross-verify table both reflect that the inner Telegram protocol
-    # never had a chance to complete. Other protocols (and the
-    # dc_reach_ok=True / dc_reach_ok=None paths) unchanged.
+    # over-optimistic — cap the verdict at HANDSHAKE_ONLY (not the data
+    # signal: we still want to record that mtg DID emit bytes, just not
+    # promote them to "session worked"). Other protocols (and the
+    # dc_reach_ok=True / dc_reach_ok=None paths) leave the cap as None.
+    cap_at: Verdict | None = None
     if is_mtg_protocol(name) and dc_reach_ok is False:
-        data_ok = False
+        cap_at = Verdict.HANDSHAKE_ONLY
 
     pr = ProtocolResult(
         handshake_count=handshake_count,
@@ -864,7 +851,25 @@ def _finalize_protocol_result(
         avg_throughput_mbps=avg_throughput,
         responder_self_test_ok=self_test_ok,
     )
-    pr.finalize()
+    pr.finalize(cap_at=cap_at)
+
+    # Diagnostic note for the same dual-vantage shape — kept inside
+    # this function so the verdict-cap and the human-readable
+    # explanation can never drift apart. The note rewrite that used to
+    # live in the caller (right after _finalize_protocol_result) was
+    # error-prone: any future helper that called _finalize_protocol_result
+    # without the trailing note block would silently drop the
+    # attribution context.
+    if cap_at is Verdict.HANDSHAKE_ONLY:
+        pr.note = (
+            "listener egress to Telegram DCs blocked at preflight "
+            "(telegram-dc-reach 0/N) — mtg accepted the FakeTLS "
+            "handshake locally but cannot relay to a real DC, so "
+            "client-side resPQ never arrives. The end-to-end protocol "
+            "is unusable from this listener vantage, independent of "
+            "any client-side DPI."
+        )
+
     return pr
 
 

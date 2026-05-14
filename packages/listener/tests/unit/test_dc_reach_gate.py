@@ -88,18 +88,25 @@ class TestFinalizeDcReachGate:
     def test_mtg_data_ok_with_dc_unreachable_caps_at_handshake_only(self) -> None:
         # WelcomePacket flipped data_transfer_ok=True, but DC was
         # unreachable at preflight — the canonical dual-RU bug shape.
+        # Post-cap_at refactor: data_transfer_ok stays True (the listener
+        # really DID emit bytes; we just don't promote them to "session
+        # worked"). The cap collapses verdict to HANDSHAKE_ONLY.
         r = _FakeResponder(connection_count=1, data_transfer_ok=True)
         pr = _finalize_protocol_result("mtproto_proxy", r, dc_reach_ok=False)
         assert pr.verdict == Verdict.HANDSHAKE_ONLY
-        assert pr.data_transfer_ok is False
+        assert pr.data_transfer_ok is True  # truthful: bytes were emitted
         assert pr.handshake_count == 1
+        # Note that explains why OK→HANDSHAKE_ONLY collapsed is set by
+        # _finalize_protocol_result itself (not the caller anymore).
+        assert pr.note is not None
+        assert "listener egress" in pr.note.lower()
 
     def test_mtg_alt_data_ok_with_dc_unreachable_caps_at_handshake_only(self) -> None:
         # Same logic on the alt-port mtg bind.
         r = _FakeResponder(connection_count=1, data_transfer_ok=True)
         pr = _finalize_protocol_result("mtproto_proxy_alt", r, dc_reach_ok=False)
         assert pr.verdict == Verdict.HANDSHAKE_ONLY
-        assert pr.data_transfer_ok is False
+        assert pr.data_transfer_ok is True
 
     def test_mtg_data_ok_with_dc_reachable_stays_ok(self) -> None:
         # When DC is reachable, the OK reading is honest — mtg both

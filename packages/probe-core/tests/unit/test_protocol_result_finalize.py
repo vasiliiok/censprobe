@@ -135,3 +135,61 @@ class TestSelfTestNoLongerDowngradesVerdict:
         )
         pr.finalize()
         assert pr.verdict == Verdict.HANDSHAKE_ONLY
+
+
+class TestFinalizeCapAt:
+    """``finalize(cap_at=...)`` constrains the derived verdict to be at
+    most ``cap_at`` on the usability ladder OK > HANDSHAKE_ONLY > BLOCKED.
+
+    The canonical use case is the dual-RU mtg vantage: iptables PSH+ACK
+    counter ticks on just the WelcomePacket emission → derived verdict
+    OK, but the inner Telegram session never had a chance to complete.
+    ``cap_at=HANDSHAKE_ONLY`` collapses the false-OK without mutating
+    the data signal (the listener really did emit bytes — we just
+    don't promote them to "session worked").
+    """
+
+    def test_cap_at_handshake_only_collapses_ok(self) -> None:
+        pr = ProtocolResult(handshake_count=1, data_transfer_ok=True)
+        pr.finalize(cap_at=Verdict.HANDSHAKE_ONLY)
+        assert pr.verdict == Verdict.HANDSHAKE_ONLY
+        # CRITICAL: data signal preserved. The mtg WelcomePacket really
+        # did flip the counter; the verdict cap is a usability
+        # constraint, not a data correction.
+        assert pr.data_transfer_ok is True
+        assert pr.handshake_count == 1
+
+    def test_cap_at_handshake_only_preserves_lower_verdicts(self) -> None:
+        # BLOCKED is already below the cap — passes through unchanged.
+        pr = ProtocolResult(handshake_count=0, data_transfer_ok=False)
+        pr.finalize(cap_at=Verdict.HANDSHAKE_ONLY)
+        assert pr.verdict == Verdict.BLOCKED
+
+    def test_cap_at_handshake_only_preserves_handshake_only(self) -> None:
+        # HANDSHAKE_ONLY == cap — passes through (one-directional cap).
+        pr = ProtocolResult(handshake_count=1, data_transfer_ok=False)
+        pr.finalize(cap_at=Verdict.HANDSHAKE_ONLY)
+        assert pr.verdict == Verdict.HANDSHAKE_ONLY
+
+    def test_cap_at_ok_is_noop(self) -> None:
+        # cap_at=OK is the no-cap shape — every derived verdict is
+        # already at or below OK, so nothing changes.
+        pr = ProtocolResult(handshake_count=1, data_transfer_ok=True)
+        pr.finalize(cap_at=Verdict.OK)
+        assert pr.verdict == Verdict.OK
+
+    def test_cap_at_none_is_legacy_finalize(self) -> None:
+        # No cap → original two-signal finalize behaviour.
+        pr = ProtocolResult(handshake_count=1, data_transfer_ok=True)
+        pr.finalize(cap_at=None)
+        assert pr.verdict == Verdict.OK
+
+    def test_cap_at_blocked_collapses_all(self) -> None:
+        # Edge case — cap=BLOCKED means "force to lowest tier". Useful
+        # for future extension (e.g., DC unreachable for mtproto_orig
+        # could cap at BLOCKED entirely). Verifies the rank table doesn't
+        # have a gap.
+        for hsk, data in [(0, False), (1, False), (1, True)]:
+            pr = ProtocolResult(handshake_count=hsk, data_transfer_ok=data)
+            pr.finalize(cap_at=Verdict.BLOCKED)
+            assert pr.verdict == Verdict.BLOCKED
