@@ -10,9 +10,13 @@ host-net-mode + NET_ADMIN root shell.
 
 We wrap each tunnel-binary spawn in `setpriv`:
   * --reuid 65534 / --regid 65534  → drop to nobody
-  * --bounding-set -all (+cap_net_bind_service for port-443 binders)
+  * --bounding-set -all (+net_bind_service for port-443 binders)
   * --inh-caps / --ambient-caps mirror the bounding-set
   * --no-new-privs                 → child cannot regain caps via setcap
+
+util-linux's setpriv expects capability names WITHOUT the `cap_` prefix
+(e.g. `net_bind_service`, not `cap_net_bind_service`). The `cap_*` form
+parses on libcap-based callers but setpriv rejects it as unknown.
 
 The listener python process stays root so it can keep writing
 /workspace/reports owned by host root and tear down WG/AWG/OpenVPN
@@ -78,7 +82,7 @@ def with_privsep(cmd: list[str], *, need_bind_service: bool = False) -> list[str
         return cmd
     bounds = "-all"
     if need_bind_service:
-        bounds = "-all,+cap_net_bind_service"
+        bounds = "-all,+net_bind_service"
     return [
         "setpriv",
         "--reuid",

@@ -21,6 +21,7 @@ import asyncio
 import contextlib
 import logging
 
+from censprobe_core._privsep import setpriv_available, with_privsep
 from censprobe_core.models import LiveSnapshot
 
 from censprobe_listener._iptables_counter import (
@@ -83,6 +84,17 @@ class MTProxyResponder:
             self.secret,
         ]
         logger.info(f"Starting mtg on port {self.port} with ee-secret")
+        # Defense-in-depth: drop mtg's privileges before spawn. mtg parses
+        # client TLS ClientHello bytes — an RCE there would otherwise
+        # inherit the listener's root + NET_ADMIN bounding set. setpriv
+        # drops to nobody; CAP_NET_BIND_SERVICE is preserved when binding
+        # a privileged port (mtproto_proxy defaults to TCP/443). The
+        # wrapper is a no-op fallback when setpriv is unavailable so
+        # alpine / minimal images still start mtg cleanly.
+        need_bind_service = self.port < 1024
+        cmd = with_privsep(cmd, need_bind_service=need_bind_service)
+        if setpriv_available():
+            logger.debug("mtg spawning under setpriv (nobody)")
         self._proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,

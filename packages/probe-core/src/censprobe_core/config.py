@@ -20,11 +20,12 @@ short-lived processes; restart is the way.
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import ClassVar
 
 import yaml
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -32,10 +33,13 @@ logger = logging.getLogger(__name__)
 # Vantage
 
 
+_ISO_3166_ALPHA2_RE = re.compile(r"^[A-Z]{2}$")
+
+
 class VantageConfig(BaseModel):
     """Whitelist of country codes treated as 'censoring' vantages.
 
-    RU-specific timing heuristics (TCP fast-RST attribution, QUIC drop
+    Censoring-vantage timing heuristics (TCP fast-RST attribution, QUIC drop
     attribution, Method-B throttling) are gated on this list — outside
     of it, the heuristics either downgrade to neutral verdicts or skip
     entirely to avoid false positives on uncensored networks.
@@ -43,11 +47,39 @@ class VantageConfig(BaseModel):
     ``override`` forces a country code regardless of ipapi.is detection,
     useful for testing the heuristics or running from a tunnelled host
     whose ipapi-detected country differs from the network being tested.
+
+    Country codes must be ISO-3166 alpha-2 uppercase (``RU``, ``BY``,
+    ``IR``, ``CN``, ``KZ``). The validator rejects ``Ru`` / ``RUS``-style
+    typos at startup; without it, ``is_censoring_vantage()`` would silently
+    miss the match and disable the heuristics.
     """
 
     model_config = ConfigDict(extra="forbid")
     censoring_countries: list[str]
     override: str | None
+
+    @field_validator("censoring_countries", mode="after")
+    @classmethod
+    def _check_country_codes(cls, v: list[str]) -> list[str]:
+        bad = [cc for cc in v if not _ISO_3166_ALPHA2_RE.match(cc)]
+        if bad:
+            raise ValueError(
+                f"censoring_countries must be ISO-3166 alpha-2 uppercase "
+                f"(e.g. 'RU', 'BY'); offenders: {bad}"
+            )
+        return v
+
+    @field_validator("override", mode="after")
+    @classmethod
+    def _check_override_code(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        if not _ISO_3166_ALPHA2_RE.match(v):
+            raise ValueError(
+                f"vantage.override must be ISO-3166 alpha-2 uppercase or null "
+                f"(e.g. 'RU'); got {v!r}"
+            )
+        return v
 
 
 # Per-module configuration
@@ -62,7 +94,12 @@ class ModuleBase(BaseModel):
 
 
 class DnsModuleConfig(ModuleBase):
-    repeats: int
+    # NOTE: there is no ``repeats`` field. DNS attribution is verified via
+    # the multi-resolver ladder (system + ISP + 4 public + 3 DoH + 2 DoT) —
+    # the cross-check IS the retry surface, single-record repeats add no
+    # signal. The field used to live here but was wired up to nothing
+    # downstream (run_dns_tests dropped the parameter on the floor); the
+    # 2026-05-14 audit removed it to stop pretending the knob did anything.
     doh_resolvers: list[str]
     doh_timeout_sec: float
     asn_lookup_backoff_sec: float
@@ -95,13 +132,16 @@ class TelegramModuleConfig(ModuleBase):
 
 
 class ThrottlingModuleConfig(ModuleBase):
-    """Method-B SNI throttling — TSPU-specific.
+    """Method-B SNI throttling — robust on every vantage.
 
-    ``require_censoring_vantage`` skips the test entirely when the
-    vantage country isn't in :class:`VantageConfig.censoring_countries`,
-    because off-vantage routing variance dominates and produces
-    unreliable verdicts. Override the SNI strings if probing a different
-    target than speedtest.selectel.ru.
+    ``require_censoring_vantage`` is opt-in (default false in
+    censprobe.yaml). Method B uses a within-run **relative** bandwidth
+    ratio across three SNIs on the same uplink, so it self-calibrates
+    against geographic latency and link width. Off-vantage you get
+    ratio ≈ 1.0 → OK (baseline-confirmed); on TSPU paths the trigger
+    SNI drops → THROTTLED. Set this flag to true only if you have
+    explicit reason to skip non-censoring vantages. Override the SNI
+    strings if probing a different target than speedtest.selectel.ru.
     """
 
     require_censoring_vantage: bool
@@ -118,8 +158,11 @@ class CloudflareModuleConfig(ModuleBase):
     targets_file: str
 
 
-class MiddleboxModuleConfig(ModuleBase):
-    pass
+# Middlebox has no knobs beyond ``enabled``. We type the slot directly as
+# ModuleBase rather than declaring an empty ``class MiddleboxModuleConfig:
+# pass`` stub — that stub added a layer with zero behaviour. If middlebox
+# ever grows tunables, the type below is the natural place to split it
+# back out.
 
 
 class ModulesConfig(BaseModel):
@@ -133,7 +176,7 @@ class ModulesConfig(BaseModel):
     telegram: TelegramModuleConfig
     throttling: ThrottlingModuleConfig
     cloudflare: CloudflareModuleConfig
-    middlebox: MiddleboxModuleConfig
+    middlebox: ModuleBase
 
 
 # Protocols
@@ -183,14 +226,33 @@ class ProtocolsConfig(BaseModel):
 
     @model_validator(mode="after")
     def _check_ports_cover_enabled(self) -> ProtocolsConfig:
+        # Cross-check against the protocol registry. Done via a late
+        # import to avoid the module-load cycle (config <-> registry):
+        # protocol_registry imports nothing from config today, but the
+        # local import keeps the contract explicit for future authors.
+        # A typo in enabled/priority would otherwise silently disappear
+        # at runtime (enabled_protocols() drops unknowns), so we surface
+        # it here at startup with the offending names.
+        from censprobe_core.protocol_registry import known_names
+
+        known = set(known_names())
+        unknown_enabled = [name for name in self.enabled if name not in known]
+        if unknown_enabled:
+            raise ValueError(
+                f"protocols.enabled references protocols unknown to the "
+                f"registry: {unknown_enabled}. Known: {sorted(known)}. "
+                f"Fix the typo or add a ProtocolSpec entry."
+            )
+        unknown_priority = [name for name in self.priority if name not in known]
+        if unknown_priority:
+            raise ValueError(
+                f"protocols.priority references protocols unknown to the "
+                f"registry: {unknown_priority}. Known: {sorted(known)}."
+            )
+
         # Cross-check ``ports`` against ``enabled`` so a half-edited yaml
         # (operator added a protocol to ``enabled`` but forgot to give it
-        # a port) fails loudly at startup. Names that aren't in the
-        # registry are tolerated here — :func:`enabled_protocols` already
-        # warns about typos at runtime, and we don't want to import the
-        # registry from inside config.py (that would create a cycle since
-        # the registry is a pure-data module today and could grow config
-        # imports tomorrow).
+        # a port) fails loudly at startup.
         missing = [name for name in self.enabled if name not in self.ports]
         if missing:
             raise ValueError(
@@ -198,20 +260,17 @@ class ProtocolsConfig(BaseModel):
                 f"{missing}. Every protocol in protocols.enabled must have "
                 f"a port in protocols.ports — no fallback defaults exist."
             )
-        # Reject ports for protocols that are unknown to the registry —
-        # a phantom name in ``ports`` usually means the operator misspelt
-        # something (e.g. ``mtproto-proxy`` vs ``mtproto_proxy``) and
-        # the listener would then bind nothing on that port.
-        # We can't import the registry here without risking a cycle, but
-        # we can at least detect ports that aren't referenced by either
-        # ``enabled`` or ``priority`` — those are guaranteed dead config.
-        referenced = set(self.enabled) | set(self.priority)
-        orphan = [name for name in self.ports if name not in referenced]
-        if orphan:
+        # Reject port entries for protocols unknown to the registry —
+        # caught here in addition to the enabled/priority check above
+        # so a phantom ``ports:`` entry (typo'd protocol name) also
+        # fails loudly. Combined with the registry cross-check above,
+        # every protocols.* dict is now guaranteed to reference only
+        # real protocols.
+        unknown_ports = [name for name in self.ports if name not in known]
+        if unknown_ports:
             raise ValueError(
-                f"protocols.ports contains entries not listed in "
-                f"protocols.enabled or protocols.priority: {orphan}. "
-                f"Remove the dead entries or add the protocol names."
+                f"protocols.ports references protocols unknown to the "
+                f"registry: {unknown_ports}. Known: {sorted(known)}."
             )
         bad_ports = [(name, p) for name, p in self.ports.items() if not (1 <= p <= 65535)]
         if bad_ports:
@@ -262,7 +321,10 @@ class ThroughputConfig(BaseModel):
 
     Tuning math:
         target_bytes / timeout_sec = floor of "throttled" detection.
-        1 MiB / 30 s ≈ 280 kbps below which throughput_throttled fires.
+        8 MiB / 30 s ≈ 2.2 Mbps below which throughput_throttled fires.
+        Bumped from 1 MiB after 100-500 Mbps cloud-to-cloud runs
+        consistently collapsed listener-side measurement to <10 ms
+        kernel-buffer-absorption windows.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -338,12 +400,19 @@ class CensprobeConfig(BaseModel):
     """Root configuration object.
 
     Every section is required — censprobe.yaml must be fully populated.
-    extra="ignore" (rather than "forbid") so a future version that adds
-    a new top-level section doesn't crash older deployments — they'll
-    just ignore the unknown section while still requiring all known ones.
+    ``extra="forbid"`` matches the per-section sub-models so a typo'd
+    top-level key (e.g. ``module:`` instead of ``modules:``) fails with
+    a clear "extra fields not permitted" error rather than silently
+    being ignored while the real ``modules:`` is absent and triggers a
+    less actionable "field required" error. The previous ``extra="ignore"``
+    was meant to leave room for future top-level sections; that's
+    a soft trade-off the project's "fail loud on misconfiguration"
+    invariant resolves in favour of strictness. When a new section is
+    added later, the config schema bump is the natural surface to
+    advertise it.
     """
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     vantage: VantageConfig
     modules: ModulesConfig

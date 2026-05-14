@@ -15,6 +15,7 @@ pip install -e packages/probe-core[test] \
             -e packages/solo[test] \
             -e packages/listener[test] \
             -e packages/client[test] \
+            -e packages/sync[test] \
             -e packages/dashboard/sync-api[test] \
             -e .[dev]
 pre-commit install --hook-type pre-commit --hook-type pre-push

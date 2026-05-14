@@ -77,7 +77,9 @@ _DEFAULT_CFG: dict[str, Any] = {
     "modules": {
         "dns": {
             "enabled": True,
-            "repeats": 1,
+            # No "repeats" — DNS module's retry surface is the
+            # multi-resolver cross-check, not a single-record loop
+            # (removed 2026-05-14).
             "doh_resolvers": ["https://cloudflare-dns.com/dns-query"],
             "doh_timeout_sec": 5.0,
             "asn_lookup_backoff_sec": 60.0,
@@ -123,7 +125,7 @@ _DEFAULT_CFG: dict[str, Any] = {
         # this map (validator rejects missing entries).
         "sni": {},
     },
-    "throughput": {"enabled": True, "target_bytes": 1048576, "timeout_sec": 30.0},
+    "throughput": {"enabled": True, "target_bytes": 8388608, "timeout_sec": 30.0},
     "scoring": {
         "entry": {"protocol": 0.6, "uplink": 0.3, "latency": 0.1},
         "exit": {"uplink": 0.6, "censorship": 0.4},

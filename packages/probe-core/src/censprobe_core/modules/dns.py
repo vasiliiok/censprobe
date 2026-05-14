@@ -61,9 +61,19 @@ def _ipapi_key() -> str:
 
 
 def _get_doh_client() -> httpx.AsyncClient:
+    """Lazy singleton DoH client.
+
+    Timeout is read lazily from CensprobeConfig if available so the
+    operator's censprobe.yaml::modules.dns.doh_timeout_sec actually
+    takes effect (previously hardcoded at 10s regardless of yaml).
+    Falls back to a sensible 10s when the config hasn't loaded yet —
+    matters for the rare test path that imports this module before
+    load_config has run.
+    """
     global _DOH_CLIENT
     if _DOH_CLIENT is None:
-        _DOH_CLIENT = httpx.AsyncClient(timeout=httpx.Timeout(10.0), http2=True)
+        timeout = _config_doh_timeout()
+        _DOH_CLIENT = httpx.AsyncClient(timeout=httpx.Timeout(timeout), http2=True)
     return _DOH_CLIENT
 
 
@@ -72,6 +82,26 @@ def _get_asn_client() -> httpx.AsyncClient:
     if _ASN_CLIENT is None:
         _ASN_CLIENT = httpx.AsyncClient(timeout=httpx.Timeout(5.0))
     return _ASN_CLIENT
+
+
+def _config_doh_timeout() -> float:
+    """Read DoH timeout from the loaded config; 10s fallback for tests."""
+    try:
+        from censprobe_core.config import get_config
+
+        return float(get_config().modules.dns.doh_timeout_sec)
+    except (RuntimeError, AttributeError):
+        return 10.0
+
+
+def _config_asn_backoff_sec() -> float:
+    """Read ipapi.is backoff cool-off from the loaded config; 90s fallback."""
+    try:
+        from censprobe_core.config import get_config
+
+        return float(get_config().modules.dns.asn_lookup_backoff_sec)
+    except (RuntimeError, AttributeError):
+        return 90.0
 
 
 # Public DNS resolvers to test
@@ -97,21 +127,22 @@ DOT_RESOLVERS = [
 ]
 
 
-async def run_dns_tests(
-    domains: list[str],
-    repeats: int = 3,
-) -> list[TestResult]:
-    """Run all DNS tests for a list of domains."""
+async def run_dns_tests(domains: list[str]) -> list[TestResult]:
+    """Run all DNS tests for a list of domains.
+
+    DNS attribution is verified via the multi-resolver ladder
+    (system + ISP + 4 public + 3 DoH + 2 DoT) — that cross-check IS
+    the retry surface. Single-record repeats would only add load
+    without changing the verdict shape, so this entry point doesn't
+    expose a ``repeats`` parameter. (Removed 2026-05-14: previously
+    accepted-and-ignored, which misled the operator into thinking
+    censprobe.yaml::modules.dns.repeats did something.)
+    """
     results: list[TestResult] = []
 
     # Test DoH resolver accessibility first
     results.extend(await _test_doh_accessibility())
 
-    # Per domain tests. ``repeats`` is part of the public module API (callers
-    # tune it via run_dns_tests) but DNS attribution does not benefit from
-    # repeated single-record queries — DoT/DoH cross-checks are the retry
-    # surface — so we don't thread it deeper.
-    _ = repeats
     for domain in domains:
         results.extend(await _test_domain(domain))
 
@@ -774,7 +805,7 @@ async def _ip_to_asn(ip: str) -> str | None:
             params={"q": ip, "key": _ipapi_key()},
         )
         if r.status_code == 429:
-            _ASN_BACKOFF_UNTIL = now + 90.0
+            _ASN_BACKOFF_UNTIL = now + _config_asn_backoff_sec()
             return None
         if r.status_code == 200:
             data = r.json()

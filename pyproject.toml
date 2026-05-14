@@ -233,5 +233,15 @@ exclude_lines = [
 ]
 
 [tool.bandit]
+# Test trees use ``assert`` freely; B101 stays meaningful for src/.
 exclude_dirs = ["tests", "*/tests/*", "build", "dist"]
-skips = ["B101", "B404", "B603", "B607"]
+# B404/B603/B607: subprocess is intentional in CLI launchers and runner
+# helpers — bandit can't tell apart "running curl/wg/ip" from "exec'ing
+# arbitrary operator input", but in this project no subprocess command
+# ever interpolates user-controlled strings (all argv lists are
+# constructed from validated config + hardcoded constants).
+# B101 (assert_used) was on this list before 2026-05-14, which silently
+# hid 4 production asserts that python -O would have stripped. Audit
+# removed it; if a new src/ assert ever lands and is legitimate (mypy
+# narrowing), suppress in-place with ``# nosec B101 — <reason>``.
+skips = ["B404", "B603", "B607"]

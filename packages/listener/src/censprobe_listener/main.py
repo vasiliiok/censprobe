@@ -226,22 +226,26 @@ def _load_config_or_exit() -> None:
         sys.exit(1)
 
 
-def _listener_udp_ports(port_overrides: dict[str, int]) -> list[int]:
-    """Resolve UDP-transport protocols to their actual bind ports.
+def _listener_udp_ports(enabled: list[str], ports_map: dict[str, int]) -> list[int]:
+    """Resolve enabled UDP-transport protocols to their actual bind ports.
 
-    Used by the pre-flight NOTRACK auto-setup. Reads the runtime port
-    overrides (which a port-allocator may have reshuffled, e.g. mtg
-    primary getting bumped off 443) and falls back to the registry's
-    ``default_port`` per protocol. Returns the de-duplicated list.
+    Used by the pre-flight NOTRACK auto-setup. Walks ``enabled`` (the
+    canonical list of protocols the listener will bring up this session)
+    and picks the matching port from ``ports_map``. Disabled protocols
+    are skipped — listener never binds them, no NOTRACK rule needed.
+    The config validator (:meth:`ProtocolsConfig._check_ports_cover_enabled`)
+    guarantees every enabled name appears in ``ports_map``, so the
+    lookup is total.
     """
-    from censprobe_core.protocol_registry import all_protocols
+    from censprobe_core.protocol_registry import get_protocol
 
-    ports: set[int] = set()
-    for spec in all_protocols():
-        if spec.transport != "udp":
+    out: set[int] = set()
+    for name in enabled:
+        spec = get_protocol(name)
+        if spec is None or spec.transport != "udp":
             continue
-        ports.add(port_overrides.get(spec.name, spec.default_port))
-    return sorted(ports)
+        out.add(ports_map[name])
+    return sorted(out)
 
 
 def _print_preflight(results: list[CheckResult]) -> None:
@@ -385,7 +389,11 @@ async def _async_main(
     # before responders see them). Never aborts startup — operators may
     # not have permission to fix sysctls — but every WARN is loud.
     cfg = get_config()
-    _print_preflight(await run_preflight(udp_ports=_listener_udp_ports(cfg.protocols.ports)))
+    _print_preflight(
+        await run_preflight(
+            udp_ports=_listener_udp_ports(cfg.protocols.enabled, cfg.protocols.ports)
+        )
+    )
 
     # ── Step 1: Generate fresh credentials in memory ──────────────────────────
     # Each session gets its own one-time credential set; nothing is written
@@ -556,6 +564,12 @@ async def _async_main(
     cred_server.stop()
 
     # ── Step 6: Finalize verdicts from snapshotted state ─────────────────────
+    # Per-protocol throughput the client measured via curl-through-tunnel
+    # and POSTed in the body of /stop. Authoritative on fast links where
+    # the listener's loopback echo collapses below the 30 ms kernel-buffer
+    # absorption floor. Empty when an older client (no body) connects;
+    # we keep ``avg_throughput_mbps`` as the fallback in that case.
+    client_throughput = cred_server.client_throughput()
     results: dict[str, ProtocolResult] = {}
     for name, responder in responders.items():
         pr = _finalize_protocol_result(
@@ -563,6 +577,7 @@ async def _async_main(
             responder,
             self_test_ok=self_test_results.get(name),
         )
+        pr.client_avg_throughput_mbps = client_throughput.get(name)
         if name == "mtproto_orig":
             override = _mtproto_orig_failure_note(responder, self_test_results.get(name))
             if override is not None:

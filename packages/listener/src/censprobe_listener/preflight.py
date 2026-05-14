@@ -699,11 +699,16 @@ def write_pruned_proxy_multi_conf(
     full mirror of the upstream-provided file.
 
     Caller is responsible for handling the empty-alive case BEFORE
-    invoking this function. We assert non-empty so a mistake at the
-    call site fails loudly rather than silently writing a config that
-    the C binary parses then crashes on.
+    invoking this function. Production ``raise`` (not ``assert``,
+    which python -O strips) so a mistake at the call site fails loudly
+    rather than silently writing a config that the C binary parses
+    then crashes on.
     """
-    assert alive, "write_pruned_proxy_multi_conf requires at least one alive upstream"
+    if not alive:
+        raise ValueError(
+            "write_pruned_proxy_multi_conf requires at least one alive upstream; "
+            "the caller must skip the spawn when alive=[]"
+        )
     if source is None:
         source = _PROXY_MULTI_CONF_PATH
 
@@ -812,6 +817,36 @@ async def run_mtproxy_orig_self_test(
     )
 
 
+def _check_setpriv_available() -> CheckResult:
+    """Verify ``setpriv`` (util-linux) is on PATH for responder privsep.
+
+    censprobe_core._privsep.with_privsep falls back to a no-op when
+    ``setpriv`` is missing — which is sound (an old image keeps working)
+    but silently re-introduces the CVE surface
+    ``_privsep`` was added to close. Surfacing this at preflight gives
+    the operator a chance to rebuild the image or apt-install util-linux
+    BEFORE the responders spawn unconstrained tunnel binaries.
+    """
+    from censprobe_core._privsep import setpriv_available
+
+    if setpriv_available():
+        return CheckResult(
+            "setpriv-available",
+            "ok",
+            "setpriv on PATH — responders will spawn under dropped privileges",
+        )
+    return CheckResult(
+        "setpriv-available",
+        "warn",
+        (
+            "setpriv NOT on PATH — tunnel binaries (xray/sing-box/hysteria/mtg) "
+            "will inherit the listener's root + NET_ADMIN bounding set. "
+            "Install util-linux in the listener image to restore the "
+            "privilege-separation defense-in-depth."
+        ),
+    )
+
+
 async def run_preflight(udp_ports: Sequence[int]) -> list[CheckResult]:
     """Run all pre-startup checks in order; return individual results.
 
@@ -842,9 +877,10 @@ async def run_preflight(udp_ports: Sequence[int]) -> list[CheckResult]:
     """
     orphan = _cleanup_orphan_rules()
     cap = _check_iptables_capability()
+    setpriv = _check_setpriv_available()
     notrack = _try_install_notrack(udp_ports)
     conntrack = _check_conntrack(notrack_installed=notrack.status == "ok")
     dmesg = _check_dmesg_recent_drops()
     dc = await _check_telegram_dc_reach()
     upstream = await _check_mtproxy_orig_upstream_reach()
-    return [orphan, cap, notrack, conntrack, dmesg, dc, upstream]
+    return [orphan, cap, setpriv, notrack, conntrack, dmesg, dc, upstream]

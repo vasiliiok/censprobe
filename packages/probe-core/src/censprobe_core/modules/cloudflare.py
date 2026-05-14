@@ -20,12 +20,16 @@ Test families:
                               — TCP 443 to WARP control-plane hostnames and the
                                  MASQUE / WireGuard anycast IP ranges; proves
                                  IP-level reachability independent of DNS.
-  cloudflare_warp_masque_udp_*,
-  cloudflare_warp_wg_udp_*    — UDP probes to MASQUE fallback ports (4443/8443)
-                                 and WireGuard ports (2408/4500). All of these
-                                 protocols silently drop unauthenticated
-                                 datagrams, so timeout = INCONCLUSIVE; only
+  cloudflare_warp_masque_udp_* — UDP probes to MASQUE fallback ports
+                                 (4443/8443). Silent timeout = INCONCLUSIVE;
                                  ICMP rejections surface as BLOCKED.
+                                 WireGuard probes (UDP 2408/4500) were
+                                 dropped 2026-05-14 — no shared key means
+                                 a real WG server's silent-drop branch is
+                                 indistinguishable from censorship, so
+                                 every probe always returned INCONCLUSIVE.
+                                 IP-level reach for 162.159.193.0/24 is
+                                 covered by cloudflare_warp_*_tcp.
   cloudflare_http_*           — HTTPS to workers.dev, pages.dev, cloudflare-dns.com
                                  as platform-level censorship canaries.
 
@@ -69,9 +73,24 @@ from censprobe_core.utils import stamp_test_elapsed
 
 logger = logging.getLogger(__name__)
 
+# These are protocol-level deadlines, not operator preferences, so they
+# live as module constants rather than CloudflareModuleConfig fields:
+#   * _CONNECT_TIMEOUT — TCP handshake budget for WARP control-plane
+#     probes. Generous because the targets live behind Cloudflare's
+#     anycast edge and a transient SYN drop is normal.
+#   * _QUIC_TIMEOUT — QUIC VN response window. RFC 9000 §6.2 mandates
+#     the reply but doesn't bound its latency; 3 s matches the
+#     observed Cloudflare anycast PoP RTT plus a small safety margin.
+#   * _WG_UDP_TIMEOUT — short on purpose. A WireGuard server silently
+#     drops handshakes whose mac1 doesn't match its static pubkey
+#     (which we can't compute). Waiting longer just delays the
+#     INCONCLUSIVE verdict.
+# An operator wanting to dial these from a high-RTT vantage can patch
+# them locally; promoting to censprobe.yaml would be config bloat for
+# knobs nobody has ever needed to tune.
 _CONNECT_TIMEOUT = 10.0
-_QUIC_TIMEOUT = 3.0  # seconds to wait for QUIC VN response
-_WG_UDP_TIMEOUT = 2.0  # seconds — WG won't respond to invalid handshake anyway
+_QUIC_TIMEOUT = 3.0
+_WG_UDP_TIMEOUT = 2.0
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -128,7 +147,29 @@ async def run_cloudflare_tests(cfg: dict[str, Any] | None = None) -> list[TestRe
         if isinstance(r, TestResult):
             results.append(r)
         elif isinstance(r, Exception):
-            logger.debug("cloudflare probe error: %s", r)
+            # Same anti-pattern fix as ``telegram._test_dc_reachability``
+            # (which previously silenced TypeErrors at DEBUG and shipped
+            # zero DC results for every report). A probe coroutine that
+            # raised here used to vanish into a debug log; now it
+            # surfaces as a real ERROR row so the dashboard reflects the
+            # failure instead of dropping it on the floor.
+            logger.warning(
+                "cloudflare probe crashed (%s): %s",
+                type(r).__name__,
+                r,
+                exc_info=r,
+            )
+            results.append(
+                TestResult(
+                    test="cloudflare_probe_crashed",
+                    category="cloudflare",
+                    target="(internal)",
+                    verdict=Verdict.ERROR,
+                    evidence={"error": repr(r), "error_type": type(r).__name__},
+                    confidence=0.0,
+                    notes="Probe coroutine raised; see listener log for traceback.",
+                )
+            )
 
     return results
 
@@ -150,6 +191,13 @@ def _build_quic_vn_trigger() -> bytes:
     carrying an Initial packet to at least 1200 bytes; servers (Cloudflare,
     Google) drop short datagrams as anti-amplification. So we pad with zeros
     to 1200 bytes — the trailing zeros are valid PADDING frames.
+
+    The Length varint covers PacketNumber + Payload — RFC 9000 §17.2.
+    We emit a 1-byte PacketNumber + 1-byte Payload, so Length=2.
+    (Pre-2026-05-14 this was encoded as Length=1, technically malformed
+    Initial framing; most stacks reply to the GREASE version regardless,
+    but stricter QUIC implementations may drop the packet before
+    reaching the VN logic.)
     """
     dcid = os.urandom(8)
     scid = os.urandom(4)
@@ -161,9 +209,9 @@ def _build_quic_vn_trigger() -> bytes:
         + bytes([len(scid)])
         + scid
         + b"\x00"  # Token Length = 0
-        + b"\x40\x01"  # Length (varint 2-byte form) = 1
-        + b"\x00"  # Packet Number
-        + b"\x00"  # 1-byte payload
+        + b"\x40\x02"  # Length (varint 2-byte form) = 2 — PN(1) + Payload(1)
+        + b"\x00"  # Packet Number (1 byte)
+        + b"\x00"  # 1-byte payload (PADDING frame)
     )
     return header + b"\x00" * (_QUIC_INITIAL_MIN_SIZE - len(header))
 
@@ -186,7 +234,11 @@ async def _test_quic(host: str, port: int, name: str) -> TestResult:
             self.fut: asyncio.Future[bytes] = asyncio.get_running_loop().create_future()
 
         def connection_made(self, transport: asyncio.BaseTransport) -> None:
-            assert isinstance(transport, asyncio.DatagramTransport)
+            # ``create_datagram_endpoint`` always hands us a DatagramTransport
+            # — narrowed via isinstance + raise (not assert, which python -O
+            # strips) so a future asyncio change surfaces loudly.
+            if not isinstance(transport, asyncio.DatagramTransport):
+                raise RuntimeError(f"expected DatagramTransport, got {type(transport).__name__}")
             transport.sendto(probe)
 
         def datagram_received(self, data: bytes, addr: tuple[str | Any, int]) -> None:
@@ -561,7 +613,11 @@ async def _test_warp_udp(
             self.fut: asyncio.Future[bytes] = asyncio.get_running_loop().create_future()
 
         def connection_made(self, transport: asyncio.BaseTransport) -> None:
-            assert isinstance(transport, asyncio.DatagramTransport)
+            # ``create_datagram_endpoint`` always hands us a DatagramTransport
+            # — narrowed via isinstance + raise (not assert, which python -O
+            # strips) so a future asyncio change surfaces loudly.
+            if not isinstance(transport, asyncio.DatagramTransport):
+                raise RuntimeError(f"expected DatagramTransport, got {type(transport).__name__}")
             try:
                 transport.sendto(probe)
             except OSError as e:

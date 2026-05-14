@@ -19,6 +19,7 @@ import socket
 import string
 from typing import Any
 
+from censprobe_core._browser_ua import CHROME_UA
 from censprobe_core.models import BlockingMethod, TestResult, Verdict
 from censprobe_core.utils import stamp_test_elapsed
 
@@ -73,27 +74,22 @@ async def _test_header_manipulation() -> list[TestResult]:
     """
     results = []
 
-    # Use the same Chrome UA as modules/http.py so middleboxes that
-    # fingerprint by User-Agent value treat both probes uniformly. The
-    # case-mutation test is about wire-byte survival, not UA content,
-    # but a "censprobe/..." string here would let a UA-aware middlebox
-    # selectively rewrite our traffic and confuse the verdict.
-    _UA = (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/145.0.0.0 Safari/537.36"
-    )
-
+    # Reuse the same Chrome UA as modules/http.py (shared constant in
+    # ``_browser_ua``) so middleboxes that fingerprint by User-Agent
+    # value treat both probes uniformly. The case-mutation test is
+    # about wire-byte survival, not UA content, but a "censprobe/..."
+    # string here would let a UA-aware middlebox selectively rewrite
+    # our traffic and confuse the verdict.
     test_cases: list[dict[str, Any]] = [
         {
             "name": "middlebox_header_host_case",
-            "headers": [("hOsT", "1.1.1.1"), ("User-Agent", _UA)],
+            "headers": [("hOsT", "1.1.1.1"), ("User-Agent", CHROME_UA)],
             "field": "hOsT",
             "notes": "Modified Host header case",
         },
         {
             "name": "middlebox_header_useragent_case",
-            "headers": [("Host", "1.1.1.1"), ("uSeR-aGeNt", _UA)],
+            "headers": [("Host", "1.1.1.1"), ("uSeR-aGeNt", CHROME_UA)],
             "field": "uSeR-aGeNt",
             "notes": "Modified User-Agent case",
         },

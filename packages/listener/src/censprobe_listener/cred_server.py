@@ -28,29 +28,24 @@ import asyncio
 import contextlib
 import hmac
 import http.server
-import ipaddress
 import json
 import logging
+import math
 import secrets
-import socket
 import ssl
 import tempfile
 import threading
-import urllib.request
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from censprobe_core.ephemeral_cert import detect_external_ip as _detect_external_ip_impl
+from censprobe_core.ephemeral_cert import generate_self_signed_cert as _generate_cert_impl
 from censprobe_core.utils import write_secret
-from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.x509.oid import NameOID
 
 logger = logging.getLogger(__name__)
 
 
-_CERT_VALIDITY_HOURS = 24  # cert lifetime; listener sessions are minutes
+_CERT_VALIDITY_HOURS = 2  # 2026-05-14: was 24; trimmed to session-scale.
 _TOKEN_BYTES = 32  # 256 bits of entropy
 # Single-use token. The previous _MAX_SERVES=5 retry budget was a
 # foot-gun: any party that snooped the bearer token (e.g. via `ps auxf`
@@ -62,51 +57,19 @@ _MAX_SERVES = 1
 
 
 def generate_self_signed_cert() -> tuple[bytes, bytes, str]:
-    """Generate an RSA-2048 self-signed cert.
+    """Generate an RSA-2048 self-signed cert for the listener cred-server.
 
-    Returns (cert_pem, key_pem, sha256_fingerprint_hex).
-
-    The cert carries a SubjectAlternativeName extension covering localhost
-    plus the common cred-fetch addresses. The client pins by SHA-256
-    fingerprint and disables hostname verification, but RFC 6125 strict
-    clients (curl --cacert when an operator debugs by hand) refuse a
-    CN-only cert outright — so we publish the SAN even though the pinned
-    client doesn't consult it.
+    Returns (cert_pem, key_pem, sha256_fingerprint_hex). Thin wrapper
+    around :func:`censprobe_core.ephemeral_cert.generate_self_signed_cert`
+    with the listener's CN baked in; both listener and sync used to
+    carry near-identical copies of this generator (with drift risk on
+    cert lifetime / key size / SAN list). 2026-05-14 hoisted the common
+    implementation to probe-core.
     """
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    name = x509.Name(
-        [
-            x509.NameAttribute(NameOID.COMMON_NAME, "censprobe-listener"),
-        ]
+    return _generate_cert_impl(
+        common_name="censprobe-listener",
+        validity_hours=_CERT_VALIDITY_HOURS,
     )
-    san = x509.SubjectAlternativeName(
-        [
-            x509.DNSName("censprobe-listener"),
-            x509.DNSName("localhost"),
-            x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
-            x509.IPAddress(ipaddress.IPv6Address("::1")),
-        ]
-    )
-    now = datetime.now(UTC)
-    cert = (
-        x509.CertificateBuilder()
-        .subject_name(name)
-        .issuer_name(name)
-        .public_key(key.public_key())
-        .serial_number(x509.random_serial_number())
-        .not_valid_before(now)
-        .not_valid_after(now + timedelta(hours=_CERT_VALIDITY_HOURS))
-        .add_extension(san, critical=False)
-        .sign(key, hashes.SHA256())
-    )
-    cert_pem = cert.public_bytes(serialization.Encoding.PEM)
-    key_pem = key.private_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.TraditionalOpenSSL,
-        encryption_algorithm=serialization.NoEncryption(),
-    )
-    fingerprint = cert.fingerprint(hashes.SHA256()).hex()
-    return cert_pem, key_pem, fingerprint
 
 
 class CredServer:
@@ -164,6 +127,14 @@ class CredServer:
         # caused on amneziawg-go was the original motivation for the
         # 2026-05 refactor.
         self._final_snapshots: dict[str, dict[str, Any]] | None = None
+        # Per-protocol throughput numbers POSTed in the JSON body of /stop
+        # by the client. Listener-side measurement on fast links discards
+        # as kernel-buffer-absorption artefact (echo_server._MIN_THROUGHPUT_
+        # DURATION_SEC); the client's curl-through-tunnel measurement is
+        # the authoritative number. Merged into ProtocolResult at report
+        # finalisation in main.py. Empty when the client posted no body
+        # (older clients) or sent a malformed body.
+        self._client_throughput: dict[str, float] = {}
         # Set by the snapshot handler once the client has successfully
         # GET /snapshot at least once AFTER commit_final_snapshots — so
         # main.py can wait_for(snapshot_drained, timeout=N) before
@@ -272,6 +243,19 @@ class CredServer:
         with self._lock:
             return self._client_ip
 
+    def client_throughput(self) -> dict[str, float]:
+        """Return a copy of the per-protocol throughput numbers the
+        client POSTed in the body of ``/stop``.
+
+        Empty when no body was posted or the body was malformed. The
+        caller (main.py at report-finalisation) merges these into the
+        ``ProtocolResult.client_avg_throughput_mbps`` field. Returning
+        a copy keeps the cred-server's internal dict immutable from
+        the caller's perspective.
+        """
+        with self._lock:
+            return dict(self._client_throughput)
+
     def stop(self) -> None:
         if self._server is not None:
             try:
@@ -299,6 +283,27 @@ class CredServer:
             # the Rich console is doing the user-facing logging.
             def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
                 return
+
+            def _read_request_body(self, max_bytes: int) -> bytes:
+                """Read up to ``max_bytes`` from the request body.
+
+                Returns ``b""`` for unparseable / missing ``Content-Length``
+                so the caller can no-op on absent bodies (the /stop
+                endpoint accepts empty bodies). Caps the read at
+                ``max_bytes`` so an abusive client can't OOM the
+                listener by streaming gigabytes.
+                """
+                try:
+                    n = int(self.headers.get("Content-Length", "0"))
+                except (TypeError, ValueError):
+                    return b""
+                if n <= 0:
+                    return b""
+                n = min(n, max_bytes)
+                try:
+                    return self.rfile.read(n) or b""
+                except OSError:
+                    return b""
 
             def _reject(self, code: int, reason: str, *, allow: str | None = None) -> None:
                 self.send_response(code)
@@ -433,6 +438,21 @@ class CredServer:
                 """
                 if not self._check_bearer():
                     return
+
+                # Read the optional JSON body before responding so we
+                # don't truncate a client mid-PUT on slow links. The
+                # body is small (a flat {protocol: mbps} map ≤ 9 entries
+                # so a few hundred bytes); cap at 64 KiB to bound abuse.
+                body = self._read_request_body(max_bytes=64 * 1024)
+                client_throughput = _parse_client_throughput(body)
+                if client_throughput:
+                    with srv._lock:
+                        # Merge — defensive against the client retrying
+                        # /stop with an overlapping but-not-identical
+                        # map (e.g. amneziawg re-measured but other
+                        # protocols already had a value).
+                        srv._client_throughput.update(client_throughput)
+
                 with srv._lock:
                     ev = srv._stop_asyncio_event
                     loop = srv._stop_event_loop
@@ -459,99 +479,54 @@ class CredServer:
         return _Handler
 
 
-# Public IP echo services queried only when the kernel's local
-# default-route source is a private/CGNAT/loopback address. Listed in
-# fallback order; first one to return a parseable IPv4 wins.
-_PUBLIC_IP_ECHOES = (
-    "https://api.ipify.org",
-    "https://ifconfig.me/ip",
-)
-_PUBLIC_IP_TIMEOUT_SEC = 5.0
+def _parse_client_throughput(body: bytes) -> dict[str, float]:
+    """Parse the optional JSON body of POST /stop into a {protocol: mbps} map.
+
+    Expected shape::
+
+        {"client_throughput": {"wireguard": 360.7, "shadowsocks": 523.4, ...}}
+
+    Accepted forms:
+      * Missing body → returns ``{}`` (older clients).
+      * Body not JSON, or missing the key → returns ``{}``.
+      * Values that aren't a finite positive float → silently dropped from
+        the map (a single bad row shouldn't reject the whole submission).
+
+    No exceptions reach the HTTP handler — a malformed body must NOT
+    fail /stop, because the client has already finished probing by
+    the time it POSTs and the listener needs to tear down regardless.
+    """
+    if not body:
+        return {}
+    try:
+        obj = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+    if not isinstance(obj, dict):
+        return {}
+    ct = obj.get("client_throughput")
+    if not isinstance(ct, dict):
+        return {}
+    out: dict[str, float] = {}
+    for proto, mbps in ct.items():
+        if not isinstance(proto, str):
+            continue
+        if not isinstance(mbps, (int, float)):
+            continue
+        if not math.isfinite(mbps) or mbps <= 0:
+            continue
+        out[proto] = float(mbps)
+    return out
 
 
 def detect_external_ip() -> str | None:
     """Best-effort detection of the IPv4 a remote client should connect to.
 
-    Two-step strategy:
-
-      1. Kernel routing trick — open a UDP socket "connected" to a public
-         anycast (SOCK_DGRAM connect never actually sends a packet) and
-         ask the kernel which source address it would use. Instant, works
-         on any host with a default route. On a cloud VPS with a directly
-         attached public IP this is the answer.
-
-      2. If step 1 returned a private/CGNAT/loopback address, the
-         listener is behind NAT — the local source IP is useless to a
-         remote client. Query a public-IP echo service to learn the
-         externally-routable address. Bounded by ~5 s per endpoint.
-
-    Returns ``None`` only if the host has no outbound network at all —
-    in that case the listener cannot accept clients anyway, and main.py
-    falls back to a placeholder ``<your-server-ip>`` in the printed
-    command.
+    Thin re-export of
+    :func:`censprobe_core.ephemeral_cert.detect_external_ip` so existing
+    imports of ``cred_server.detect_external_ip`` keep working. The
+    actual logic lives in probe-core (2026-05-14 hoist) — used by both
+    listener and sync, with a third public-IP echo fallback added in
+    that same pass.
     """
-    local_ip = _udp_connect_local_ip()
-    if local_ip is None:
-        return None
-
-    if not _is_unroutable(local_ip):
-        return local_ip
-
-    public_ip = _query_public_ip_echo()
-    return public_ip or local_ip
-
-
-def _udp_connect_local_ip() -> str | None:
-    """Return the IPv4 source address the kernel would use for a public destination."""
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        try:
-            s.connect(("1.1.1.1", 80))
-            ip: str = s.getsockname()[0]
-            return ip
-        finally:
-            s.close()
-    except OSError:
-        return None
-
-
-_CGNAT_NETWORK = ipaddress.IPv4Network("100.64.0.0/10")
-
-
-def _is_unroutable(ip: str) -> bool:
-    """Treat an IPv4 as unusable for a remote client.
-
-    Covers all the cases where a behind-NAT listener would otherwise hand
-    the client an IP it cannot reach:
-      * RFC 1918 (10/8, 172.16/12, 192.168/16),
-      * loopback (127/8) and link-local (169.254/16) — `is_private`
-        captures both,
-      * CGNAT (100.64/10, RFC 6598) — explicitly NOT covered by
-        `is_private` in CPython, so we add a direct subnet membership
-        check. Mobile uplinks and several budget VPS providers hand out
-        CGNAT addresses, and falling through to the echo lookup is
-        exactly the path we want for those listeners.
-    """
-    try:
-        addr = ipaddress.IPv4Address(ip)
-    except ValueError:
-        # ipaddress.AddressValueError is a ValueError subclass — Sonar S5713.
-        return True
-    return addr.is_private or addr in _CGNAT_NETWORK
-
-
-def _query_public_ip_echo() -> str | None:
-    """Ask a couple of public-IP echo services and return the first parseable IPv4."""
-    for url in _PUBLIC_IP_ECHOES:
-        try:
-            # urls are a hardcoded module-level tuple of trusted https endpoints
-            # (api.ipify.org, ifconfig.me) — no operator/network input is mixed
-            # into the URL, so the "audit URL open" warning doesn't apply.
-            with urllib.request.urlopen(url, timeout=_PUBLIC_IP_TIMEOUT_SEC) as r:  # noqa: S310  # nosec B310
-                ip: str = r.read().decode("ascii", errors="replace").strip()
-            ipaddress.IPv4Address(ip)  # validate; raises if junk
-            return ip
-        except (OSError, ValueError):
-            # ipaddress.AddressValueError is already a ValueError subclass.
-            continue
-    return None
+    return _detect_external_ip_impl()

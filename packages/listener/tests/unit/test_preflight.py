@@ -253,12 +253,13 @@ class TestRunPreflight:
         # orphan cleanup runs FIRST so subsequent installs aren't shadowed
         # by leftover rules; cap check is reported next so a missing-CAP
         # condition is loud BEFORE the conntrack/notrack output that
-        # depends on it; DC reach checks run last because they're
-        # network-dependent and the slowest, with the cheaper 443-port
-        # public probe ahead of the per-proxy-multi.conf 8888 probe.
+        # depends on it; setpriv check is purely local and lives next to
+        # cap (both are environment-capability gates); DC reach checks
+        # run last because they're network-dependent and slow.
         assert names == [
             "orphan-rules",
             "iptables-cap",
+            "setpriv-available",
             "notrack-autosetup",
             "conntrack",
             "conntrack-dmesg",
@@ -531,7 +532,9 @@ class TestWritePrunedProxyMultiConf:
 
     def test_rejects_empty_alive_list(self, tmp_path: Path) -> None:
         # Caller is supposed to handle 0-alive specially (skip launching
-        # mtproto-proxy entirely). Asserting here protects against a
-        # caller mistake silently writing an unparseable config.
-        with pytest.raises(AssertionError):
+        # mtproto-proxy entirely). Raising ValueError protects against a
+        # caller mistake silently writing an unparseable config. The
+        # 2026-05-14 audit replaced an ``assert`` here with a real raise
+        # so python -O doesn't strip the guard.
+        with pytest.raises(ValueError, match="at least one alive upstream"):
             preflight.write_pruned_proxy_multi_conf([], tmp_path / "out.conf")

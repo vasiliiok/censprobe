@@ -47,7 +47,22 @@ from censprobe_core.utils import stamp_test_elapsed
 
 logger = logging.getLogger(__name__)
 
-_TIMEOUT = 8.0
+# Default per-DC / per-HTTPS timeout. Used when callers reach the helpers
+# directly (tests, ad-hoc tooling); :func:`run_telegram_tests` overrides
+# from CensprobeConfig.modules.telegram.timeout_sec at run time and
+# threads the value through. Previously a mutable module-level constant
+# read implicitly by every helper — bound to config 2026-05-14 audit.
+_DEFAULT_TIMEOUT_SEC = 8.0
+
+
+def _config_timeout_sec() -> float:
+    """Read Telegram module timeout from CensprobeConfig; default fallback."""
+    try:
+        from censprobe_core.config import get_config
+
+        return float(get_config().modules.telegram.timeout_sec)
+    except (RuntimeError, AttributeError):
+        return _DEFAULT_TIMEOUT_SEC
 
 
 async def run_telegram_tests(cfg: dict[str, Any] | None = None) -> list[TestResult]:
@@ -269,7 +284,7 @@ async def _test_dc_port(dc_id: int, ip_ver: str, ip: str, port: int) -> TestResu
     try:
         reader, writer = await asyncio.wait_for(
             asyncio.open_connection(ip, port),
-            timeout=_TIMEOUT,
+            timeout=_config_timeout_sec(),
         )
         rtt_connect = (time.monotonic() - t0) * 1000
 
@@ -291,7 +306,16 @@ async def _test_dc_port(dc_id: int, ip_ver: str, ip: str, port: int) -> TestResu
         # using 'q' (signed) for compatibility with existing servers.
         msg_id &= (1 << 63) - 1
         mtproto = struct.pack("<qqi", 0, msg_id, 4) + b"\xf1\x8e\x7e\xbe"
-        assert len(mtproto) == 24 and (len(mtproto) % 4) == 0
+        # Invariant: 24 bytes total, multiple of 4 (abridged-transport frame
+        # length is the byte-length divided by 4). Pre-2026-05-14 this was
+        # an ``assert``, which python -O strips — any future format-string
+        # edit that broke the invariant would have shipped malformed bytes
+        # to Telegram's DC without raising. Real RuntimeError now.
+        if len(mtproto) != 24 or len(mtproto) % 4 != 0:
+            raise RuntimeError(
+                f"MTProto abridged frame invariant violated: "
+                f"len={len(mtproto)}, expected 24 and divisible by 4"
+            )
         writer.write(b"\xef" + bytes([len(mtproto) // 4]) + mtproto)
         await writer.drain()
 
@@ -409,7 +433,7 @@ async def _test_https_domains(
     so the verdict is reclassified BLOCKED → INCONCLUSIVE.
     """
     async with httpx.AsyncClient(
-        timeout=httpx.Timeout(_TIMEOUT),
+        timeout=httpx.Timeout(_config_timeout_sec()),
         http2=True,
         follow_redirects=True,
         verify=True,
@@ -495,8 +519,10 @@ async def _classify_tls_failure(
          this step).
       3. Compare cert SAN/CN against the ``*.telegram.org`` family.
 
-    Pass step 2 + 3 → INCONCLUSIVE (Telegram serving wrong cert, not a
-    censor: TSPU cannot mint a chain to a public CA for *.t.me).
+    Pass step 2 + 3 → OK (Telegram cert family observable from this
+    vantage, even if this specific SAN is routed inconsistently — TSPU
+    cannot mint a chain to a public CA for *.t.me, so an owned cert is
+    proof of authentic Telegram routing).
     Otherwise BLOCKED tls_handshake_failure.
     """
     blocked_result = TestResult(
@@ -518,17 +544,20 @@ async def _classify_tls_failure(
             test=test_name,
             category="telegram",
             target=url,
-            verdict=Verdict.INCONCLUSIVE,
-            confidence=0.0,
+            verdict=Verdict.OK,
+            confidence=0.7,
             evidence={
                 "error": err_msg,
                 "reason": "wrong_cert_owned_family",
                 "cert_san_match": matched_name,
             },
             notes=(
-                "TLS hostname check failed but cert is system-trusted and "
-                "belongs to the Telegram-owned domain family — authentic "
-                "but misrouted endpoint, not censorship."
+                "TLS hostname check failed but cert chain is system-trusted "
+                "and belongs to the Telegram-owned domain family — proof "
+                "the Telegram edge is reachable from this vantage; only "
+                "the specific SAN routing is inconsistent. TSPU cannot "
+                "forge a chain to a public CA for *.t.me, so this is not "
+                "censorship."
             ),
         )
 
@@ -541,28 +570,65 @@ async def _classify_tls_failure(
 
 
 async def _host_has_ipv6() -> bool:
-    """Quick check: can this host establish an IPv6 TCP connection?
+    """Pure-local check: does the host have a usable global IPv6 path?
 
-    Mirrors server_meta._check_ipv6 but kept module-local to avoid coupling
-    the telegram module to detect_server_meta. Used to decide whether to
-    skip the DC v6 ladder entirely.
+    Two-stage, no outbound traffic:
+
+      1. Kernel-stack check via ``socket(AF_INET6).bind(("::", 0))``
+         — succeeds iff the kernel can allocate a v6 socket at all.
+      2. Default-route check via ``/proc/net/ipv6_route`` — succeeds
+         iff there's a non-loopback default route (``::/0``).
+
+    Stage 1 alone (the pre-2026-05-14 behaviour) was too lax: a host
+    with a v6 stack but no global route would pass, then every DC v6
+    probe would fail with EHOSTUNREACH and the dashboard would fill
+    with ~15 per-endpoint INCONCLUSIVE rows hiding the real reason.
+    Adding the route check rolls those up into the single
+    ``telegram_ipv6_skipped`` marker that's already wired into the
+    main flow.
+
+    On-path-observer opsec preserved: no outbound packet is generated
+    just to decide whether to add the v6 ladder later.
     """
     try:
         sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
     except OSError:
         return False
     try:
-        loop = asyncio.get_running_loop()
-        sock.settimeout(3.0)
-        await loop.run_in_executor(
-            None,
-            lambda: sock.connect(("2606:4700:4700::1111", 80)),
-        )
-        return True
-    except Exception:
+        sock.bind(("::", 0))
+    except OSError:
         return False
     finally:
         sock.close()
+
+    return await asyncio.to_thread(_has_ipv6_default_route)
+
+
+def _has_ipv6_default_route() -> bool:
+    """Read /proc/net/ipv6_route and look for a non-loopback default route.
+
+    Format reference: each line is
+        dest_addr_hex dest_plen_hex src_addr_hex src_plen_hex
+        next_hop_hex metric_hex refcount_hex use_hex flags_hex iface
+    A default route has all-zero dest_addr (32 hex chars) and dest_plen "00".
+    The link-local default ``fe80::/10`` is excluded by the all-zeros match.
+
+    Returns True if a default route via a non-loopback interface exists;
+    False if /proc isn't available (Darwin/BSD CI, containers without proc
+    mounted) — we conservatively assume no global v6 to avoid a flood of
+    EHOSTUNREACH per-DC INCONCLUSIVE rows on unknown environments.
+    """
+    try:
+        with open("/proc/net/ipv6_route") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) < 10:
+                    continue
+                if parts[0] == "0" * 32 and parts[1] == "00" and parts[9] != "lo":
+                    return True
+    except OSError:
+        return False
+    return False
 
 
 def _count_v6_endpoints(dcs: list[dict[str, Any]]) -> int:

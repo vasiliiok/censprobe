@@ -119,29 +119,22 @@ jobs:
       - name: Load censprobe.yaml + targets/*.yaml via Pydantic
         run: |
           python <<'PY'
-          import logging, sys
           from pathlib import Path
-          # Capture WARNING-level logs from load_targets (it currently
-          # warn-skips malformed files) so we can promote them to errors.
-          warnings: list[str] = []
-          class _CapHandler(logging.Handler):
-              def emit(self, record: logging.LogRecord) -> None:
-                  if record.levelno >= logging.WARNING:
-                      warnings.append(self.format(record))
-          handler = _CapHandler()
-          handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
-          logging.getLogger().addHandler(handler)
-          logging.getLogger().setLevel(logging.INFO)
           from censprobe_core.config import load_config
           from censprobe_core.targets import load_targets
+          # Both loaders are fail-loud by contract (2026-05-14 audit):
+          # any malformed YAML, missing file, schema error, or
+          # module_owned typo raises ValueError. The CI job only needs
+          # to invoke them and let the exception surface — no
+          # warning-to-error promotion shim required anymore.
           load_config(Path("."))
           ts = load_targets(Path("targets"))
-          assert ts.files, "no target files were discovered under targets/"
-          if warnings:
-              print("Promoting load_targets warnings to errors:", file=sys.stderr)
-              for w in warnings:
-                  print(f"  {w}", file=sys.stderr)
-              sys.exit(1)
+          if not ts.files:
+              raise SystemExit(
+                  "no target files were discovered under targets/ — "
+                  "shipping the listener without at least one YAML "
+                  "would produce empty dashboards"
+              )
           print(f"OK: censprobe.yaml + {len(ts.files)} target files parsed cleanly")
           PY
 

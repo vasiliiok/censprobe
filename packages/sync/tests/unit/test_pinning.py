@@ -322,17 +322,22 @@ class TestSelfSignedCertGenerator:
 
 
 class TestExternalIpDetection:
-    """``_detect_external_ip`` is duplicated from cred_server. Mirror
-    the few core paths so a future refactor of the helper into
-    probe-core surfaces here too if it changes shape.
+    """``_detect_external_ip`` now lives in
+    :mod:`censprobe_core.ephemeral_cert` and is re-exported as a thin
+    wrapper by ``sync.main`` (2026-05-14 hoist — was duplicated from
+    cred_server). The tests monkeypatch the underlying helpers in
+    probe-core so the behaviour is verified at the real call site
+    rather than the wrapper.
     """
 
     def test_routable_local_ip_returned_directly(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from censprobe_core import ephemeral_cert
+
         # When the kernel's source-IP for a public destination is itself
         # public (cloud VPS), we return it without hitting the echo
         # service. 8.8.8.8 isn't in any reserved/private range so
         # ``is_private`` correctly returns False.
-        monkeypatch.setattr(sync_main, "_udp_connect_local_ip", lambda: "8.8.8.8")
+        monkeypatch.setattr(ephemeral_cert, "_udp_connect_local_ip", lambda: "8.8.8.8")
 
         called = {"echo": False}
 
@@ -340,27 +345,33 @@ class TestExternalIpDetection:
             called["echo"] = True
             return "should-not-be-used"
 
-        monkeypatch.setattr(sync_main, "_query_public_ip_echo", _echo)
+        monkeypatch.setattr(ephemeral_cert, "_query_public_ip_echo", _echo)
 
         assert sync_main._detect_external_ip() == "8.8.8.8"
         assert called["echo"] is False
 
     def test_private_ip_falls_through_to_echo(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from censprobe_core import ephemeral_cert
+
         # Local source is RFC 1918 → operator is behind NAT → ask echo.
         # Echo returns a Cloudflare anycast address (clearly non-private).
-        monkeypatch.setattr(sync_main, "_udp_connect_local_ip", lambda: "192.168.1.10")
-        monkeypatch.setattr(sync_main, "_query_public_ip_echo", lambda: "1.1.1.1")
+        monkeypatch.setattr(ephemeral_cert, "_udp_connect_local_ip", lambda: "192.168.1.10")
+        monkeypatch.setattr(ephemeral_cert, "_query_public_ip_echo", lambda: "1.1.1.1")
 
         assert sync_main._detect_external_ip() == "1.1.1.1"
 
     def test_cgnat_falls_through_to_echo(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from censprobe_core import ephemeral_cert
+
         # 100.64.0.0/10 (RFC 6598) — mobile carriers + budget VPS.
-        monkeypatch.setattr(sync_main, "_udp_connect_local_ip", lambda: "100.64.0.5")
-        monkeypatch.setattr(sync_main, "_query_public_ip_echo", lambda: "9.9.9.9")
+        monkeypatch.setattr(ephemeral_cert, "_udp_connect_local_ip", lambda: "100.64.0.5")
+        monkeypatch.setattr(ephemeral_cert, "_query_public_ip_echo", lambda: "9.9.9.9")
 
         assert sync_main._detect_external_ip() == "9.9.9.9"
 
     def test_no_outbound_returns_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(sync_main, "_udp_connect_local_ip", lambda: None)
+        from censprobe_core import ephemeral_cert
+
+        monkeypatch.setattr(ephemeral_cert, "_udp_connect_local_ip", lambda: None)
 
         assert sync_main._detect_external_ip() is None

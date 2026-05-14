@@ -32,6 +32,13 @@ logger = logging.getLogger(__name__)
 # now-removed verdicts (the verdict and method were redundant), so the
 # producer-supplied method takes precedence and this fallback only fires
 # on the rare legacy rows where method was None.
+#
+# DEPRECATION SCHEDULE: this table is targeted for removal on or after
+# 2027-01-01 (≥ 6 months after the last pre-consolidation report would
+# normally be re-imported). At removal time, drop the table and the
+# call site; any leftover legacy reports will fall through as
+# unknown-verdict strings and the import will fail loud — which is the
+# correct behaviour for a stale archive.
 _LEGACY_VERDICT_TRANSLATION: dict[str, tuple[str, str | None]] = {
     "DNS_POISONING": ("BLOCKED", "dns_poisoning"),
     "DNS_BLOCKED": ("BLOCKED", "dns_blocked_nxdomain"),
@@ -217,6 +224,16 @@ def parse_listener_report(
                 # dashboard expects for "not measured".
                 "avg_throughput_mbps": _to_float(
                     pr.get("avg_throughput_mbps"),
+                    default=None,
+                ),
+                # Client-measured end-to-end throughput POSTed in the
+                # /stop body (2026-05-14). Authoritative on fast links
+                # where listener-side measurement collapses to NULL via
+                # the kernel-buffer-absorption discard. Older listener
+                # reports (predating the field) quietly leave the column
+                # NULL; the dashboard then falls back to avg_throughput_mbps.
+                "client_avg_throughput_mbps": _to_float(
+                    pr.get("client_avg_throughput_mbps"),
                     default=None,
                 ),
                 "throughput_throttled": bool(pr.get("throughput_throttled", False)),

@@ -26,15 +26,29 @@ Renaming an existing probe family:
 
 from __future__ import annotations
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Mapping rules
 # ─────────────────────────────────────────────────────────────────────────────
 #
-# Suffix rules win over prefix rules — they let us split a single
-# top-level family into named sub-families based on the role suffix
-# (``_sni_blocked`` / ``_sni_neutral`` / ``_ech`` for the TLS family).
-# Order matters within suffix rules too: the longest / most specific
-# suffix should come first so a less specific match doesn't shadow it.
+# Resolution order in :func:`derive`:
+#   1. _NAME_OVERRIDES (explicit per-test mapping — cross-vendor controls)
+#   2. _SUFFIX_RULES   (longest-first; splits the TLS family by role)
+#   3. _SUBSTRING_RULES (middle-of-name markers; WARP UDP variants)
+#   4. _PREFIX_RULES   (declaration-order, first match wins)
+#   5. category fallback then "unknown"
+#
+# Cloudflare prefixes are layered specific-first (``cloudflare_quic_`` >
+# ``cloudflare_warp_`` > ``cloudflare_http_`` > ``cloudflare_``). Cross-
+# vendor QUIC controls (Google/Quad9 DNS) carry the vendor name as the
+# prefix and reach ``cloudflare_quic`` via _NAME_OVERRIDES instead.
+
+# Suffix rules — split a family by role suffix. Longest first so a less
+# specific match doesn't shadow a more specific one.
 _SUFFIX_RULES: tuple[tuple[str, str], ...] = (
     ("_sni_blocked", "tls_sni_blocked"),
     ("_sni_neutral", "tls_sni_neutral"),
@@ -43,34 +57,13 @@ _SUFFIX_RULES: tuple[tuple[str, str], ...] = (
 )
 
 
-# Prefix rules are evaluated in order — first match wins. The order
-# matters: e.g. ``cloudflare_quic_`` must come before ``cloudflare_``
-# so QUIC tests don't get the generic ``cloudflare`` subcategory.
-# Each rule is (prefix, subcategory). A matching test name is reduced
-# to the subcategory and nothing else from the name is used.
+# Prefix rules — first match wins.
 _PREFIX_RULES: tuple[tuple[str, str], ...] = (
     # DNS family
     ("doh_access_", "doh"),
     ("dot_access_", "dot"),
     ("dns_", "dns"),
-    # TLS family — split into the two halves of the SNI-paired probe and
-    # the standalone ECH probe. Pair-key reconstruction in dashboards
-    # joins on the ``_sni_blocked`` / ``_sni_neutral`` halves.
-    # Order: more specific suffixes first.
-    # NB: subcategory is the same for both halves; dashboards use
-    # ``tls_pair`` and re-derive blocked/neutral from the test-name suffix.
-    # We don't try to encode the suffix in the subcategory itself
-    # (that would explode the cardinality).
-    # Cloudflare family — sub-subcategories for QUIC / WARP TCP / WARP UDP / HTTP.
-    # WARP UDP names look like ``cloudflare_warp_masque_udp_4443`` and
-    # ``cloudflare_warp_wg_udp_2408`` — both contain the substring
-    # ``_udp_``, so we use a substring rule to split UDP from TCP within
-    # the WARP family. (Substring rules are matched in :func:`derive`
-    # before the simple prefix rules below.)
-    # Note: we keep ``cloudflare_quic_`` ahead of ``google_quic_dns`` /
-    # ``quad9_quic_dns`` (which begin with ``google_`` / ``quad9_`` and
-    # would otherwise miss). Those land in the ``cloudflare_quic``
-    # subcategory by way of the explicit name-override block below.
+    # Cloudflare family
     ("cloudflare_quic_", "cloudflare_quic"),
     ("cloudflare_warp_", "cloudflare_warp"),
     ("cloudflare_http_", "cloudflare_http"),
@@ -87,8 +80,7 @@ _PREFIX_RULES: tuple[tuple[str, str], ...] = (
     ("throttling_", "throttling"),
     # Middlebox
     ("middlebox_", "middlebox"),
-    # TLS — must come AFTER specific tls_* rules above (none currently;
-    # listed last in the family so future tls_xxx_<thing> can be split).
+    # TLS — must come AFTER the suffix rules at the top of the module.
     ("tls_", "tls"),
     # TCP
     ("tcp_", "tcp"),
@@ -146,4 +138,13 @@ def derive(test_name: str, category: str | None = None) -> str:
             return sub
     if category:
         return category
+    # Surfacing "unknown" in the dashboard means a producer module emitted
+    # a test name that doesn't fit any rule above. Log at WARNING so the
+    # operator notices in the listener/solo console — a silent "unknown"
+    # row used to slip past every reviewer until Grafana surfaced it.
+    logger.warning(
+        "subcategory: test name %r matched no rule and has no category — "
+        "defaulting to 'unknown'; add a prefix/suffix/override mapping",
+        test_name,
+    )
     return "unknown"

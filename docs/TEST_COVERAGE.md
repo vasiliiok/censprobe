@@ -4,9 +4,11 @@
 
 Цифры:
 
-- **58 тест-файлов** в 7 деревьях.
-- **765 collected test** (после расширения `parametrize`); из них 763 default + 2 deselected (e2e, `e2e-dashboard` job).
-- **Coverage on new code: ~40%** (общая coverage растёт по плану — см. раздел «Roadmap»; точное число — в SonarCloud отчёте последнего PR).
+_Цифры ниже — snapshot на 2026-05-14 (после audit-фикса). Актуальное число тестов и coverage всегда смотрите в последнем зелёном CI прогоне; этот документ обновляется на каждом крупном изменении тестовой пирамиды._
+
+- **58 тест-файлов** в 7 деревьях (плюс новые contract-tests: `tests/contracts/test_asymmetric_dpi_markers_contract.py`).
+- **862 passing tests** на 2026-05-14 (после audit-фикса).
+- **Coverage on new code: ~40%** на момент написания — стремимся к 80%; точное число всегда в SonarCloud отчёте последнего PR.
 - **8 required CI gates** (`lint`, `validate-config`, `test × 6-package matrix`, `cross-package-tests`, `network-tests`, `e2e-dashboard`, `security-fast`, `sonar`) + image gates в `build.yml` (size + non-root) + 1 informational (weekly CodeQL).
 
 ---

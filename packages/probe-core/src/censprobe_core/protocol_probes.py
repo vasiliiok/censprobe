@@ -32,7 +32,7 @@ from typing import Any, ParamSpec
 from censprobe_core.echo_ports import ECHO_PORTS, TUN_ECHO_PORTS, VPN_TUN_LISTENER_IPS
 from censprobe_core.link_utils import async_delete_iface, async_rm_amneziawg_socket
 from censprobe_core.models import Verdict
-from censprobe_core.utils import graceful_terminate
+from censprobe_core.utils import graceful_terminate, write_secret
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,7 @@ _CURL_BODY_SINK = "/dev/null"
 # censprobe_core.protocol_probes import ECHO_PORTS` keep working — the
 # canonical home is censprobe_core.echo_ports.
 __all__ = [
+    "ASYMMETRIC_DPI_ERROR_MARKERS",
     "ECHO_PORTS",
     "PROBE_TIMEOUT",
     "AmneziaWGObfuscation",
@@ -64,6 +65,29 @@ __all__ = [
     "ping_echo",
     "proxy_echo",
 ]
+
+
+# Error-string substrings emitted by ``_mtg_error_result`` that the
+# client-side cross-verifier treats as evidence of asymmetric DPI when
+# the listener-side counter reports the handshake reached it. Exported
+# as a frozen tuple so the client (and any future analyser) imports the
+# canonical contract rather than copying string literals — a refactor
+# that renames these markers in one file would otherwise silently break
+# the cross-verify attribution (regression of commit 280cf77 / memory
+# ``mts_round_2026-05-13``).
+#
+# Adding a new marker: emit the substring from ``_mtg_error_result``,
+# add the prefix here, document the failure shape in
+# :class:`ProbeResult` history. The substring match is intentional —
+# many actual error strings carry a record-index suffix
+# (``welcome_read_timeout_record0``) and a category-level prefix
+# match keeps the contract stable across that suffix variation.
+ASYMMETRIC_DPI_ERROR_MARKERS: tuple[str, ...] = (
+    "welcome_read_timeout",
+    "orig_resPQ_len_timeout",
+    "orig_resPQ_body_timeout",
+    "orig_resPQ_truncated",
+)
 
 # Deterministic interface names so a crashed run leaves something we can
 # proactively clean up (otherwise a stale tun/wg device keeps holding the
@@ -189,8 +213,16 @@ async def run_cmd(cmd: list[str], timeout: float = PROBE_TIMEOUT) -> tuple[int, 
         # Python 3.11+ context manager (S7483) instead of asyncio.wait_for(...).
         async with asyncio.timeout(timeout):
             stdout, stderr = await proc.communicate()
-        # proc.returncode is set after communicate() completes; assert for mypy.
-        assert proc.returncode is not None
+        # proc.returncode is documented as non-None after communicate()
+        # returns. Defensive check (not ``assert``, which python -O
+        # strips) so a future asyncio race or a SIGCHLD interleaving
+        # that leaves returncode unset surfaces as a real error instead
+        # of a mypy-only attribute violation in production.
+        if proc.returncode is None:
+            raise RuntimeError(
+                f"subprocess {cmd[0]!r} communicate() returned without "
+                f"setting returncode — likely an asyncio race"
+            )
         return proc.returncode, stdout.decode(errors="replace"), stderr.decode(errors="replace")
     except TimeoutError:
         with contextlib.suppress(OSError):
@@ -262,12 +294,15 @@ def _start_log_drain(
     """
     if proc.stdout is None:
         return None
+    # Pin the local for type narrowing — mypy can't follow ``proc.stdout
+    # is not None`` from the enclosing scope into the inner coroutine,
+    # and an ``assert`` here would be stripped by python -O.
+    stdout = proc.stdout
 
     async def _drain() -> None:
-        assert proc.stdout is not None
         try:
             while True:
-                chunk = await proc.stdout.read(4096)
+                chunk = await stdout.read(4096)
                 if not chunk:
                     return
                 remaining = max_bytes - len(buf)
@@ -597,24 +632,31 @@ async def proxy_throughput(
         _CURL_BODY_SINK,
         "--max-time",
         str(n_timeout),
-        # %{exitcode}: curl's own exit; %{speed_download}: bytes/sec
-        # (curl's already-averaged rate over the whole transfer);
-        # %{size_download}: total bytes received — used to ignore
-        # partial transfers that the tunnel cut short.
+        # %{exitcode}: curl's own exit; %{size_download}: total bytes
+        # received (rejects partial transfers); %{time_total} and
+        # %{time_starttransfer}: TIMING in seconds — we use their
+        # difference as pure stream duration. ``%{speed_download}``
+        # is curl's whole-transfer average and includes the TCP+SOCKS+
+        # HTTP setup overhead (~one RTT on intercontinental hops),
+        # which biases the measurement DOWN by 30-70% on small 8 MiB
+        # payloads. The size/(t_total - t_starttransfer) formula
+        # matches what the listener-side echo records (first-byte to
+        # last-byte) so the two columns are comparable.
         "-w",
-        "%{exitcode} %{speed_download} %{size_download}",
+        "%{exitcode} %{size_download} %{time_total} %{time_starttransfer}",
         "-x",
         f"socks5h://127.0.0.1:{proxy_port}",
         f"http://127.0.0.1:{echo_port}/throughput?bytes={n_bytes}",
     ]
     code, out, _err = await run_cmd(cmd, timeout=n_timeout + 2)
     parts = out.strip().split()
-    if len(parts) < 3:
+    if len(parts) < 4:
         return None, False
     try:
         exit_code = int(parts[0])
-        speed_bps = float(parts[1])
-        size = int(parts[2])
+        size = int(parts[1])
+        time_total = float(parts[2])
+        time_starttransfer = float(parts[3])
     except ValueError:
         return None, False
 
@@ -628,7 +670,14 @@ async def proxy_throughput(
     if code != 0 or size <= 0:
         return None, False
 
-    return (speed_bps * 8) / 1_000_000, False
+    pure_duration = time_total - time_starttransfer
+    # Sub-millisecond windows are kernel-buffer-absorption regimes
+    # (same artefact echo_server._MIN_THROUGHPUT_DURATION_SEC guards
+    # against on the listener side). Match that 30 ms floor so the
+    # client-side number is similarly artefact-proof.
+    if pure_duration < 0.03:
+        return None, False
+    return (size * 8) / pure_duration / 1_000_000, False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -671,20 +720,23 @@ async def tunnel_throughput(
         _CURL_BODY_SINK,
         "--max-time",
         str(n_timeout),
-        # Same write-out tokens as proxy_throughput so the parse path
-        # below is identical.
+        # Same write-out tokens as proxy_throughput; see the long
+        # comment there for why we compute pure stream duration as
+        # (time_total - time_starttransfer) instead of trusting
+        # curl's whole-transfer-averaged ``%{speed_download}``.
         "-w",
-        "%{exitcode} %{speed_download} %{size_download}",
+        "%{exitcode} %{size_download} %{time_total} %{time_starttransfer}",
         f"http://{target_host}:{target_port}/throughput?bytes={n_bytes}",
     ]
     code, out, _err = await run_cmd(cmd, timeout=n_timeout + 2)
     parts = out.strip().split()
-    if len(parts) < 3:
+    if len(parts) < 4:
         return None, False
     try:
         exit_code = int(parts[0])
-        speed_bps = float(parts[1])
-        size = int(parts[2])
+        size = int(parts[1])
+        time_total = float(parts[2])
+        time_starttransfer = float(parts[3])
     except ValueError:
         return None, False
 
@@ -692,7 +744,11 @@ async def tunnel_throughput(
         return None, True
     if code != 0 or size <= 0:
         return None, False
-    return (speed_bps * 8) / 1_000_000, False
+
+    pure_duration = time_total - time_starttransfer
+    if pure_duration < 0.03:
+        return None, False
+    return (size * 8) / pure_duration / 1_000_000, False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -713,8 +769,10 @@ async def probe_openvpn(host: str, port: int, psk_pem: str) -> ProbeResult:
     with tempfile.TemporaryDirectory(prefix="censprobe_client_ovpn_") as tmpdir:
         tmp_path = Path(tmpdir)
         psk_path = tmp_path / "static.key"
-        psk_path.write_text(psk_pem, encoding="utf-8")
-        psk_path.chmod(0o600)
+        # write_secret opens with O_CREAT mode 0o600 in one syscall — closes
+        # the TOCTOU window where ``write_text`` + follow-up ``chmod`` would
+        # briefly leave the file world-readable under the process umask.
+        write_secret(psk_path, psk_pem)
 
         # Server side uses ifconfig 10.200.0.1 10.200.0.2 → client mirrors.
         # Cipher must match the server (AES-256-CBC; AEAD ciphers are not
@@ -744,14 +802,19 @@ verb 1
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
+        # PIPE above guarantees proc.stdout is not None; pin to a local so
+        # mypy narrows inside the loop below without an assert that python -O
+        # would strip.
+        if proc.stdout is None:  # pragma: no cover — defensive
+            raise RuntimeError("openvpn subprocess opened without a stdout pipe")
+        proc_stdout = proc.stdout
 
         try:
             t0 = time.monotonic()
             hs_ok = False
             while time.monotonic() - t0 < PROBE_TIMEOUT:
                 try:
-                    assert proc.stdout is not None
-                    line_bytes = await asyncio.wait_for(proc.stdout.readline(), timeout=1.0)
+                    line_bytes = await asyncio.wait_for(proc_stdout.readline(), timeout=1.0)
                     if not line_bytes:
                         break
                     line = line_bytes.decode(errors="replace")
@@ -869,7 +932,11 @@ AllowedIPs = 10.202.0.1/32
 PersistentKeepalive = 25
 """
         conf_path = tmp_path / f"{_WG_CLI_IFACE}.conf"
-        conf_path.write_text(config)
+        # WG conf carries the client private key + preshared key — write
+        # with O_CREAT mode 0o600 in one syscall to close the TOCTOU
+        # window where ``write_text`` + follow-up ``chmod`` would briefly
+        # leave the file world-readable under the process umask.
+        write_secret(conf_path, config)
 
         # Remove any stale interface from a previously killed run. wg-quick
         # up would otherwise fail with "File exists" in host netns.
@@ -967,7 +1034,10 @@ AllowedIPs = 10.201.0.1/32
 PersistentKeepalive = 25
 """
         conf_path = tmp_path / f"{_AWG_CLI_IFACE}.conf"
-        conf_path.write_text(config)
+        # AWG conf carries the client private key + preshared key + the 9
+        # H/S/Jc obfuscation magic ints (secret per session). Same
+        # TOCTOU-safe write as WG above.
+        write_secret(conf_path, config)
 
         # Remove any stale interface AND its userspace control socket from
         # a previously killed run. amneziawg-go writes a unix socket under
@@ -1141,7 +1211,10 @@ socks5:
   listen: 127.0.0.1:{local_port}
 """
         conf_path = tmp_path / "config.yaml"
-        conf_path.write_text(config)
+        # Hysteria 2 conf carries the operator auth password + salamander
+        # obfs password — TOCTOU-safe write so the 0o600 perms are
+        # set at file-creation time.
+        write_secret(conf_path, config)
 
         proc = await asyncio.create_subprocess_exec(
             "hysteria",
@@ -1251,7 +1324,10 @@ async def _tunnel_via_singbox_or_xray(
     local_port = _pick_free_local_port()
     with tempfile.TemporaryDirectory(prefix=f"censprobe_client_{proto_label}_") as tmpdir:
         conf_path = Path(tmpdir) / "config.json"
-        conf_path.write_text(json.dumps(config_builder(local_port), indent=2))
+        # SOCKS-routed config carries protocol-specific secrets (Reality
+        # private/public key + short-id, SS password, etc) — TOCTOU-safe
+        # write with mode 0o600 at file-creation.
+        write_secret(conf_path, json.dumps(config_builder(local_port), indent=2))
         cmd = [c.format(conf=str(conf_path)) for c in binary_cmd]
 
         proc = await asyncio.create_subprocess_exec(

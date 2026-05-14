@@ -54,19 +54,19 @@ _THROUGHPUT_RESPONSE_TIMEOUT_SEC = 35.0
 
 # Below this elapsed time, the listener-side measurement is dominated by
 # kernel/loopback buffer absorption (see the long comment in
-# _serve_throughput) and the resulting Mbps figure is meaningless. 100 ms
-# is comfortably above the loopback round-trip but well below the
-# duration of any realistic 1 MiB tunneled transfer (8 ms at 1 Gbps would
-# already saturate sub-Gbps consumer links — we don't see those here).
-_MIN_THROUGHPUT_DURATION_SEC = 0.1
+# _serve_throughput) and the resulting Mbps figure is meaningless. 30 ms
+# is comfortably above the loopback round-trip (sub-millisecond on Linux
+# host-mode docker) while leaving headroom to record real ~2 Gbps
+# transfers of the 8 MiB target_bytes payload.
+_MIN_THROUGHPUT_DURATION_SEC = 0.03
 
 # Even with duration above the floor, anything wildly above what a real
 # remote tunnel can deliver is the same artefact under a different mask
-# (write was very small, kernel still absorbed in <one tick). 2 Gbps is
+# (write was very small, kernel still absorbed in <one tick). 5 Gbps is
 # above any consumer / VPS uplink we expect to test against; treat
 # anything beyond as "kernel buffer absorption did not block hard enough"
 # and discard.
-_MAX_PLAUSIBLE_MBPS = 2000.0
+_MAX_PLAUSIBLE_MBPS = 5000.0
 
 
 class EchoServer:
@@ -398,7 +398,7 @@ def _parse_throughput_n(request: bytes) -> int:
     """
     try:
         first_line = request.split(b"\r\n", 1)[0]
-        # "GET /throughput?bytes=1048576 HTTP/1.1"
+        # "GET /throughput?bytes=8388608 HTTP/1.1"
         parts = first_line.split(b" ")
         if len(parts) < 2:
             return 0

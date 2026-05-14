@@ -25,7 +25,7 @@
 - [Восемь модулей измерения](#восемь-модулей-измерения)
 - [Скоринг](#скоринг)
 - [Дашборд (Grafana)](#дашборд-grafana)
-- [Sync (передача `reports/` между машинами)](#шаг-5-sync-опционально--забрать-reports-на-машину-с-git-доступом)
+- [Шаг 5. Sync (опционально) — забрать `reports/` на машину с git-доступом](#шаг-5-sync-опционально--забрать-reports-на-машину-с-git-доступом)
 - [Переменные окружения (`.env`)](#переменные-окружения-env)
 - [Структура отчётов](#структура-отчётов)
 - [CI/CD и quality gates](#cicd-и-quality-gates)
@@ -313,14 +313,14 @@ docker compose --profile sync run --rm sync pull [OPTIONS]
 
 | Модуль | Поля (помимо `enabled`) |
 |--------|-------------------------|
-| `dns` | `repeats`, `doh_resolvers` (list of DoH URLs), `doh_timeout_sec`, `asn_lookup_backoff_sec` |
+| `dns` | `doh_resolvers` (list of DoH URLs), `doh_timeout_sec`, `asn_lookup_backoff_sec` — без `repeats`: ретраи DNS-attribution живут в multi-resolver cross-check (system + ISP + 4 public + 3 DoH + 2 DoT), single-record repeats добавляли нагрузку без сигнала и были removed 2026-05-14 |
 | `tcp` | `repeats`, `syn_timeout_sec`, `fast_rst_threshold_ms` (RTT below = SUSPECTED method=tcp_rst_injection), `max_parallel` |
 | `tls` | `repeats`, `timeout_sec`, `max_parallel` |
 | `http` | `repeats`, `body_cap_bytes`, `timeout_connect_sec`, `timeout_read_sec`, `max_parallel` |
 | `telegram` | `targets_file` (basename without .yaml), `timeout_sec` |
 | `cloudflare` | `targets_file` |
 | `throttling` | `require_censoring_vantage`, `target_url`, `correct_sni`, `typo_sni`, `trigger_sni`, `sequential_runs`, `bandwidth_ratio_threshold`, `curl_timeout_sec` |
-| `middlebox` | (placeholder — только `enabled`) |
+| `middlebox` | только `enabled` — у модуля нет конфигурируемых knob'ов |
 
 ### `protocols`
 
@@ -336,8 +336,8 @@ Sustained-data probe через SOCKS-routed протоколы (Shadowsocks, VL
 
 | Поле | Описание |
 |------|----------|
-| `target_bytes` | Байт для трансфера (1 MiB = 1048576). |
-| `timeout_sec` | Транспорт таймаут. Floor "throttled" detection. |
+| `target_bytes` | Байт для трансфера (8 MiB = 8388608 — достаточно, чтобы listener-side измерение не схлопывалось в kernel-buffer-absorption на быстрых линках до ~2 Gbps). |
+| `timeout_sec` | Транспорт таймаут. Floor "throttled" detection (`target_bytes / timeout_sec`; для 8 MiB / 30 s ≈ 2.2 Mbps). |
 
 ### `scoring`
 
@@ -385,19 +385,19 @@ Sustained-data probe через SOCKS-routed протоколы (Shadowsocks, VL
 
 ## Девять VPN-протоколов
 
-`packages/probe-core/src/censprobe_core/protocol_registry.py` — single source of truth по именам и метаданным; реальные bind-порты — в `protocols.ports` в `censprobe.yaml` (overрайдят registry default, validator `_check_ports_cover_enabled` гарантирует полное покрытие enabled-протоколов).
+`packages/probe-core/src/censprobe_core/protocol_registry.py` — single source of truth по именам и метаданным (без портов). Bind-порты — exclusively в `protocols.ports` в `censprobe.yaml`; validator `_check_ports_cover_enabled` фейлится при отсутствии port-entry для enabled-протокола. (Registry больше не несёт `default_port` — 2026-05-14 audit убрал поле, чтобы устранить drift surface; раньше комментарий в registry рекомендовал mtproto_proxy=9443, а yaml ставил 443.)
 
-| Имя | Label | Transport | Registry default | Текущий yaml-port | uses_socks_echo |
-|-----|-------|-----------|------------------:|------------------:|-----------------|
-| `openvpn` | OpenVPN | UDP | 1194 | 1194 | False |
-| `wireguard` | WireGuard | UDP | 51820 | 51820 | False |
-| `amneziawg` | AmneziaWG | UDP | 51821 | 51821 | False |
-| `shadowsocks` | Shadowsocks 2022 | TCP | 8388 | 8388 | True |
-| `vless_reality` | VLESS+Reality | TCP | 443 | 8444 | True |
-| `hysteria2` | Hysteria 2 | UDP | 443 | 443 | True |
-| `mtproto_proxy` | MTProto Proxy | TCP | 9443 | 443 | False |
-| `mtproto_proxy_alt` | MTProto Proxy (alt port) | TCP | 8888 | 8888 | False |
-| `mtproto_orig` | MTProto Proxy (original C) | TCP | 2080 | 2080 | False |
+| Имя | Label | Transport | Текущий yaml-port | uses_socks_echo |
+|-----|-------|-----------|------------------:|-----------------|
+| `openvpn` | OpenVPN | UDP | 1194 | False |
+| `wireguard` | WireGuard | UDP | 51820 | False |
+| `amneziawg` | AmneziaWG | UDP | 51821 | False |
+| `shadowsocks` | Shadowsocks 2022 | TCP | 8388 | True |
+| `vless_reality` | VLESS+Reality | TCP | 8444 | True |
+| `hysteria2` | Hysteria 2 | UDP | 443 | True |
+| `mtproto_proxy` | MTProto Proxy | TCP | 443 | False |
+| `mtproto_proxy_alt` | MTProto Proxy (alt port) | TCP | 8888 | False |
+| `mtproto_orig` | MTProto Proxy (original C) | TCP | 2080 | False |
 
 Поле `uses_socks_echo` отмечает протоколы с SOCKS-routed data-phase через listener echo server (для throughput-проб). Остальные — handshake-only: OpenVPN/WireGuard/AmneziaWG поднимают tun-интерфейс и пинг-эхо для верификации data plane; mtg-варианты `mtproto_proxy`/`mtproto_proxy_alt` подтверждают handshake через mtg `Stream has been started` лог-токен и через faketls-HMAC на стороне клиента; `mtproto_orig` (оригинальный C-MTProxy) — через obfuscated2 init + MTProto `req_pq_multi` round-trip с проверкой echoed nonce в `resPQ`.
 
@@ -491,7 +491,7 @@ DC reachability (5 DC × {v4, v6} × {443, 80, 5222}) + Web (`web.telegram.org`,
 `_compute_health_score` — weighted avg `dc:55% / web:25% / cdn:20%` (веса из `health_weights` в `targets/telegram.yaml`).
 
 ### `cloudflare.py`
-Mixed: QUIC vn-trigger (UDP 443) — `_build_quic_vn_trigger` строит long-header пакет с version=0x00000001 для триггера version negotiation; WARP TCP control plane; WARP UDP/MASQUE — `_build_masque_probe_packet` UDP encap; WireGuard UDP 51820 — `_build_wg_handshake_init` (148-byte payload, message_type=1).
+Mixed: QUIC vn-trigger (UDP 443) — `_build_quic_vn_trigger` строит long-header пакет с GREASE-version `0x0a0a0a0a` (unrecognised), что по RFC 9000 §6.2 обязывает сервер ответить Version Negotiation packet'ом. Datagram дополняется PADDING'ом до RFC 9000 §14.1 минимума 1200 байт; WARP TCP control plane; WARP UDP/MASQUE — `_build_masque_probe_packet` UDP encap; WireGuard UDP 51820 — `_build_wg_handshake_init` (148-byte payload, message_type=1).
 
 QUIC-таймаут на UDP 443 в censoring vantage → `QUIC_DROPPED` (TSPU-specific behavior).
 

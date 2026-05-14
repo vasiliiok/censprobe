@@ -78,6 +78,15 @@ NON_SCORING_VERDICTS: frozenset[Verdict] = frozenset(
 )
 
 
+# Penalty applied to ``censorship`` axis of the exit_score when Method-B
+# SNI throttling fired (cfg.scoring is for linear-combination weights,
+# not behavioural penalties — keeping this as a named constant in the
+# scoring module rather than promoting it to censprobe.yaml). 0.2 is
+# the calibrated value from the original heuristic; bumping it changes
+# how much a throttled outbound drags the score down.
+_THROTTLING_DETECTED_PENALTY = 0.2
+
+
 def compute_scores(
     solo_results: list[TestResult],
     listener_reports: list[ListenerReport] | None = None,
@@ -163,16 +172,11 @@ def compute_scores(
     # ── Exit score ────────────────────────────────────────────────────────────
     # exit = uplink·W_u + censorship·W_c   (×100)
     #
-    # The historical formula included a third "no_geoblock" axis worth
-    # 20 points, but inbound geoblocking is never actually measured —
-    # the term degenerated to a duplicated copy of uplink_quality and
-    # made operators think a real signal existed. Until geoblock is
-    # measured for real (would need outbound probes from RU IP back at
-    # the test server), the score is a two-axis weighted average that
-    # honestly reflects what we know.
+    # The historical formula included a third "no_geoblock" axis; until
+    # inbound geoblocking is measured for real, the score is two-axis.
     w_x = weights.exit
     if scores.throttling_detected:
-        censorship_low = max(0.0, uplink_quality - 0.2)
+        censorship_low = max(0.0, uplink_quality - _THROTTLING_DETECTED_PENALTY)
     else:
         censorship_low = uplink_quality
     scores.exit_score = max(

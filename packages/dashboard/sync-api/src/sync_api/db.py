@@ -271,6 +271,13 @@ class ProtocolResult(Base):
     # whose data-phase verification is a single ICMP ping. Surfaced in
     # dashboards as an operator signal; NEVER used by scoring.
     avg_throughput_mbps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Client-measured end-to-end throughput (curl through the tunnel)
+    # POSTed in the body of /stop by censprobe-client. Authoritative on
+    # fast links where ``avg_throughput_mbps`` (listener-side, loopback-
+    # echo) discards as kernel-buffer-absorption artefact. Same NULL
+    # semantics as ``avg_throughput_mbps`` — older listener reports
+    # predate the field, MTProto family never measures throughput at all.
+    client_avg_throughput_mbps: Mapped[float | None] = mapped_column(Float, nullable=True)
     throughput_throttled: Mapped[bool] = mapped_column(Boolean, default=False)
     # Free-text diagnostic from the listener's ProtocolResult.note. Two
     # producers populate it today: (a) the listener-side self-test
@@ -330,6 +337,8 @@ _ADDITIVE_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("test_results", "elapsed_ms", "DOUBLE PRECISION"),
     # added 2026-05 (commit 8023a36) for ProtocolResult.note round-trip
     ("protocol_results", "note", "TEXT"),
+    # added 2026-05-14 for client-side throughput POSTed in /stop body
+    ("protocol_results", "client_avg_throughput_mbps", "DOUBLE PRECISION"),
 )
 
 

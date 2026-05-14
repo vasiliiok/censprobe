@@ -56,7 +56,6 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import ipaddress
 import logging
 import os
 import secrets
@@ -65,15 +64,13 @@ import ssl
 import sys
 import tempfile
 import time
-import urllib.request
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import click
+from censprobe_core.ephemeral_cert import detect_external_ip as _detect_external_ip_impl
+from censprobe_core.ephemeral_cert import generate_self_signed_cert as _generate_cert_impl
 from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.x509.oid import NameOID
+from cryptography.hazmat.primitives import serialization
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.panel import Panel
@@ -107,24 +104,15 @@ _FETCH_TIMEOUT_SEC = 15.0
 _PIN_MAX_ATTEMPTS = 3
 _PIN_RETRY_BACKOFF_BASE_SEC = 1.0
 
-# Public-IP echo fallback chain — used when the local default-route
-# source IP is private/CGNAT and would not be reachable by a remote
-# pull-side. Mirror of cred_server's identical constant.
-_PUBLIC_IP_ECHOES = (
-    "https://api.ipify.org",
-    "https://ifconfig.me/ip",
-)
-_PUBLIC_IP_TIMEOUT_SEC = 5.0
-_CGNAT_NETWORK = ipaddress.IPv4Network("100.64.0.0/10")
-
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Cert generation (mirrors cred_server.generate_self_signed_cert).
+# Cert generation + external-IP detection — shared with listener via
+# censprobe_core.ephemeral_cert (2026-05-14 hoist; previously duplicated).
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 def _generate_self_signed_cert(extra_ip: str | None = None) -> tuple[bytes, bytes, str]:
-    """Generate an RSA-2048 self-signed cert.
+    """Generate an RSA-2048 self-signed cert for the sync HTTPS endpoint.
 
     Returns ``(cert_pem, key_pem, sha256_fingerprint_hex)``. SAN covers
     localhost + loopback (so an operator who curls the endpoint by
@@ -133,108 +121,26 @@ def _generate_self_signed_cert(extra_ip: str | None = None) -> tuple[bytes, byte
 
     Why ``extra_ip`` matters: rclone's HTTP backend uses Go's
     ``net/http`` which **always** verifies the cert SAN against the
-    URL host even when ``--ca-cert`` already trusts the cert. There's
-    no rclone flag to skip hostname verification while keeping CA
-    trust. Pinning by fingerprint at the Python layer guarantees the
-    cert is the right one; baking ``extra_ip`` into SAN then makes
-    rclone's name check happy without weakening anything (the puller
-    only ever talks to its parameter ``--server-host``, which equals
-    the ``extra_ip`` that ``serve`` printed).
-
-    ``None`` falls back to the listener-style SAN of just localhost +
-    loopback — matches the unit-test surface and keeps the helper
-    usable for non-network callers.
+    URL host even when ``--ca-cert`` already trusts the cert. Pinning
+    by fingerprint at the Python layer guarantees the cert is the right
+    one; baking ``extra_ip`` into SAN then makes rclone's name check
+    happy without weakening anything.
     """
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "censprobe-sync")])
-    san_entries: list[x509.GeneralName] = [
-        x509.DNSName("censprobe-sync"),
-        x509.DNSName("localhost"),
-        x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
-        x509.IPAddress(ipaddress.IPv6Address("::1")),
-    ]
-    if extra_ip:
-        try:
-            san_entries.append(x509.IPAddress(ipaddress.IPv4Address(extra_ip)))
-        except (ipaddress.AddressValueError, ValueError):
-            # Not a parseable IPv4 — treat as DNSName so an operator
-            # who set up a custom hostname (e.g. ``censprobe.example``)
-            # can still reach the cert. The puller's ``--server-host``
-            # has to match this entry verbatim either way.
-            san_entries.append(x509.DNSName(extra_ip))
-    san = x509.SubjectAlternativeName(san_entries)
-    now = datetime.now(UTC)
-    cert = (
-        x509.CertificateBuilder()
-        .subject_name(name)
-        .issuer_name(name)
-        .public_key(key.public_key())
-        .serial_number(x509.random_serial_number())
-        .not_valid_before(now)
-        .not_valid_after(now + timedelta(hours=_CERT_VALIDITY_HOURS))
-        .add_extension(san, critical=False)
-        .sign(key, hashes.SHA256())
+    return _generate_cert_impl(
+        common_name="censprobe-sync",
+        extra_ip=extra_ip,
+        validity_hours=_CERT_VALIDITY_HOURS,
     )
-    cert_pem = cert.public_bytes(serialization.Encoding.PEM)
-    key_pem = key.private_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.TraditionalOpenSSL,
-        encryption_algorithm=serialization.NoEncryption(),
-    )
-    fingerprint = cert.fingerprint(hashes.SHA256()).hex()
-    return cert_pem, key_pem, fingerprint
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# External IP detection (mirrors cred_server.detect_external_ip).
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def _detect_external_ip() -> str | None:
-    """Best-effort IPv4 the puller should reach us on. ``None`` means
-    no usable outbound — operator gets ``<your-server-ip>`` placeholder
-    in the printed command and substitutes by hand.
+    """Best-effort IPv4 the puller should reach us on.
+
+    Thin wrapper around the probe-core implementation; kept module-local
+    so existing sync internals can keep their ``_detect_external_ip()``
+    call sites unchanged.
     """
-    local_ip = _udp_connect_local_ip()
-    if local_ip is None:
-        return None
-    if not _is_unroutable(local_ip):
-        return local_ip
-    public_ip = _query_public_ip_echo()
-    return public_ip or local_ip
-
-
-def _udp_connect_local_ip() -> str | None:
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        try:
-            s.connect(("1.1.1.1", 80))
-            ip: str = s.getsockname()[0]
-            return ip
-        finally:
-            s.close()
-    except OSError:
-        return None
-
-
-def _is_unroutable(ip: str) -> bool:
-    try:
-        addr = ipaddress.IPv4Address(ip)
-    except ValueError:
-        return True
-    return addr.is_private or addr in _CGNAT_NETWORK
-
-
-def _query_public_ip_echo() -> str | None:
-    for url in _PUBLIC_IP_ECHOES:
-        try:
-            with urllib.request.urlopen(url, timeout=_PUBLIC_IP_TIMEOUT_SEC) as r:  # noqa: S310  # nosec B310
-                ip: str = r.read().decode("ascii", errors="replace").strip()
-            ipaddress.IPv4Address(ip)
-            return ip
-        except (OSError, ValueError):
-            continue
-    return None
+    return _detect_external_ip_impl()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -335,7 +241,14 @@ def _fetch_and_verify_peer_cert_with_retry(
                     delay,
                 )
                 time.sleep(delay)
-    assert last_exc is not None  # mypy: at least one attempt ran
+    # Defensive: max_attempts >= 1 by the function's signature contract.
+    # Production ``raise`` rather than ``assert`` (which python -O strips)
+    # so a future caller passing max_attempts=0 surfaces the bug.
+    if last_exc is None:
+        raise RuntimeError(
+            "_pinned_get_with_retry: retry loop exited without recording "
+            "a transient error — caller likely passed max_attempts < 1"
+        )
     raise last_exc
 
 

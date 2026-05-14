@@ -73,7 +73,10 @@ class ModuleSpec:
 
 
 async def _run_dns(cfg: CensprobeConfig, ts: TargetSet) -> list[TestResult]:
-    return await dns.run_dns_tests(ts.domains(), repeats=cfg.modules.dns.repeats)
+    # No repeats arg — see run_dns_tests docstring (multi-resolver
+    # cross-check is the retry surface).
+    del cfg
+    return await dns.run_dns_tests(ts.domains())
 
 
 async def _run_tcp(cfg: CensprobeConfig, ts: TargetSet) -> list[TestResult]:
@@ -92,11 +95,16 @@ async def _run_telegram(cfg: CensprobeConfig, ts: TargetSet) -> list[TestResult]
     name = cfg.modules.telegram.targets_file
     tf = ts.file(name)
     if tf is None:
-        logger.warning(
-            "telegram module enabled but %s.yaml not found in targets/",
-            name,
+        # Fail-loud: a missing targets file for an enabled module means
+        # the operator either typo'd ``modules.telegram.targets_file`` or
+        # didn't ship the corresponding YAML. Silently returning an empty
+        # result list would mask the misconfiguration as "category empty"
+        # in the dashboard. Same invariant as load_config / load_targets.
+        raise RuntimeError(
+            f"telegram module is enabled but no target file {name!r} was "
+            f"discovered under targets/. Fix censprobe.yaml::"
+            f"modules.telegram.targets_file or create targets/{name}.yaml."
         )
-        return []
     return await telegram.run_telegram_tests(tf.model_dump())
 
 
@@ -104,11 +112,11 @@ async def _run_cloudflare(cfg: CensprobeConfig, ts: TargetSet) -> list[TestResul
     name = cfg.modules.cloudflare.targets_file
     tf = ts.file(name)
     if tf is None:
-        logger.warning(
-            "cloudflare module enabled but %s.yaml not found in targets/",
-            name,
+        raise RuntimeError(
+            f"cloudflare module is enabled but no target file {name!r} was "
+            f"discovered under targets/. Fix censprobe.yaml::"
+            f"modules.cloudflare.targets_file or create targets/{name}.yaml."
         )
-        return []
     return await cloudflare.run_cloudflare_tests(tf.model_dump())
 
 

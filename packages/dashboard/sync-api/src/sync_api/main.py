@@ -85,10 +85,32 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 SERVICE_VERSION = "0.5.0"
 
 WORKSPACE = Path("/workspace")
-# Single source of truth: .env (committed) + docker-compose env injection.
-# No code-side fallback — a missing key surfaces as an explicit KeyError
-# at startup rather than a silent "60s by accident" deployment.
-IMPORT_INTERVAL_SEC = float(os.environ["CENSPROBE_IMPORT_INTERVAL_SEC"])
+
+
+def _read_import_interval() -> float:
+    """Read the importer scan interval from env, fail loud with hint.
+
+    Single source of truth is .env (committed defaults) + docker-compose
+    env injection. A bare ``os.environ[key]`` would surface as a raw
+    KeyError at module-load time, which is correct fail-loud behaviour
+    but doesn't tell the operator what to set. This wrapper raises
+    RuntimeError with the canonical fix instead.
+    """
+    raw = os.environ.get("CENSPROBE_IMPORT_INTERVAL_SEC")
+    if raw is None:
+        raise RuntimeError(
+            "CENSPROBE_IMPORT_INTERVAL_SEC is unset. Set it in .env "
+            "(suggested value: 60) — sync-api refuses to start without "
+            "an explicit interval so a missing value doesn't silently "
+            "fall back to a default that may not match operator intent."
+        )
+    try:
+        return float(raw)
+    except ValueError as e:
+        raise RuntimeError(f"CENSPROBE_IMPORT_INTERVAL_SEC={raw!r} is not a number") from e
+
+
+IMPORT_INTERVAL_SEC = _read_import_interval()
 
 # No HTTP-level authentication. sync-api is bound to 127.0.0.1:8080
 # inside ``docker-compose.yml`` (loopback only — external network
@@ -96,14 +118,52 @@ IMPORT_INTERVAL_SEC = float(os.environ["CENSPROBE_IMPORT_INTERVAL_SEC"])
 # the Postgres datasource (NOT this HTTP API), and the data exposed
 # is read-only network-measurement results with no credentials or
 # PII. The single-tenant deployment model assumes the operator owns
-# the host. If you ever need to expose port 8080 beyond loopback,
-# put a reverse proxy with auth in front of it — the API itself
-# is not designed to face the internet.
+# the host. The lifespan startup check below refuses to start when
+# the bind appears non-loopback unless the operator explicitly opts
+# out via CENSPROBE_ALLOW_NON_LOOPBACK_BIND=1 — that flag is the
+# "I know what I'm doing, there's a reverse proxy with auth in
+# front" escape hatch.
+
+
+def _verify_loopback_bind() -> None:
+    """Refuse to start the unauthenticated API on a non-loopback bind.
+
+    Reads the bind address from the uvicorn-conventional ``HOST`` /
+    ``UVICORN_HOST`` env vars (docker-compose sets the former
+    explicitly to 127.0.0.1). Operators who genuinely need external
+    exposure put a reverse proxy in front and set
+    ``CENSPROBE_ALLOW_NON_LOOPBACK_BIND=1`` to acknowledge the auth
+    responsibility shift.
+    """
+    bind = os.environ.get("HOST") or os.environ.get("UVICORN_HOST") or "127.0.0.1"
+    loopback = {"127.0.0.1", "::1", "localhost"}
+    if bind in loopback:
+        return
+    if os.environ.get("CENSPROBE_ALLOW_NON_LOOPBACK_BIND") == "1":
+        logger.warning(
+            "sync-api bound on %s (non-loopback). Operator opted in via "
+            "CENSPROBE_ALLOW_NON_LOOPBACK_BIND=1 — make sure there is a "
+            "reverse proxy with authentication in front of port %s.",
+            bind,
+            os.environ.get("PORT", "8080"),
+        )
+        return
+    raise RuntimeError(
+        f"sync-api bind address {bind!r} is not loopback. The API ships "
+        f"without HTTP-level authentication and is designed for "
+        f"127.0.0.1-only deployments. Set HOST=127.0.0.1 (the "
+        f"docker-compose default), or set "
+        f"CENSPROBE_ALLOW_NON_LOOPBACK_BIND=1 if you have a reverse "
+        f"proxy with auth in front."
+    )
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Initialize DB tables and start the background importer."""
+    # Refuse to start unauthenticated on a public interface — see the
+    # function's docstring for the opt-out env var.
+    _verify_loopback_bind()
     # Load censprobe.yaml at startup so ``compute_scores`` (called per
     # imported run) can read ScoringConfig weights without raising
     # "Config not loaded" — without this, every TestRun's score columns

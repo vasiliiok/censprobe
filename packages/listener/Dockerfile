@@ -122,10 +122,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     openssl \
     openvpn \
     unzip \
+    util-linux \
     wget \
     wireguard-tools \
     zlib1g \
     && rm -rf /var/lib/apt/lists/*
+# util-linux is load-bearing here, not just convenience: it provides the
+# ``setpriv`` binary that ``censprobe_core._privsep.with_privsep`` wraps
+# every tunnel-binary spawn (xray / sing-box / hysteria / mtg) with so
+# an RCE inside those parsers can't inherit the listener's root + NET_ADMIN
+# bounding set. The privsep helper falls back to a no-op when setpriv is
+# missing, which would silently re-introduce the CVE surface; explicit
+# install here closes that gap. Pinned to whatever debian:stable ships
+# — setpriv's CLI is stable across versions, no version constraint
+# needed.
 
 # ── sing-box (Shadowsocks 2022 inbound) ──────────────────────────────────────
 ARG SINGBOX_VERSION=1.9.4

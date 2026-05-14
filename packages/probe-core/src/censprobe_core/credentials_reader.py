@@ -241,6 +241,7 @@ def parse_protocols_yaml(text: str) -> ProtocolCredentials:
         ("mtproto_proxy_alt", _parse_mtproto_proxy_alt),
         ("mtproto_orig", _parse_mtproto_orig),
     ]
+    parser_keys = {name for name, _ in parsers}
     for key, fn in parsers:
         if key in raw:
             section = raw[key]
@@ -250,5 +251,32 @@ def parse_protocols_yaml(text: str) -> ProtocolCredentials:
                     f"got {type(section).__name__}"
                 )
             fn(c, section)
+
+    # Cross-check enabled ↔ sections: every name listed in
+    # ``_protocols_enabled`` MUST have a matching section in the YAML
+    # body. The docstring promised this since 2026-05, but the loop
+    # above (``if key in raw``) only ran the parser for present
+    # sections — an enabled-but-omitted protocol used to land with
+    # zero-default fields and the client skipped its probe with no
+    # diagnostic. Fix-loud here, schema mismatch in lockstep deploy is
+    # always a bug. Unknown names in ``_protocols_enabled`` are also
+    # rejected: silent drop hid the same kind of typo (closed
+    # 2026-05-14 audit).
+    missing_sections = [
+        name for name in c._protocols_enabled if name in parser_keys and name not in raw
+    ]
+    if missing_sections:
+        raise ValueError(
+            f"credentials YAML lists {missing_sections} in _protocols_enabled "
+            f"but does not carry the corresponding section(s); listener and "
+            f"client versions disagree on the credentials schema."
+        )
+    unknown_enabled = [name for name in c._protocols_enabled if name not in parser_keys]
+    if unknown_enabled:
+        raise ValueError(
+            f"credentials YAML _protocols_enabled contains names not known to "
+            f"this client build: {unknown_enabled}. Known protocols: "
+            f"{sorted(parser_keys)}."
+        )
 
     return c

@@ -37,6 +37,7 @@ class TestRetryPolicy:
             *,
             path: str,
             method: str = "GET",
+            body: bytes = b"",
         ) -> str:
             calls.append(path)
             return "OK"

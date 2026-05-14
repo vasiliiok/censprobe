@@ -47,7 +47,9 @@ vantage:
 modules:
   dns:
     enabled: true
-    repeats: 3
+    # No ``repeats`` knob — multi-resolver cross-check IS the retry surface
+    # (see DnsModuleConfig docstring); single-record repeats would only
+    # add load without changing the verdict shape.
     doh_resolvers:
       - https://cloudflare-dns.com/dns-query
       - https://dns.google/dns-query
@@ -87,7 +89,11 @@ modules:
 
   throttling:
     enabled: true
-    require_censoring_vantage: true
+    # Method B (within-run relative ratio) is robust off-vantage: on a
+    # non-censoring path the three SNIs give ratio ≈ 1.0 → OK, baseline-
+    # confirmed. On TSPU the trigger SNI drops below threshold → THROTTLED.
+    # Running everywhere yields cross-vantage calibration data.
+    require_censoring_vantage: false
     target_url:    https://speedtest.selectel.ru/100MB
     correct_sni:   speedtest.selectel.ru
     typo_sni:      speedtset.selectel.ru
@@ -101,10 +107,10 @@ modules:
 
 
 # ── Protocols ────────────────────────────────────────────────────────────────
-# The six VPN protocols tested by the listener+client phase. Names must
+# The nine VPN protocols tested by the listener+client phase. Names must
 # match the registry in
-# packages/probe-core/src/censprobe_core/protocol_registry.py — typos
-# are dropped with a warning at startup, never silently.
+# packages/probe-core/src/censprobe_core/protocol_registry.py — the
+# config validator rejects unknown names at startup (2026-05-14 audit).
 #
 # To add a protocol (e.g. MTProto-proxy, TUIC):
 #   1. Append a ProtocolSpec to protocol_registry.py.
@@ -230,10 +236,14 @@ protocols:
 # data plane via a single ICMP ping instead.
 #
 # target_bytes / timeout_sec set the floor of "throttled" detection:
-#   1 MiB / 30 s ≈ ~280 kbps below which throughput_throttled fires.
+#   8 MiB / 30 s ≈ ~2.2 Mbps below which throughput_throttled fires.
+# 8 MiB chosen so the listener-side measurement clears the 30 ms
+# kernel-buffer-absorption floor on links up to ~2 Gbps (1 MiB collapsed
+# to <10 ms on a 100-500 Mbps GCP↔Vultr link and was always discarded).
+# RU YouTube throttle to 1-5 Mbps still fires throughput_throttled.
 throughput:
   enabled: true
-  target_bytes: 1048576
+  target_bytes: 8388608
   timeout_sec:  30.0
 
 

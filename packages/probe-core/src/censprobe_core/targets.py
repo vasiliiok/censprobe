@@ -291,14 +291,29 @@ def load_targets(
     view. Files are still loaded into ``set.files`` so their owner
     modules can consume them.
 
-    A YAML that fails to parse (or fails pydantic validation) is logged
-    and skipped — one corrupt file doesn't poison the whole run. The
-    other files keep being discovered.
+    Fail-loud contract (matches :func:`load_config`): every discovered
+    file MUST parse and validate against :class:`TargetFile`. A missing
+    directory, an unreadable file, malformed YAML, or a Pydantic
+    validation error all raise :class:`ValueError` with the offending
+    path. The previous warn-and-skip behaviour silently dropped a
+    typo'd ``news.yaml`` from the run; the dashboard then rendered the
+    affected category empty without any error surface — opposite of
+    the project's "fail loud at startup" invariant. Symlinks remain
+    a silent-skip on purpose: they're explicitly rejected as a
+    path-traversal guard, not an operator typo.
+
+    ``module_owned`` entries that don't correspond to a discovered
+    basename are also rejected — that is the most common source of a
+    "module enabled but target file missing" runtime surprise.
     """
     out = TargetSet(module_owned=list(module_owned or []))
     if not directory.exists():
-        logger.warning("Targets directory %s does not exist", directory)
-        return out
+        raise ValueError(
+            f"Targets directory {directory} does not exist. "
+            f"censprobe.yaml::targets.directory points at a missing path — "
+            f"fix the path or create the directory with at least one "
+            f"*.yaml file."
+        )
 
     if files:
         candidates = [directory / f"{name}.yaml" for name in files]
@@ -306,24 +321,54 @@ def load_targets(
         candidates = sorted(directory.glob("*.yaml"))
 
     for path in candidates:
-        if not path.exists() or path.is_symlink():
+        if path.is_symlink():
+            # Symlink guard: importer/runner refuse to follow symlinks in
+            # the targets tree (a malicious PR could ship a symlink at
+            # targets/foo.yaml → /etc/passwd). Skip silently — not an
+            # operator typo, so no actionable error to raise.
+            logger.warning("Skipping symlink %s in targets/", path)
+            continue
+        if not path.exists():
+            # When ``files=`` is explicit and one of the requested
+            # basenames is missing on disk, that's a configuration bug
+            # worth surfacing rather than silently shrinking the run.
+            if files:
+                raise ValueError(
+                    f"Target file {path} listed in censprobe.yaml::"
+                    f"targets.files does not exist on disk."
+                )
             continue
         basename = path.stem
         try:
             text = path.read_text(encoding="utf-8")
+        except OSError as e:
+            raise ValueError(f"Could not read target file {path}: {e}") from e
+        try:
             raw = yaml.safe_load(text) or {}
-        except Exception as e:
-            logger.warning("Failed to read target file %s: %s", path, e)
-            continue
+        except yaml.YAMLError as e:
+            raise ValueError(f"Invalid YAML in target file {path}: {e}") from e
         if not isinstance(raw, dict):
-            logger.warning("%s is not a YAML mapping; skipping", path)
-            continue
+            raise ValueError(
+                f"Target file {path} must be a YAML mapping at the top level "
+                f"(got {type(raw).__name__})."
+            )
         try:
             tf = TargetFile.model_validate(raw)
         except Exception as e:
-            logger.warning("Invalid target file %s: %s", path, e)
-            continue
+            raise ValueError(f"Invalid schema in target file {path}: {e}") from e
         out.files[basename] = tf
         logger.debug("Loaded target file: %s", basename)
+
+    # module_owned cross-check: every entry must correspond to an
+    # actually-loaded basename. A typo ``[telegrm]`` would otherwise
+    # silently leak Telegram's MTProto-shaped targets into the generic
+    # dns/tcp/tls/http view and produce spurious BLOCKED rows there.
+    orphan_owned = [name for name in out.module_owned if name not in out.files]
+    if orphan_owned:
+        raise ValueError(
+            f"censprobe.yaml::targets.module_owned references files that were "
+            f"not discovered under {directory}: {orphan_owned}. "
+            f"Either fix the typo, or create the file."
+        )
 
     return out

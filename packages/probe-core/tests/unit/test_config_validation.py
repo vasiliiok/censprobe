@@ -44,14 +44,32 @@ class TestProtocolsConfigCrossCheck:
             )
 
     def test_orphan_port_rejected(self) -> None:
-        # A port for a protocol nobody references is dead config — almost
-        # always a typo on the protocol name.
-        with pytest.raises(ValidationError, match="not listed in"):
+        # A port for a protocol unknown to the registry is dead config —
+        # almost always a typo on the protocol name. Since 2026-05-14
+        # the validator does a late-import registry cross-check, so the
+        # rejection message names "unknown to the registry" rather than
+        # the older "not listed in enabled/priority" wording.
+        with pytest.raises(ValidationError, match="unknown to the registry"):
             ProtocolsConfig.model_validate(
                 {
                     "enabled": ["openvpn"],
                     "priority": ["openvpn"],
                     "ports": {"openvpn": 1194, "openvpn_typo": 1195},
+                    "sni": {},
+                }
+            )
+
+    def test_unknown_enabled_rejected(self) -> None:
+        # 2026-05-14 audit: protocols.enabled used to silently drop names
+        # that weren't in the registry (typo'd ``vless-reality`` with a
+        # dash). Now the validator cross-checks against
+        # protocol_registry.known_names() at startup.
+        with pytest.raises(ValidationError, match="enabled references protocols unknown"):
+            ProtocolsConfig.model_validate(
+                {
+                    "enabled": ["openvpn", "vless-reality"],  # typo: dash
+                    "priority": ["openvpn"],
+                    "ports": {"openvpn": 1194, "vless-reality": 8444},
                     "sni": {},
                 }
             )
@@ -251,13 +269,19 @@ class TestCensprobeConfigStructure:
         with pytest.raises(ValidationError):
             CensprobeConfig.model_validate(cfg_dict)
 
-    def test_unknown_top_level_section_ignored(self, make_config: Callable[..., Any]) -> None:
-        # CensprobeConfig has extra="ignore" — older deployments must
-        # not crash when newer yaml adds sections they don't know about.
+    def test_unknown_top_level_section_rejected(self, make_config: Callable[..., Any]) -> None:
+        # 2026-05-14 audit: CensprobeConfig switched from extra="ignore"
+        # to extra="forbid" so a typo'd top-level key (e.g. ``module:``
+        # instead of ``modules:``) fails with a clear "extra fields not
+        # permitted" rather than ignoring the typo and emitting a less
+        # actionable "modules: field required" message.
         from censprobe_core.config import CensprobeConfig
 
         cfg_dict = make_config().model_dump()
         cfg_dict["future_section"] = {"x": 1}
-        cfg = CensprobeConfig.model_validate(cfg_dict)
+        with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+            CensprobeConfig.model_validate(cfg_dict)
+        # Sanity: the canonical dict (without the extra) still validates.
+        cfg = CensprobeConfig.model_validate(make_config().model_dump())
         # Existing fields still work.
         assert cfg.scoring.entry.protocol == 0.6

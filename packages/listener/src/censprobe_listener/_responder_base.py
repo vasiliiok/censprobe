@@ -38,6 +38,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from censprobe_core._privsep import chown_tree, setpriv_available, with_privsep
 from censprobe_core.echo_ports import ECHO_PORTS
 from censprobe_core.models import LiveSnapshot
 from censprobe_core.utils import graceful_terminate, write_secret
@@ -109,6 +110,21 @@ class SubprocessResponder(ABC):
         write_secret(conf_path, json.dumps(self.config_dict(), indent=2))
 
         argv = self.binary_argv(conf_path)
+        # Defense-in-depth: drop the tunnel binary's privileges before spawn.
+        # xray/sing-box/hysteria parse network input + decode crypto frames —
+        # an RCE inheriting the listener's root + NET_ADMIN bounding set
+        # would otherwise escalate to host-net-mode root. setpriv drops to
+        # nobody and zeroes the cap bounding set (keeping CAP_NET_BIND_SERVICE
+        # only when the responder binds a privileged port). If setpriv is
+        # absent (alpine / minimal image), the wrapper returns the argv
+        # unchanged — same behaviour as before privsep was added.
+        need_bind_service = self.port < 1024
+        if setpriv_available():
+            # Ensure the dropped-privilege child can read its own config and
+            # any cert/key material we wrote into tmpdir. chown happens
+            # AFTER write_secret so the 0o600 permissions are preserved.
+            chown_tree(tmpdir)
+        argv = with_privsep(argv, need_bind_service=need_bind_service)
         self._proc = await asyncio.create_subprocess_exec(
             *argv,
             stdout=asyncio.subprocess.PIPE,

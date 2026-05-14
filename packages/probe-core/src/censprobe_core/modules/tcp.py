@@ -178,20 +178,59 @@ async def _single_tcp_attempt(ip: str, port: int, cfg: TcpModuleConfig) -> _Atte
             if elapsed_ms < cfg.fast_rst_threshold_ms:
                 return Verdict.BLOCKED, BlockingMethod.TCP_RST_INJECTION
             return Verdict.BLOCKED, BlockingMethod.TCP_REFUSED
+        logger.debug("tcp probe %s:%d OSError: %s", ip, port, e)
         return Verdict.ERROR, None
 
-    except Exception:
+    except Exception as e:
+        # Defensive catch: any unexpected exception (TypeError, etc.)
+        # surfaces in the log so a future bug doesn't silently degrade
+        # to a generic ERROR row without traceback. exc_info=True
+        # produces the full stack at DEBUG level.
+        logger.debug("tcp probe %s:%d unexpected: %s", ip, port, e, exc_info=True)
         return Verdict.ERROR, None
+
+
+# Verdict severity for tie-breaking in :func:`_majority`. Lower value =
+# more conservative; when two outcomes tie on count, we pick the one
+# with the SMALLEST severity number (BLOCKED beats OK on a 2-vs-2 tie,
+# THROTTLED beats OK, etc.). The motivation: a tie of [OK, BLOCKED]
+# should not silently become OK just because OK happens to iterate
+# first in the counter dict.
+_VERDICT_SEVERITY: dict[Verdict, int] = {
+    Verdict.BLOCKED: 0,
+    Verdict.THROTTLED: 1,
+    Verdict.ANOMALY: 2,
+    Verdict.HANDSHAKE_ONLY: 3,
+    Verdict.ERROR: 4,
+    Verdict.SERVER_REFUSED: 5,
+    Verdict.INCONCLUSIVE: 6,
+    Verdict.OK: 7,
+}
 
 
 def _majority(outcomes: list[_AttemptOutcome]) -> _AttemptOutcome:
-    """Return most common (verdict, method) tuple."""
+    """Return most common (verdict, method) tuple; ties favour the more
+    conservative verdict (see :data:`_VERDICT_SEVERITY`).
+
+    Deterministic: ``max(counts, key=counts.get)`` used to return
+    whichever key iterated first on a tie, which depended on dict
+    insertion order and made the verdict path subtly non-reproducible
+    across Python versions. The explicit severity tiebreaker makes the
+    output order-independent — a 1-vs-1 [OK, BLOCKED] tie now always
+    returns BLOCKED, matching how the operator interprets "even split"
+    (one bad attempt is enough to keep us on the cautious side).
+    """
     if not outcomes:
         return Verdict.INCONCLUSIVE, None
     counts: dict[_AttemptOutcome, int] = {}
     for o in outcomes:
         counts[o] = counts.get(o, 0) + 1
-    return max(counts, key=counts.get)  # type: ignore[arg-type]
+    return max(
+        counts.items(),
+        # Primary key: count descending. Secondary: conservative-first
+        # (smaller severity number wins on tie).
+        key=lambda item: (item[1], -_VERDICT_SEVERITY.get(item[0][0], 99)),
+    )[0]
 
 
 def _slug(ip: str) -> str:

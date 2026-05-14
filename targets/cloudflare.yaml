@@ -116,17 +116,13 @@ warp_tunnel_udp_targets:
     name: "cloudflare_warp_masque_udp_8443"
     notes: "MASQUE UDP fallback (high-port) — least likely to hit port-based blocks"
 
-  - host: "162.159.193.10"
-    port_udp: 2408
-    protocol: wireguard
-    name: "cloudflare_warp_wg_udp_2408"
-    notes: "WireGuard primary UDP port (legacy WARP protocol)"
-
-  - host: "162.159.193.10"
-    port_udp: 4500
-    protocol: wireguard
-    name: "cloudflare_warp_wg_udp_4500"
-    notes: "WireGuard NAT-T fallback UDP port"
+  # WireGuard probes (UDP/2408, UDP/4500) were removed 2026-05-14.
+  # A real WG server silently drops any packet that doesn't carry a
+  # valid handshake (RFC) and we have no shared key for the WARP anycast
+  # service, so the only verdict these probes ever returned was
+  # INCONCLUSIVE (`tunnel_silently_drops_invalid`) — no censorship
+  # signal possible. IP-level reachability for 162.159.193.0/24 is
+  # already covered by the cloudflare_warp_*_tcp probes above.
 
 # Cloudflare platform HTTP targets (workers.dev, pages.dev)
 # RKN has blocked specific workers.dev/pages.dev subdomains hosting banned content.

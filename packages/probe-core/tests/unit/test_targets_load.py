@@ -4,7 +4,6 @@ Tests for targets.py — Pydantic models + auto-discovery loader.
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 
 import pytest
@@ -76,16 +75,14 @@ class TestTelegramDC:
 
 
 class TestLoadTargets:
-    def test_missing_directory_returns_empty(
-        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        # Loader must not crash on a missing directory — operator may
-        # have just renamed the path. A warning is logged so they can
-        # find it.
-        with caplog.at_level(logging.WARNING):
-            ts = load_targets(tmp_path / "nonexistent")
-        assert ts.files == {}
-        assert any("does not exist" in r.message for r in caplog.records)
+    def test_missing_directory_raises(self, tmp_path: Path) -> None:
+        # Fail-loud contract (2026-05-14 audit): a missing targets
+        # directory means censprobe.yaml::targets.directory is wrong —
+        # surfacing it as ``ValueError`` lets the operator fix the
+        # config instead of running with an empty result set the
+        # dashboard would render as "category empty".
+        with pytest.raises(ValueError, match="does not exist"):
+            load_targets(tmp_path / "nonexistent")
 
     def test_empty_directory_returns_empty_set(self, tmp_path: Path) -> None:
         ts = load_targets(tmp_path)
@@ -122,34 +119,32 @@ class TestLoadTargets:
         # scanned only for the generic side, and module_owned drops it).
         assert "t.me" not in domains
 
-    def test_malformed_yaml_logs_warning_and_skips(
-        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        # Today load_targets is warn-only. The CI validate-config job
-        # promotes that warning to an error; this test pins the
-        # underlying behaviour (warning logged, file skipped, sibling
-        # files still loaded).
+    def test_malformed_yaml_raises(self, tmp_path: Path) -> None:
+        # Fail-loud (2026-05-14): a syntactically broken YAML in the
+        # targets tree must fail startup rather than silently drop the
+        # affected category. Previously the loader logged a warning
+        # and continued; the CI validate-config job promoted that to
+        # an error, but the runtime path on operator boxes still
+        # produced an empty result. Now both layers fail loudly.
         (tmp_path / "good.yaml").write_text("targets:\n  - domain: ok.com\n    name: ok\n")
         (tmp_path / "broken.yaml").write_text("targets: [not a dict\n")
-        with caplog.at_level(logging.WARNING):
-            ts = load_targets(tmp_path)
-        assert "good" in ts.files
-        assert "broken" not in ts.files
-        # The warning must mention the offending file path so operators
-        # don't have to grep for it.
-        assert any("broken" in r.message.lower() for r in caplog.records)
+        with pytest.raises(ValueError, match="broken"):
+            load_targets(tmp_path)
 
-    def test_top_level_non_mapping_logs_and_skips(
-        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        # A YAML whose top-level value is a list / string instead of a
-        # mapping must be rejected — the rest of the loader assumes a
-        # dict shape.
+    def test_top_level_non_mapping_raises(self, tmp_path: Path) -> None:
         (tmp_path / "scalar.yaml").write_text("just a string\n")
-        with caplog.at_level(logging.WARNING):
-            ts = load_targets(tmp_path)
-        assert ts.files == {}
-        assert any("not a YAML mapping" in r.message for r in caplog.records)
+        with pytest.raises(ValueError, match="must be a YAML mapping"):
+            load_targets(tmp_path)
+
+    def test_module_owned_orphan_raises(self, tmp_path: Path) -> None:
+        # module_owned cross-check: a typo'd entry like ``[telegrm]`` that
+        # doesn't correspond to a discovered basename must be rejected.
+        # Otherwise Telegram's MTProto-shaped entries would leak into
+        # the generic dns/tcp/tls/http view via the un-excluded actual
+        # file, producing spurious BLOCKED rows.
+        (tmp_path / "telegram.yaml").write_text("targets: []\n")
+        with pytest.raises(ValueError, match="module_owned"):
+            load_targets(tmp_path, module_owned=["telegrm"])  # typo
 
     def test_symlink_skipped(self, tmp_path: Path) -> None:
         # load_targets refuses to follow symlinks (defence-in-depth, same

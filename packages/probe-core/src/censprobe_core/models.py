@@ -20,25 +20,33 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import StrEnum
+from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
 from censprobe_core.subcategories import derive as _derive_subcategory
 
+
+def _probe_core_version() -> str:
+    """Return the installed censprobe_core package version.
+
+    Falls back to ``"0.0.0-dev"`` only when the package is being run
+    out of a non-editable build environment where importlib.metadata
+    cannot resolve it (e.g. CI bootstrapping). Editable installs (the
+    standard local + container setup) always resolve cleanly.
+    """
+    try:
+        return version("censprobe_core")
+    except PackageNotFoundError:
+        return "0.0.0-dev"
+
+
 # Enums
 
 
 class Verdict(StrEnum):
-    """Top-level verdict for a single test.
-
-    Eight categorical outcomes, each with a unique semantic role. The
-    DNS/TCP-specific verdicts that previously duplicated ``BlockingMethod``
-    (DNS_POISONING, DNS_BLOCKED, DOH_BLOCKED, IP_DROPPED, RST_INJECTED,
-    REFUSED, YOUTUBE_SNI_THROTTLED) were consolidated in 2026-05 — the
-    "what kind of blocking" detail now lives exclusively on
-    :class:`BlockingMethod` while ``verdict`` stays at the categorical
-    level.
+    """Top-level verdict for a single test — eight categorical outcomes.
 
     Score-effect contract (see :func:`scoring._ok_pct`):
       * Counted as success: OK
@@ -82,7 +90,6 @@ class BlockingMethod(StrEnum):
     SHADOWSOCKS_ACTIVE_PROBED = "shadowsocks_active_probed"
     VPN_DATA_PHASE_BLOCKED = "vpn_data_phase_blocked"
     MIDDLEBOX_HTTP_MANIPULATION = "middlebox_http_manipulation"
-    UNKNOWN = "unknown"
 
 
 # Core result model
@@ -231,7 +238,10 @@ class ReportMeta(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     server: ServerMeta = Field(default_factory=ServerMeta)
     planned_sessions: list[str] = Field(default_factory=list)
-    probe_core_version: str = "0.1.0"
+    # Resolved at instantiation from importlib.metadata so a future
+    # pyproject.toml bump propagates without a manual edit here (the
+    # previous "0.1.0" literal silently went stale on every release).
+    probe_core_version: str = Field(default_factory=_probe_core_version)
 
 
 # Listener / Protocol models
@@ -298,6 +308,15 @@ class ProtocolResult(BaseModel):
     handshake_count: int = 0
     data_transfer_ok: bool = False
     avg_throughput_mbps: float | None = None
+    # End-to-end throughput as measured by the CLIENT through the tunnel.
+    # The listener-side ``avg_throughput_mbps`` collapses to None on fast
+    # links (kernel-buffer absorption discard in echo_server) — the client
+    # measurement is the authoritative number once the link clears ~100
+    # Mbps. POSTed in the JSON body of ``/stop`` and merged at report
+    # finalisation. ``None`` for older clients that don't POST the body
+    # or for protocols (MTProto family) where the client never reports
+    # throughput. Informational only — not consumed by scoring.
+    client_avg_throughput_mbps: float | None = None
     throughput_throttled: bool = False
     note: str | None = None
     # Result of the listener-side startup self-test (loopback probe of

@@ -95,8 +95,15 @@ class ProbeRunner:
             )
 
     def _apply_repeat_override(self, repeats: int) -> None:
-        """Force every repeat-aware module section to use ``repeats``."""
-        for name in ("dns", "tcp", "tls", "http"):
+        """Force every repeat-aware module section to use ``repeats``.
+
+        DNS doesn't appear here because its retry surface is the
+        multi-resolver cross-check rather than a single-record repeat;
+        :func:`censprobe_core.modules.dns.run_dns_tests` takes no
+        ``repeats`` parameter. The remaining three modules (tcp / tls /
+        http) honour the override.
+        """
+        for name in ("tcp", "tls", "http"):
             section = getattr(self.config.modules, name, None)
             if section is not None and hasattr(section, "repeats"):
                 section.repeats = repeats

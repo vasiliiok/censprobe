@@ -18,12 +18,14 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import secrets
 import ssl
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
 
+from censprobe_core._browser_ua import CHROME_UA, CHROME_VERSION
 from censprobe_core._evidence import describe_exception
 from censprobe_core.config import get_config
 from censprobe_core.models import BlockingMethod, TestResult, Verdict
@@ -141,6 +143,11 @@ async def _attempt_url(
         expected_status=target.get("expected_status"),
     )
 
+    # An OK response is unambiguous — confidence stays at the default 1.0.
+    # ANOMALY / SERVER_REFUSED carry slight ambiguity (the response code
+    # alone could be a censor's injected stub, a CDN edge quirk, or the
+    # real origin); 0.9 is the historical calibration.
+    confidence = 1.0 if verdict == Verdict.OK else 0.9
     return TestResult(
         test=test_name,
         category="http",
@@ -155,7 +162,7 @@ async def _attempt_url(
             "final_url": final_url,
             "content_type": content_type,
         },
-        confidence=0.9,
+        confidence=confidence,
     )
 
 
@@ -240,9 +247,19 @@ async def _test_url(
             )
 
         if attempt < repeats:
-            await asyncio.sleep(2)
+            # Backoff 2 s + 0–1 s jitter. Jitter blunts the "every
+            # in-flight probe retries at exactly t=2 s" thundering-herd
+            # against a single target (matters when targets/*.yaml gets
+            # a CDN that returns 429 globally to a synchronised retry).
+            await asyncio.sleep(_HTTP_RETRY_BACKOFF_SEC + secrets.SystemRandom().random())
 
     return last_error or _timeout_result(test_name, url, attempts=repeats)
+
+
+# Extracted from a magic ``2`` in the retry loop (2026-05-14 audit).
+# 2 s is comfortably above transient packet-loss recovery but below
+# the per-probe timeout budget. Jittered with 0–1 s in the call site.
+_HTTP_RETRY_BACKOFF_SEC = 2.0
 
 
 def _http_test_name(domain: str, url: str) -> str:
@@ -301,11 +318,7 @@ def _timeout_result(test_name: str, url: str, attempts: int = 1) -> TestResult:
 # ~6 months. Stale versions become a fingerprint of their own and start
 # tripping the same heuristics we are trying to pass.
 _BROWSER_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/145.0.0.0 Safari/537.36"
-    ),
+    "User-Agent": CHROME_UA,
     "Accept": (
         "text/html,application/xhtml+xml,application/xml;q=0.9,"
         "image/avif,image/webp,image/apng,*/*;q=0.8,"
@@ -313,7 +326,11 @@ _BROWSER_HEADERS = {
     ),
     "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
     "Accept-Encoding": "gzip, deflate, br, zstd",
-    "sec-ch-ua": '"Chromium";v="145", "Google Chrome";v="145", "Not?A_Brand";v="24"',
+    "sec-ch-ua": (
+        f'"Chromium";v="{CHROME_VERSION}", '
+        f'"Google Chrome";v="{CHROME_VERSION}", '
+        f'"Not?A_Brand";v="24"'
+    ),
     "sec-ch-ua-mobile": "?0",
     "sec-ch-ua-platform": '"Windows"',
     "Sec-Fetch-Site": "none",

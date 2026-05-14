@@ -73,6 +73,18 @@ def get_vantage_country() -> str | None:
     return _VANTAGE_COUNTRY
 
 
+def reset_vantage_country() -> None:
+    """Drop the recorded vantage country — primarily for test fixtures.
+
+    Parallel to :func:`censprobe_core.config.reset_config`. Without a
+    reset hook, a test that calls ``set_vantage_country("RU")`` poisons
+    every subsequent test running in the same process — the global
+    sits there until module re-import.
+    """
+    global _VANTAGE_COUNTRY
+    _VANTAGE_COUNTRY = None
+
+
 def is_censoring_vantage() -> bool:
     """True iff the vantage country is in
     :data:`censprobe_core.config.VantageConfig.censoring_countries`.
@@ -95,12 +107,24 @@ def is_censoring_vantage() -> bool:
     return _VANTAGE_COUNTRY in {cc.upper() for cc in get_config().vantage.censoring_countries}
 
 
-# Back-compat alias. Kept indefinitely because the module ecosystem
-# (dns/tcp/cloudflare/throttling) used this name for several months and
-# external tooling may still call it. New code should prefer
-# :func:`is_censoring_vantage`.
 def is_ru_vantage() -> bool:
-    """Deprecated: prefer :func:`is_censoring_vantage`."""
+    """Deprecated alias for :func:`is_censoring_vantage`.
+
+    Kept because the module ecosystem (dns / tcp / cloudflare /
+    throttling) used this name for several months and external tooling
+    may still call it. Emits a :class:`DeprecationWarning` so callers
+    eventually migrate — silent aliases tend to live forever.
+    """
+    import warnings
+
+    warnings.warn(
+        "is_ru_vantage() is deprecated; use is_censoring_vantage() instead. "
+        "The check covers RU, BY, and any other code in "
+        "censprobe.yaml::vantage.censoring_countries — the old name is "
+        "misleading on multi-country deployments.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     return is_censoring_vantage()
 
 

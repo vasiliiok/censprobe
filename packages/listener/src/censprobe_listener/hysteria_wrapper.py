@@ -67,10 +67,14 @@ class HysteriaResponder(SubprocessResponder):
 
     def config_dict(self) -> dict[str, Any]:
         # pre_spawn_setup must have run by the time the base class calls
-        # this; assert so a future re-ordering surfaces loudly rather than
+        # this. Production ``raise`` (not ``assert``, which python -O
+        # strips) so a future re-ordering surfaces loudly rather than
         # writing a config with literal "None" paths.
-        assert self._cert_path is not None and self._key_path is not None
-        assert self._acl_path is not None
+        if self._cert_path is None or self._key_path is None or self._acl_path is None:
+            raise RuntimeError(
+                "HysteriaResponder.config_dict() called before pre_spawn_setup() — "
+                "cert/key/acl paths are unset"
+            )
         return {
             "listen": f":{self.port}",
             "tls": {"cert": str(self._cert_path), "key": str(self._key_path)},

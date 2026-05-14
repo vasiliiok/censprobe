@@ -61,7 +61,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT tr.test_id AS server, ls.session_id, COALESCE(ls.client_meta->'asn'->>'org', '\u2014') AS client_org, pr.protocol, pr.verdict, pr.handshake_count, pr.data_transfer_ok, pr.avg_throughput_mbps, pr.throughput_throttled, pr.note FROM protocol_results pr JOIN listener_sessions ls ON ls.id = pr.session_id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE (tr.test_id IN (${test_id:singlequote})) ORDER BY ls.session_id, pr.protocol",
+          "rawSql": "SELECT tr.test_id AS server, ls.session_id, COALESCE(ls.client_meta->'asn'->>'org', '\u2014') AS client_org, pr.protocol, pr.verdict, pr.handshake_count, pr.data_transfer_ok, COALESCE(pr.client_avg_throughput_mbps, pr.avg_throughput_mbps) AS avg_throughput_mbps, pr.throughput_throttled, pr.note FROM protocol_results pr JOIN listener_sessions ls ON ls.id = pr.session_id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE (tr.test_id IN (${test_id:singlequote})) ORDER BY ls.session_id, pr.protocol",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -162,7 +162,8 @@
                 "value": {
                   "mode": "absolute",
                   "steps": [
-                    {"color": "red", "value": null},
+                    {"color": "transparent", "value": null},
+                    {"color": "red", "value": 0},
                     {"color": "yellow", "value": 5},
                     {"color": "green", "value": 50}
                   ]
@@ -355,7 +356,7 @@
     {
       "id": 4,
       "title": "Throughput by protocol (per session, Mbps)",
-      "description": "Sustained throughput measured by curl through the tunnel (SOCKS-routed for SS/VLESS/Hy2; direct via tun for OpenVPN/WG/AWG). MTProto protocols don't expose an echo and stay absent. Throttled rows are hidden (the bar would be 0); see the matrix panel above for the throttled flag.",
+      "description": "Sustained throughput per protocol. Prefers the client-measured number (POSTed in /stop body) and falls back to the listener-side measurement when the client predates the body upload. MTProto protocols don't expose an echo and stay absent. Throttled rows are hidden (the bar would be 0); see the matrix panel above for the throttled flag.",
       "type": "barchart",
       "gridPos": {
         "x": 0,
@@ -369,7 +370,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT (COALESCE(ls.client_meta->'asn'->>'org', '\u2014') || ' / ' || ls.session_id) AS session, pr.protocol, pr.avg_throughput_mbps AS mbps FROM protocol_results pr JOIN listener_sessions ls ON ls.id = pr.session_id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE (tr.test_id IN (${test_id:singlequote})) AND pr.avg_throughput_mbps IS NOT NULL ORDER BY session, pr.protocol",
+          "rawSql": "SELECT (COALESCE(ls.client_meta->'asn'->>'org', '\u2014') || ' / ' || ls.session_id) AS session, pr.protocol, COALESCE(pr.client_avg_throughput_mbps, pr.avg_throughput_mbps) AS mbps FROM protocol_results pr JOIN listener_sessions ls ON ls.id = pr.session_id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE (tr.test_id IN (${test_id:singlequote})) AND COALESCE(pr.client_avg_throughput_mbps, pr.avg_throughput_mbps) IS NOT NULL ORDER BY session, pr.protocol",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -389,8 +390,12 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "red",
+                "color": "transparent",
                 "value": null
+              },
+              {
+                "color": "red",
+                "value": 0
               },
               {
                 "color": "yellow",
@@ -428,7 +433,7 @@
     {
       "id": 5,
       "title": "Median throughput (across all OK sessions, by protocol)",
-      "description": "Per-protocol median of avg_throughput_mbps over every session that reached data_ok. Useful for cross-protocol comparison without per-session noise.",
+      "description": "Per-protocol median of throughput (client-measured preferred, listener-measured fallback) over every session that reached data_ok. Useful for cross-protocol comparison without per-session noise.",
       "type": "stat",
       "gridPos": {
         "x": 18,
@@ -442,7 +447,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT pr.protocol, PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY pr.avg_throughput_mbps) AS median_mbps FROM protocol_results pr JOIN listener_sessions ls ON ls.id = pr.session_id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE (tr.test_id IN (${test_id:singlequote})) AND pr.avg_throughput_mbps IS NOT NULL GROUP BY pr.protocol ORDER BY median_mbps DESC",
+          "rawSql": "SELECT pr.protocol, PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY COALESCE(pr.client_avg_throughput_mbps, pr.avg_throughput_mbps)) AS median_mbps FROM protocol_results pr JOIN listener_sessions ls ON ls.id = pr.session_id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE (tr.test_id IN (${test_id:singlequote})) AND COALESCE(pr.client_avg_throughput_mbps, pr.avg_throughput_mbps) IS NOT NULL GROUP BY pr.protocol ORDER BY median_mbps DESC",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -462,8 +467,12 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "red",
+                "color": "transparent",
                 "value": null
+              },
+              {
+                "color": "red",
+                "value": 0
               },
               {
                 "color": "yellow",

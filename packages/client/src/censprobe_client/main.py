@@ -37,7 +37,7 @@ import click
 from censprobe_core.config import load_config
 from censprobe_core.credentials_reader import parse_protocols_yaml
 from censprobe_core.models import LiveSnapshot, ProtocolResult, Verdict
-from censprobe_core.protocol_probes import ProbeResult
+from censprobe_core.protocol_probes import ASYMMETRIC_DPI_ERROR_MARKERS, ProbeResult
 from censprobe_core.protocol_registry import enabled_protocols, known_names
 from rich.console import Console
 from rich.logging import RichHandler
@@ -336,6 +336,16 @@ async def _async_main(
     # report contains. No more live-vs-final drift (which was the
     # AWG cross-verify discrepancy that surfaced in RU runs).
     listener_snapshot: dict[str, LiveSnapshot] | None = None
+    # Collect per-protocol client-measured throughput numbers and ship
+    # them in the /stop body so the listener can persist them into the
+    # report (its own loopback measurement collapses on fast links).
+    # We only include OK rows with a finite positive number — error /
+    # blocked / unmeasured probes have no signal to forward.
+    client_throughput = {
+        name: float(r.throughput_mbps)
+        for name, r in results.items()
+        if r.throughput_mbps is not None and r.throughput_mbps > 0
+    }
     try:
         await asyncio.to_thread(
             _post_stop,
@@ -343,6 +353,7 @@ async def _async_main(
             creds_port,
             creds_token,
             creds_cert_sha256,
+            client_throughput=client_throughput,
         )
     except _PermanentEndpointError as e:
         # /stop refused at auth/pinning level. The operator can still
@@ -476,6 +487,8 @@ def _post_stop(
     port: int,
     token: str,
     expected_sha256: str,
+    *,
+    client_throughput: dict[str, float] | None = None,
 ) -> None:
     """POST https://host:port/stop — ask listener to stop.
 
@@ -485,13 +498,27 @@ def _post_stop(
     (POST-helpers in the retry wrapper accept 2xx broadly). Retries
     on transient errors.
 
+    When ``client_throughput`` is supplied, the per-protocol Mbps map
+    is attached as a JSON body — the listener merges it into the
+    final report's ``ProtocolResult.client_avg_throughput_mbps`` so
+    the dashboard sees real numbers on fast links (the listener's
+    own loopback measurement collapses to ``None`` above ~Gbps).
+
     Retrying POST is normally risky (double-submit hazard), but the
     cred-server's /stop is explicitly idempotent: it sets a single
     asyncio.Event guarded by ``Event.set()``, which is a no-op after
     the first call. A retry that lands while the listener has
     already started teardown will simply re-flip an already-set
     event and return 202 — no double-teardown, no leaked state.
+    The throughput map is merged on the listener side so a retry
+    with the same numbers is idempotent there too.
     """
+    body = b""
+    if client_throughput:
+        body = json.dumps(
+            {"client_throughput": client_throughput},
+            separators=(",", ":"),
+        ).encode("utf-8")
     _pinned_get_with_retry(
         host,
         port,
@@ -499,6 +526,7 @@ def _post_stop(
         expected_sha256,
         path="/stop",
         method="POST",
+        body=body,
     )
 
 
@@ -510,6 +538,7 @@ def _pinned_get(
     *,
     path: str,
     method: str = "GET",
+    body: bytes = b"",
 ) -> str:
     """Pinned-TLS bearer-auth request. Shared by /creds, /snapshot, /stop.
 
@@ -535,6 +564,15 @@ def _pinned_get(
     if len(expected) != 64 or not all(c in "0123456789abcdef" for c in expected):
         raise ValueError("CREDS_CERT_SHA256 must be a 64-char hex SHA-256 fingerprint")
 
+    # Reject embedded CRLF in host BEFORE formatting the HTTP request below.
+    # ``host`` flows in from --server-host / SERVER_HOST and is otherwise
+    # template-interpolated into a literal HTTP/1.1 request; without this
+    # guard, a host like ``1.2.3.4\r\nEvil: header`` would smuggle a
+    # second header. CLI/env are the only current sources, but defending
+    # at the formatter is cheap insurance against a future caller.
+    if "\r" in host or "\n" in host or "\r" in path or "\n" in path:
+        raise ValueError(f"host/path must not contain CR or LF: host={host!r}, path={path!r}")
+
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
@@ -544,7 +582,15 @@ def _pinned_get(
     # this order, the secret would land at a possibly-MitM'd peer.
     try:
         with socket.create_connection((host, port), timeout=_FETCH_TIMEOUT_SEC) as raw:
+            # ``create_connection`` set the timeout on the raw socket
+            # only for the connect() syscall. ``wrap_socket`` does NOT
+            # carry that over to subsequent recv() loops, so an
+            # unresponsive peer after the TLS handshake would block on
+            # ``tls.recv`` until OS keepalive (~2 hours on Linux). Set
+            # the deadline explicitly on the wrapped socket below so
+            # the recv loop has a bounded budget.
             with ctx.wrap_socket(raw, server_hostname=host) as tls:
+                tls.settimeout(_FETCH_TIMEOUT_SEC)
                 peer_der = tls.getpeercert(binary_form=True)
                 if not peer_der:
                     # No cert == server didn't actually negotiate TLS;
@@ -557,20 +603,29 @@ def _pinned_get(
                         f"expected {expected}"
                     )
                 # Pinning passed — now safe to ship the bearer token.
-                # POST has Content-Length: 0 (no body) — /stop is the
-                # only POST endpoint right now and its payload is the
-                # bearer token, nothing else.
-                content_length_header = "Content-Length: 0\r\n" if method == "POST" else ""
+                # POST carries an optional JSON body (currently only
+                # /stop ships one, with the per-protocol client_throughput
+                # map). GET never has a body. The Content-Length header
+                # is emitted for any POST regardless of body size so a
+                # zero-length body still parses cleanly on the server.
+                if method == "POST":
+                    headers_extra = f"Content-Length: {len(body)}\r\n"
+                    if body:
+                        headers_extra += "Content-Type: application/json; charset=utf-8\r\n"
+                else:
+                    headers_extra = ""
                 request = (
                     f"{method} {path} HTTP/1.1\r\n"
                     f"Host: {host}:{port}\r\n"
                     f"Authorization: Bearer {token}\r\n"
-                    f"{content_length_header}"
+                    f"{headers_extra}"
                     f"Connection: close\r\n"
                     f"User-Agent: censprobe-client\r\n"
                     f"\r\n"
                 )
                 tls.sendall(request.encode("ascii"))
+                if body:
+                    tls.sendall(body)
                 buf = b""
                 while True:
                     chunk = tls.recv(65536)
@@ -622,6 +677,7 @@ def _pinned_get_with_retry(
     *,
     path: str,
     method: str = "GET",
+    body: bytes = b"",
     max_attempts: int = _FETCH_MAX_ATTEMPTS,
 ) -> str:
     """Wrap :func:`_pinned_get` with bounded retry on transient errors.
@@ -639,7 +695,9 @@ def _pinned_get_with_retry(
     last_exc: _TransientEndpointError | None = None
     for attempt in range(1, max_attempts + 1):
         try:
-            return _pinned_get(host, port, token, expected_sha256, path=path, method=method)
+            return _pinned_get(
+                host, port, token, expected_sha256, path=path, method=method, body=body
+            )
         except _TransientEndpointError as e:
             last_exc = e
             if attempt < max_attempts:
@@ -656,7 +714,15 @@ def _pinned_get_with_retry(
             # else: fall through to raise after the loop
     # Exhausted retries — re-raise the last transient error so the
     # caller decides whether to abort (creds) or skip-and-warn (snapshot).
-    assert last_exc is not None  # mypy: for-loop set last_exc on first failure
+    # Defensive: max_attempts >= 1 by the function's signature contract,
+    # so last_exc must be set if we got here. Production ``raise`` rather
+    # than ``assert`` so a future caller passing max_attempts=0 surfaces
+    # the bug instead of being silently stripped by python -O.
+    if last_exc is None:
+        raise RuntimeError(
+            "_pinned_get_with_retry: retry loop exited without recording "
+            "a transient error — caller likely passed max_attempts < 1"
+        )
     raise last_exc
 
 
@@ -796,27 +862,23 @@ def _listener_verdict(snap: LiveSnapshot) -> Verdict:
     return pr.verdict
 
 
-# Probe-side error markers that mean "the SERVER successfully responded
-# (or at least started to) but the response payload didn't reach us
-# before the read-deadline". Strongly suggests asymmetric DPI on the
-# return path — confirmed on MTS RU vantage 2026-05-13 for both
-# mtg variants (welcome_read_timeout_record + orig_resPQ_len_*).
-# Any other client error ("connection_refused", "tcp_timeout", network
-# errors at write time, etc.) is NOT asymmetric DPI — those mean the
-# client never reached the server at all, and listener=OK in that
-# state is a Docker-loopback/host-netstack quirk, not censorship.
-_ASYMMETRIC_DPI_ERROR_MARKERS = (
-    "welcome_read_timeout",
-    "orig_resPQ_len_timeout",
-    "orig_resPQ_body_timeout",
-    "orig_resPQ_truncated",
-)
-
-
 def _is_asymmetric_dpi_error(error: str | None) -> bool:
+    """Whether ``error`` is the read-timeout-after-handshake shape that,
+    combined with a listener-side OK / HANDSHAKE_ONLY counter, attributes
+    the failure to asymmetric DPI rather than a generic
+    client-overconfident disagreement.
+
+    Imports the canonical marker tuple from probe-core
+    (:data:`ASYMMETRIC_DPI_ERROR_MARKERS`) — single source of truth
+    with the producer side (``_mtg_error_result`` in
+    ``protocol_probes``). The 2026-05-14 audit moved the markers
+    there so a future rename of an error string in
+    ``protocol_probes`` can't silently break the cross-verify
+    attribution (commit 280cf77 / memory ``mts_round_2026-05-13``).
+    """
     if not error:
         return False
-    return any(marker in error for marker in _ASYMMETRIC_DPI_ERROR_MARKERS)
+    return any(marker in error for marker in ASYMMETRIC_DPI_ERROR_MARKERS)
 
 
 def _agreed_verdict(

@@ -74,6 +74,23 @@ class TestProtocolsEnabledRequired:
         creds = parse_protocols_yaml(body)
         assert creds._protocols_enabled == []
 
+    def test_enabled_protocol_without_section_raises(self) -> None:
+        # 2026-05-14: enabled-without-section used to fall through with
+        # zero-default fields and the client skipped the probe silently.
+        # Now: schema mismatch is rejected at parse-time with the
+        # offending name listed.
+        body = yaml.safe_dump({"_protocols_enabled": ["shadowsocks"]})
+        with pytest.raises(ValueError, match="does not carry the corresponding section"):
+            parse_protocols_yaml(body)
+
+    def test_unknown_name_in_enabled_raises(self) -> None:
+        # Protocol name unknown to this client build (newer listener
+        # added a protocol the client doesn't yet support) → fail loud
+        # rather than silently dropping.
+        body = yaml.safe_dump({"_protocols_enabled": ["fictional_proto"]})
+        with pytest.raises(ValueError, match="names not known"):
+            parse_protocols_yaml(body)
+
 
 class TestSectionFieldsRequired:
     def test_missing_port_raises(self) -> None:

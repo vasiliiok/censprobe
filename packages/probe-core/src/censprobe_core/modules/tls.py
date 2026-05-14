@@ -55,10 +55,15 @@ def _get_doh_client() -> httpx.AsyncClient:
 
 logger = logging.getLogger(__name__)
 
-# TLS timeout fallback used by the few callers (internal helpers, ECH
-# probe) that aren't on the run_tls_tests entry path. The main entry
-# reads from CensprobeConfig.modules.tls — see run_tls_tests below.
-_TLS_TIMEOUT = 10.0
+# Default per-handshake timeout used by callers that import the helpers
+# directly (tests, the ECH sub-probe). The main entry point overrides it
+# via the ``timeout`` parameter threaded through the call chain, read
+# from CensprobeConfig.modules.tls — see :func:`run_tls_tests`. Previously
+# this was a *mutable module-level global* that ``run_tls_tests`` clobbered
+# and helpers read implicitly; that anti-pattern produced silent staleness
+# between parallel test-suite invocations. Replaced 2026-05-14 with an
+# explicit parameter that has a sensible default constant.
+_DEFAULT_TLS_TIMEOUT_SEC = 10.0
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -160,16 +165,22 @@ async def run_tls_tests(
     """Run TLS/SNI tests for each target in parallel (bounded).
 
     Concurrency cap and per-handshake timeout come from
-    :class:`censprobe_core.config.TlsModuleConfig`. The internal
-    helpers below still reference the module-level ``_TLS_TIMEOUT``
-    fallback for back-compat with tests that import them directly.
+    :class:`censprobe_core.config.TlsModuleConfig`. The timeout is
+    threaded through the helper chain as a parameter rather than via
+    a module-level mutable global (replaced 2026-05-14 — the previous
+    global was race-prone across parallel test invocations).
     """
     from censprobe_core.config import get_config
 
     cfg = get_config().modules.tls
-    global _TLS_TIMEOUT
-    _TLS_TIMEOUT = cfg.timeout_sec
+    timeout = cfg.timeout_sec
     sem = asyncio.Semaphore(cfg.max_parallel)
+
+    # Per-run state reset: the resolve-path breadcrumb dict accumulates
+    # across runs if not cleared (no per-instance binding because the
+    # helpers are module-level). Clearing at run-start keeps long-lived
+    # test suites and re-imports honest.
+    _LAST_RESOLVE_PATH.clear()
 
     async def _one(t: dict[str, Any]) -> list[TestResult]:
         async with sem:
@@ -197,6 +208,7 @@ async def run_tls_tests(
                 blocked_sni,
                 repeats,
                 ech_advertised=ech_advertised,
+                timeout=timeout,
             )
 
     grouped = await asyncio.gather(*[_one(t) for t in targets])
@@ -212,6 +224,7 @@ async def _tls_connect_with_repeats(
     *,
     verify: bool,
     repeats: int,
+    timeout: float = _DEFAULT_TLS_TIMEOUT_SEC,
 ) -> tuple[Verdict, dict[str, Any], int]:
     """Run _tls_connect up to `repeats` times; first OK wins, last failure
     is returned otherwise. Returns (final_verdict, evidence, attempts_made).
@@ -224,7 +237,7 @@ async def _tls_connect_with_repeats(
     last_evidence: dict[str, Any] = {}
     last_verdict = Verdict.INCONCLUSIVE
     for attempt in range(1, repeats + 1):
-        v, ev = await _tls_connect(ip, sni, verify=verify)
+        v, ev = await _tls_connect(ip, sni, verify=verify, timeout=timeout)
         last_verdict, last_evidence = v, ev
         if v == Verdict.OK:
             return v, ev, attempt
@@ -284,6 +297,7 @@ async def _test_sni_scenarios(
     repeats: int,
     *,
     ech_advertised: bool = False,
+    timeout: float = _DEFAULT_TLS_TIMEOUT_SEC,
 ) -> list[TestResult]:
     """Test multiple SNI scenarios against one IP.
 
@@ -307,6 +321,7 @@ async def _test_sni_scenarios(
         blocked_sni,
         verify=True,
         repeats=repeats,
+        timeout=timeout,
     )
 
     # Record which resolver path produced the IP we just tested. A
@@ -345,6 +360,7 @@ async def _test_sni_scenarios(
         neutral_sni,
         verify=False,
         repeats=repeats,
+        timeout=timeout,
     )
     # ssl_error on the neutral SNI means the server sent an INTERNAL_ERROR
     # alert — happens when the chosen neutral SNI still isn't provisioned
@@ -389,10 +405,11 @@ def _tls_handshake_blocking(
     port: int,
     ctx: ssl.SSLContext,
     t0: float,
+    timeout: float = _DEFAULT_TLS_TIMEOUT_SEC,
 ) -> dict[str, Any]:
     """Blocking TLS handshake; never raises — returns an evidence dict."""
     try:
-        with socket.create_connection((ip, port), timeout=_TLS_TIMEOUT) as raw:
+        with socket.create_connection((ip, port), timeout=timeout) as raw:
             rtt_connect = (time.monotonic() - t0) * 1000
             with ctx.wrap_socket(raw, server_hostname=sni) as tls:
                 cert = tls.getpeercert()
@@ -422,6 +439,7 @@ async def _tls_connect(
     sni: str,
     verify: bool = True,
     port: int = 443,
+    timeout: float = _DEFAULT_TLS_TIMEOUT_SEC,
 ) -> tuple[Verdict, dict[str, Any]]:
     """
     Attempt TLS handshake to ip:port with specified SNI.
@@ -438,12 +456,12 @@ async def _tls_connect(
     try:
         loop = asyncio.get_running_loop()
         result = await asyncio.wait_for(
-            loop.run_in_executor(None, _tls_handshake_blocking, ip, sni, port, ctx, t0),
-            timeout=_TLS_TIMEOUT + 2,
+            loop.run_in_executor(None, _tls_handshake_blocking, ip, sni, port, ctx, t0, timeout),
+            timeout=timeout + 2,
         )
     except TimeoutError:
         evidence["error"] = "outer_timeout"
-        # outer_timeout = the wrapper waited past _TLS_TIMEOUT+2 — the inner
+        # outer_timeout = the wrapper waited past ``timeout``+2 — the inner
         # blocking handshake never returned. Treat as BLOCKED with IP_DROPPED
         # method (same as a pure connect-stage SYN drop on the wire).
         return Verdict.BLOCKED, evidence

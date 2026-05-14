@@ -34,6 +34,7 @@ import tempfile
 from pathlib import Path
 
 from censprobe_core.models import LiveSnapshot
+from censprobe_core.utils import graceful_terminate
 
 from censprobe_listener._iptables_counter import (
     install_counter,
@@ -200,6 +201,21 @@ class MTProxyOrigResponder:
             "Starting mtproto-proxy (original C) on port %d with dd-secret",
             self.port,
         )
+        # Install the iptables PSH-ACK counter rule BEFORE spawn so a
+        # fast client (or the loopback self-test) that lands within the
+        # 2-second settle window doesn't fly past an uninstalled rule
+        # and produce a false zero-counter / BLOCKED verdict. Pre-2026-05-14
+        # the install ran after sleep(2.0), leaving a real race window.
+        await install_counter("OUTPUT", self._counter_rule_args(), self._counter_comment)
+        # NOTE: no with_privsep() wrapper here — unlike mtg/xray/sing-box/hysteria,
+        # mtproto-proxy performs its own privilege drop via ``-u nobody``
+        # (line 186 above). Stacking setpriv on top would leave the binary
+        # already running as nobody when it tries to setuid to nobody, which
+        # the C source treats as "already privileged-dropped, skip" — but
+        # also strips CAP_NET_BIND_SERVICE we may have kept for binding the
+        # operator-supplied -H port if it happens to be <1024. The binary's
+        # own drop is the load-bearing security boundary here; we leave it
+        # alone rather than risk a double-setuid edge case.
         self._proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
@@ -208,18 +224,18 @@ class MTProxyOrigResponder:
         # Settle window — mtproto-proxy is a bit slower to come up than mtg
         # because it parses proxy-multi.conf and resolves Telegram DC IPs.
         # 2 s should be enough on any container that boots in <5 s. If it
-        # exits early we surface the captured tail rather than a generic
-        # "responder failed".
+        # exits early we surface the captured tail and remove the counter
+        # rule we pre-installed so a failed-start doesn't leave orphans.
         await asyncio.sleep(2.0)
         if self._proc.returncode is not None:
             tail = b""
             if self._proc.stdout is not None:
                 with contextlib.suppress(Exception):
                     tail = await self._proc.stdout.read()
+            await remove_counter("OUTPUT", self._counter_rule_args())
             raise RuntimeError(f"mtproto-proxy failed to start: {tail.decode(errors='replace')}")
 
         self._log_task = asyncio.create_task(self._monitor_output())
-        await install_counter("OUTPUT", self._counter_rule_args(), self._counter_comment)
 
     async def stop(self) -> None:
         if self.unavailable:
@@ -253,17 +269,13 @@ class MTProxyOrigResponder:
 
         if self._proc is not None:
             logger.info("Stopping mtproto-proxy (original C) on port %d", self.port)
-            try:
-                self._proc.terminate()
-            except ProcessLookupError:
-                pass
-            try:
-                await asyncio.wait_for(self._proc.wait(), timeout=2.0)
-            except TimeoutError:
-                with contextlib.suppress(ProcessLookupError):
-                    self._proc.kill()
-                with contextlib.suppress(Exception):
-                    await self._proc.wait()
+            # Use the shared SIGTERM-then-SIGKILL helper so the shutdown
+            # semantics match mtg / xray / sing-box / hysteria. Hand-
+            # rolled terminate+wait+kill blocks here used to be a quiet
+            # drift surface (Sonar S5713 around ProcessLookupError
+            # vs OSError, missing reap on SIGKILL); the helper handles
+            # both correctly.
+            await graceful_terminate(self._proc, timeout=2.0)
             self._proc = None
 
         self._unlink_pruned_conf()

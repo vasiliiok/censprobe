@@ -18,14 +18,13 @@
         "wireguard_signature_blocked",
         "shadowsocks_active_probed",
         "vpn_data_phase_blocked",
-        "middlebox_http_manipulation",
-        "unknown"
+        "middlebox_http_manipulation"
       ],
       "title": "BlockingMethod",
       "type": "string"
     },
     "Verdict": {
-      "description": "Top-level verdict for a single test.\n\nEight categorical outcomes, each with a unique semantic role. The\nDNS/TCP-specific verdicts that previously duplicated ``BlockingMethod``\n(DNS_POISONING, DNS_BLOCKED, DOH_BLOCKED, IP_DROPPED, RST_INJECTED,\nREFUSED, YOUTUBE_SNI_THROTTLED) were consolidated in 2026-05 \u2014 the\n\"what kind of blocking\" detail now lives exclusively on\n:class:`BlockingMethod` while ``verdict`` stays at the categorical\nlevel.\n\nScore-effect contract (see :func:`scoring._ok_pct`):\n  * Counted as success: OK\n  * Counted as failure (denominator + not in numerator):\n    BLOCKED, HANDSHAKE_ONLY, ANOMALY, ERROR, THROTTLED\n  * Excluded from denominator entirely:\n    SERVER_REFUSED, INCONCLUSIVE",
+      "description": "Top-level verdict for a single test \u2014 eight categorical outcomes.\n\nScore-effect contract (see :func:`scoring._ok_pct`):\n  * Counted as success: OK\n  * Counted as failure (denominator + not in numerator):\n    BLOCKED, HANDSHAKE_ONLY, ANOMALY, ERROR, THROTTLED\n  * Excluded from denominator entirely:\n    SERVER_REFUSED, INCONCLUSIVE",
       "enum": [
         "OK",
         "BLOCKED",
