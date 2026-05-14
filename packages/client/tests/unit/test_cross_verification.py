@@ -100,13 +100,21 @@ class TestAgreedVerdict:
 
 
 class TestAsymmetricDpiDetection:
-    """``_agreed_verdict`` downgrades listener=OK + client=BLOCKED to
-    HANDSHAKE_ONLY when client error matches a "server replied but
-    return-path filtered" marker. Confirmed on MTS RU 2026-05-13:
-    listener sent the mtg faketls SERVER_HELLO (iptables PSH-ACK
-    counter ticked), but the client never received it — TSPU dropped
-    the server→client leg. From the operator's perspective the
-    protocol is NOT usable, so masking it as OK based purely on the
+    """``_agreed_verdict`` downgrades listener=OK/HANDSHAKE_ONLY +
+    client=BLOCKED to HANDSHAKE_ONLY when client error matches a
+    read-timeout-after-handshake marker. Two distinct shapes verified
+    in production pcaps:
+
+      * MTS RU 2026-05-13: listener sent the mtg faketls SERVER_HELLO
+        (iptables PSH-ACK counter ticked), but the client never
+        received it — TSPU dropped the server→client leg.
+      * Selectel→Vultr 2026-05-13: L4 handshake both directions,
+        ClientHello PSH-ACK retransmits never arrived at the listener
+        — c→s payload dropped, server never responded.
+
+    The listener cannot distinguish the two from its counters alone,
+    so the attribution note stays direction-agnostic. Either way the
+    protocol is NOT usable, and masking it as OK based purely on the
     listener counter would be wrong."""
 
     def test_listener_ok_client_blocked_with_welcome_timeout_is_handshake_only(
@@ -119,13 +127,13 @@ class TestAsymmetricDpiDetection:
         )
         assert final == Verdict.HANDSHAKE_ONLY
         assert "asymmetric" in note.lower()
-        assert "server replied" in note.lower()
+        assert "data plane filtered" in note.lower()
 
     def test_listener_ok_client_blocked_with_orig_respq_timeout_is_handshake_only(
         self,
     ) -> None:
         # mtproto_orig (C MTProxy obfuscated2 path) version of the
-        # same return-path-dropped signature.
+        # same read-timeout-after-handshake signature.
         final, note = _agreed_verdict(
             Verdict.BLOCKED,
             Verdict.OK,
@@ -157,18 +165,24 @@ class TestAsymmetricDpiDetection:
     def test_listener_handshake_only_client_blocked_with_timeout_fires_asymmetric_note(
         self,
     ) -> None:
-        # Verified live on MTS RU 2026-05-13: client@google-cloud probing
-        # listener@MTS for mtg faketls — listener's iptables OUTPUT
-        # counter ticked exactly once (SERVER_HELLO), no return traffic,
-        # so listener.finalize() landed HANDSHAKE_ONLY (handshake_count=1,
-        # data_transfer_ok=False). Client got
-        # ``welcome_read_timeout_record0`` because the TSPU on MTS
-        # ingress dropped the server→client return leg. The final
-        # verdict stays HANDSHAKE_ONLY, but the note must surface the
-        # asymmetric-DPI attribution instead of the generic
-        # ``client=BLOCKED`` fall-through, otherwise the operator
-        # cannot distinguish this from a regular HANDSHAKE_ONLY-with-
-        # client-error shape.
+        # Two pcap-verified shapes both land here:
+        #   * MTS RU 2026-05-13: client@google-cloud probing
+        #     listener@MTS — iptables OUTPUT counter ticked once
+        #     (SERVER_HELLO), no return traffic; listener.finalize()
+        #     landed HANDSHAKE_ONLY (handshake_count=1,
+        #     data_transfer_ok=False). Client got
+        #     ``welcome_read_timeout_record0`` (s→c leg dropped).
+        #   * Selectel→Vultr 2026-05-13: mtg saw the L4 accept()
+        #     (stream-has-started → handshake_count=1) but ClientHello
+        #     PSH-ACK retransmits never arrived; mtg never sent
+        #     SERVER_HELLO. Client got the same timeout marker
+        #     (c→s payload dropped). Listener cannot tell the two
+        #     shapes apart from its counters alone.
+        # Final verdict stays HANDSHAKE_ONLY; the note surfaces the
+        # direction-agnostic asymmetric-DPI attribution instead of the
+        # generic ``client=BLOCKED`` fall-through, otherwise the
+        # operator cannot distinguish this from a regular
+        # HANDSHAKE_ONLY-with-client-error shape.
         final, note = _agreed_verdict(
             Verdict.BLOCKED,
             Verdict.HANDSHAKE_ONLY,
@@ -176,7 +190,7 @@ class TestAsymmetricDpiDetection:
         )
         assert final == Verdict.HANDSHAKE_ONLY
         assert "asymmetric" in note.lower()
-        assert "server replied" in note.lower()
+        assert "data plane filtered" in note.lower()
 
     def test_listener_handshake_only_client_blocked_no_timeout_falls_through(
         self,

@@ -752,14 +752,16 @@ def _print_results(results: dict[str, ProbeResult], server_host: str) -> None:
         summary_color = "yellow"
     else:
         summary_color = "red"
-    console.print(
-        Panel.fit(
-            f"[{summary_color}]{ok_count}/{len(results)} protocols reached[/{summary_color}]\n"
-            f"[dim]Note: HANDSHAKE_ONLY means handshake succeeded but data phase blocked.\n"
-            f"This is expected in test mode — it still means the protocol is reachable.[/dim]",
-            title="Summary",
+    body = f"[{summary_color}]{ok_count}/{len(results)} protocols reached[/{summary_color}]"
+    has_handshake_only = any(r.verdict == Verdict.HANDSHAKE_ONLY for r in results.values())
+    if has_handshake_only:
+        body += (
+            "\n[dim]HANDSHAKE_ONLY: client completed the handshake but the "
+            "data-plane round-trip did not finish before the deadline. "
+            "See the per-protocol Note column on the cross-verified table "
+            "for the attribution.[/dim]"
         )
-    )
+    console.print(Panel.fit(body, title="Summary"))
 
 
 def _listener_verdict(snap: LiveSnapshot) -> Verdict:
@@ -824,21 +826,30 @@ def _agreed_verdict(
         either side, comment empty.
       * ``client_overconfident``: client says OK, listener says
         BLOCKED/HANDSHAKE_ONLY. Final = listener's (the strict
-        view). Canonical Docker Desktop netstack-spoof quirk where
-        ICMP/UDP responses appear locally even though nothing
-        reached the server.
-      * ``asymmetric_dpi`` (since 2026-05-13, broadened 2026-05-14):
+        view). Common on Docker Desktop where the host netstack
+        spoofs ICMP/UDP responses locally even though nothing
+        reached the server; also surfaces under host-firewall
+        artefacts and amneziawg-go local-loop quirks.
+      * ``asymmetric_dpi`` (since 2026-05-13, broadened 2026-05-14,
+        wording corrected 2026-05-13 after pcap audit):
         client says BLOCKED with a read-timeout-after-handshake error
         marker (see ``_ASYMMETRIC_DPI_ERROR_MARKERS``), and the
-        listener saw at least the handshake leave the wire — either
+        listener saw at least the L4 handshake leave the wire — either
         OK (the daemon completed the full server-side flow) or
-        HANDSHAKE_ONLY (the daemon emitted SERVER_HELLO but no
-        client reply ever came back because the return leg was
-        dropped). Both shapes mean "server replied, return path
-        filtered" — final = HANDSHAKE_ONLY with the explicit
-        attribution note. Verified on MTS RU 2026-05-13 for mtg
-        faketls: server PSH-ACK ticked, client got
-        ``welcome_read_timeout_record0``.
+        HANDSHAKE_ONLY (counter only saw the accept(), no application
+        bytes flowed). Both shapes mean "the data plane is filtered
+        in at least one direction" but the listener cannot reliably
+        distinguish ``c→s ClientHello dropped`` from ``s→c return
+        leg dropped`` from its counters alone — observed both shapes
+        in production:
+          * MTS RU 2026-05-13: server PSH-ACK iptables counter ticked,
+            client got ``welcome_read_timeout_record0`` → ``s→c``
+            return leg dropped.
+          * Selectel→Vultr 2026-05-13 (pcap-confirmed): L4 handshake
+            both directions, six 517-byte ``ClientHello`` retransmits
+            from client, zero application bytes arrived at mtg →
+            ``c→s`` payload dropped, server never responded.
+        Final = HANDSHAKE_ONLY with a direction-agnostic note.
       * ``listener_overconfident`` (other shapes): listener=OK,
         client=BLOCKED but with a NON-timeout error (e.g.
         ``connection_refused`` from a Docker-loopback artefact).
@@ -850,12 +861,11 @@ def _agreed_verdict(
     if client == Verdict.OK:
         return str(listener), "client overread (listener saw less)"
     # Asymmetric DPI: client got a read-timeout-after-handshake while
-    # the listener saw the server side complete its part of the dance
-    # (full OK, or HANDSHAKE_ONLY when the daemon got SERVER_HELLO out
-    # but the symmetric response never came back from the client). In
-    # both cases the network dropped the server→client return leg, so
-    # the protocol is NOT usable from this client vantage — final
-    # collapses to HANDSHAKE_ONLY with the same explicit note.
+    # the listener saw the L4 handshake. Two distinct shapes verified
+    # in pcap audits (see docstring); the listener counters cannot
+    # tell them apart, so the attribution stays direction-agnostic.
+    # Either way the protocol is NOT usable from this client vantage —
+    # final collapses to HANDSHAKE_ONLY with the explicit note.
     if (
         client == Verdict.BLOCKED
         and listener in (Verdict.OK, Verdict.HANDSHAKE_ONLY)
@@ -863,7 +873,7 @@ def _agreed_verdict(
     ):
         return (
             str(Verdict.HANDSHAKE_ONLY),
-            "asymmetric DPI: server replied but client did not receive",
+            "asymmetric DPI: handshake passed, data plane filtered",
         )
     if listener == Verdict.OK:
         return str(listener), "listener saw data the client missed"
@@ -908,6 +918,7 @@ def _print_cross_verification(
     }
 
     disagreements = 0
+    client_overread = 0
     for name, client_r in results.items():
         snap = snapshot.get(name)
         if snap is None:
@@ -919,6 +930,13 @@ def _print_cross_verification(
         final, note = _agreed_verdict(client_r.verdict, listener_v, client_r.error)
         if note:
             disagreements += 1
+            # ``client_overread`` is the only disagreement shape where the
+            # Docker-Desktop/loopback-spoofing hint adds real value — for
+            # ``asymmetric DPI …`` the per-row note already explains it
+            # and a generic "Docker Desktop" trailer is misleading
+            # (verified 2026-05-13 on ubuntu-server → ubuntu-server pcap).
+            if client_r.verdict == Verdict.OK and listener_v != Verdict.OK:
+                client_overread += 1
 
         client_v = client_r.verdict
         c_color = verdict_color.get(client_v, "white")
@@ -935,11 +953,16 @@ def _print_cross_verification(
     console.print("\n")
     console.print(table)
     if disagreements:
-        console.print(
-            f"[yellow]{disagreements} protocol(s) disagreed — "
-            "listener-side verdict wins. Common cause: client OS/Docker "
-            "Desktop netstack spoofing local responses.[/yellow]"
-        )
+        msg = f"[yellow]{disagreements} protocol(s) disagreed — listener-side verdict wins."
+        if client_overread:
+            msg += (
+                " Client-overread rows above typically come from a host "
+                "netstack that spoofs ICMP/UDP locally (Docker Desktop, "
+                "amneziawg-go loopback) — listener counters are the "
+                "ground truth."
+            )
+        msg += "[/yellow]"
+        console.print(msg)
 
 
 if __name__ == "__main__":
