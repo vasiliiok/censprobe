@@ -259,7 +259,7 @@
                     "type": "value",
                     "options": {
                       "dns_poisoning": {
-                        "text": "\ud83e\udda0 DNS poison",
+                        "text": "DNS poison",
                         "color": "orange"
                       }
                     }
@@ -268,7 +268,7 @@
                     "type": "value",
                     "options": {
                       "dns_blocked_nxdomain": {
-                        "text": "\u2716 NXDOMAIN",
+                        "text": "NXDOMAIN",
                         "color": "dark-orange"
                       }
                     }
@@ -277,7 +277,7 @@
                     "type": "value",
                     "options": {
                       "doh_blocked": {
-                        "text": "\ud83d\udd12 DoH blocked",
+                        "text": "DoH blocked",
                         "color": "light-orange"
                       }
                     }
@@ -286,7 +286,7 @@
                     "type": "value",
                     "options": {
                       "ip_dropped": {
-                        "text": "\ud83d\udca7 IP dropped",
+                        "text": "IP dropped",
                         "color": "semi-dark-red"
                       }
                     }
@@ -295,7 +295,7 @@
                     "type": "value",
                     "options": {
                       "tcp_rst_injection": {
-                        "text": "\u26a1 RST inject",
+                        "text": "RST inject",
                         "color": "red"
                       }
                     }
@@ -304,7 +304,7 @@
                     "type": "value",
                     "options": {
                       "tcp_rst_after_tls_ch": {
-                        "text": "\u26a1 RST after CH",
+                        "text": "RST after CH",
                         "color": "magenta"
                       }
                     }
@@ -313,7 +313,7 @@
                     "type": "value",
                     "options": {
                       "tcp_refused": {
-                        "text": "\u2715 refused",
+                        "text": "refused",
                         "color": "dark-red"
                       }
                     }
@@ -322,7 +322,7 @@
                     "type": "value",
                     "options": {
                       "tls_handshake_failure": {
-                        "text": "\ud83d\udd10 TLS fail",
+                        "text": "TLS fail",
                         "color": "purple"
                       }
                     }
@@ -331,7 +331,7 @@
                     "type": "value",
                     "options": {
                       "ech_blocked": {
-                        "text": "\ud83d\udd10 ECH blocked",
+                        "text": "ECH blocked",
                         "color": "light-purple"
                       }
                     }
@@ -340,7 +340,7 @@
                     "type": "value",
                     "options": {
                       "sni_throttling": {
-                        "text": "\ud83d\udc22 SNI throttle",
+                        "text": "SNI throttle",
                         "color": "dark-purple"
                       }
                     }
@@ -349,7 +349,7 @@
                     "type": "value",
                     "options": {
                       "quic_dropped": {
-                        "text": "\ud83d\udca7 QUIC dropped",
+                        "text": "QUIC dropped",
                         "color": "yellow"
                       }
                     }
@@ -358,7 +358,7 @@
                     "type": "value",
                     "options": {
                       "openvpn_signature_blocked": {
-                        "text": "\ud83d\udee1 OVPN sig",
+                        "text": "OVPN sig",
                         "color": "blue"
                       }
                     }
@@ -367,7 +367,7 @@
                     "type": "value",
                     "options": {
                       "wireguard_signature_blocked": {
-                        "text": "\ud83d\udee1 WG sig",
+                        "text": "WG sig",
                         "color": "light-blue"
                       }
                     }
@@ -376,7 +376,7 @@
                     "type": "value",
                     "options": {
                       "shadowsocks_active_probed": {
-                        "text": "\ud83d\udee1 SS probed",
+                        "text": "SS probed",
                         "color": "dark-blue"
                       }
                     }
@@ -385,7 +385,7 @@
                     "type": "value",
                     "options": {
                       "vpn_data_phase_blocked": {
-                        "text": "\ud83d\udce1 VPN data",
+                        "text": "VPN data",
                         "color": "purple"
                       }
                     }
@@ -394,7 +394,7 @@
                     "type": "value",
                     "options": {
                       "middlebox_http_manipulation": {
-                        "text": "\ud83e\udea4 middlebox",
+                        "text": "middlebox",
                         "color": "pink"
                       }
                     }
@@ -499,7 +499,7 @@
                     "type": "value",
                     "options": {
                       "dns_poisoning": {
-                        "text": "\ud83e\udda0 DNS poison",
+                        "text": "DNS poison",
                         "color": "orange"
                       }
                     }
@@ -508,7 +508,7 @@
                     "type": "value",
                     "options": {
                       "dns_blocked_nxdomain": {
-                        "text": "\u2716 NXDOMAIN",
+                        "text": "NXDOMAIN",
                         "color": "dark-orange"
                       }
                     }
@@ -517,7 +517,7 @@
                     "type": "value",
                     "options": {
                       "doh_blocked": {
-                        "text": "\ud83d\udd12 DoH blocked",
+                        "text": "DoH blocked",
                         "color": "light-orange"
                       }
                     }
@@ -526,7 +526,7 @@
                     "type": "value",
                     "options": {
                       "ip_dropped": {
-                        "text": "\ud83d\udca7 IP dropped",
+                        "text": "IP dropped",
                         "color": "semi-dark-red"
                       }
                     }
@@ -535,7 +535,7 @@
                     "type": "value",
                     "options": {
                       "tcp_rst_injection": {
-                        "text": "\u26a1 RST inject",
+                        "text": "RST inject",
                         "color": "red"
                       }
                     }
@@ -544,7 +544,7 @@
                     "type": "value",
                     "options": {
                       "tcp_rst_after_tls_ch": {
-                        "text": "\u26a1 RST after CH",
+                        "text": "RST after CH",
                         "color": "magenta"
                       }
                     }
@@ -553,7 +553,7 @@
                     "type": "value",
                     "options": {
                       "tcp_refused": {
-                        "text": "\u2715 refused",
+                        "text": "refused",
                         "color": "dark-red"
                       }
                     }
@@ -562,7 +562,7 @@
                     "type": "value",
                     "options": {
                       "tls_handshake_failure": {
-                        "text": "\ud83d\udd10 TLS fail",
+                        "text": "TLS fail",
                         "color": "purple"
                       }
                     }
@@ -571,7 +571,7 @@
                     "type": "value",
                     "options": {
                       "ech_blocked": {
-                        "text": "\ud83d\udd10 ECH blocked",
+                        "text": "ECH blocked",
                         "color": "light-purple"
                       }
                     }
@@ -580,7 +580,7 @@
                     "type": "value",
                     "options": {
                       "sni_throttling": {
-                        "text": "\ud83d\udc22 SNI throttle",
+                        "text": "SNI throttle",
                         "color": "dark-purple"
                       }
                     }
@@ -589,7 +589,7 @@
                     "type": "value",
                     "options": {
                       "quic_dropped": {
-                        "text": "\ud83d\udca7 QUIC dropped",
+                        "text": "QUIC dropped",
                         "color": "yellow"
                       }
                     }
@@ -598,7 +598,7 @@
                     "type": "value",
                     "options": {
                       "openvpn_signature_blocked": {
-                        "text": "\ud83d\udee1 OVPN sig",
+                        "text": "OVPN sig",
                         "color": "blue"
                       }
                     }
@@ -607,7 +607,7 @@
                     "type": "value",
                     "options": {
                       "wireguard_signature_blocked": {
-                        "text": "\ud83d\udee1 WG sig",
+                        "text": "WG sig",
                         "color": "light-blue"
                       }
                     }
@@ -616,7 +616,7 @@
                     "type": "value",
                     "options": {
                       "shadowsocks_active_probed": {
-                        "text": "\ud83d\udee1 SS probed",
+                        "text": "SS probed",
                         "color": "dark-blue"
                       }
                     }
@@ -625,7 +625,7 @@
                     "type": "value",
                     "options": {
                       "vpn_data_phase_blocked": {
-                        "text": "\ud83d\udce1 VPN data",
+                        "text": "VPN data",
                         "color": "purple"
                       }
                     }
@@ -634,7 +634,7 @@
                     "type": "value",
                     "options": {
                       "middlebox_http_manipulation": {
-                        "text": "\ud83e\udea4 middlebox",
+                        "text": "middlebox",
                         "color": "pink"
                       }
                     }
@@ -763,7 +763,7 @@
                     "type": "value",
                     "options": {
                       "dns_poisoning": {
-                        "text": "\ud83e\udda0 DNS poison",
+                        "text": "DNS poison",
                         "color": "orange"
                       }
                     }
@@ -772,7 +772,7 @@
                     "type": "value",
                     "options": {
                       "dns_blocked_nxdomain": {
-                        "text": "\u2716 NXDOMAIN",
+                        "text": "NXDOMAIN",
                         "color": "dark-orange"
                       }
                     }
@@ -781,7 +781,7 @@
                     "type": "value",
                     "options": {
                       "doh_blocked": {
-                        "text": "\ud83d\udd12 DoH blocked",
+                        "text": "DoH blocked",
                         "color": "light-orange"
                       }
                     }
@@ -790,7 +790,7 @@
                     "type": "value",
                     "options": {
                       "ip_dropped": {
-                        "text": "\ud83d\udca7 IP dropped",
+                        "text": "IP dropped",
                         "color": "semi-dark-red"
                       }
                     }
@@ -799,7 +799,7 @@
                     "type": "value",
                     "options": {
                       "tcp_rst_injection": {
-                        "text": "\u26a1 RST inject",
+                        "text": "RST inject",
                         "color": "red"
                       }
                     }
@@ -808,7 +808,7 @@
                     "type": "value",
                     "options": {
                       "tcp_rst_after_tls_ch": {
-                        "text": "\u26a1 RST after CH",
+                        "text": "RST after CH",
                         "color": "magenta"
                       }
                     }
@@ -817,7 +817,7 @@
                     "type": "value",
                     "options": {
                       "tcp_refused": {
-                        "text": "\u2715 refused",
+                        "text": "refused",
                         "color": "dark-red"
                       }
                     }
@@ -826,7 +826,7 @@
                     "type": "value",
                     "options": {
                       "tls_handshake_failure": {
-                        "text": "\ud83d\udd10 TLS fail",
+                        "text": "TLS fail",
                         "color": "purple"
                       }
                     }
@@ -835,7 +835,7 @@
                     "type": "value",
                     "options": {
                       "ech_blocked": {
-                        "text": "\ud83d\udd10 ECH blocked",
+                        "text": "ECH blocked",
                         "color": "light-purple"
                       }
                     }
@@ -844,7 +844,7 @@
                     "type": "value",
                     "options": {
                       "sni_throttling": {
-                        "text": "\ud83d\udc22 SNI throttle",
+                        "text": "SNI throttle",
                         "color": "dark-purple"
                       }
                     }
@@ -853,7 +853,7 @@
                     "type": "value",
                     "options": {
                       "quic_dropped": {
-                        "text": "\ud83d\udca7 QUIC dropped",
+                        "text": "QUIC dropped",
                         "color": "yellow"
                       }
                     }
@@ -862,7 +862,7 @@
                     "type": "value",
                     "options": {
                       "openvpn_signature_blocked": {
-                        "text": "\ud83d\udee1 OVPN sig",
+                        "text": "OVPN sig",
                         "color": "blue"
                       }
                     }
@@ -871,7 +871,7 @@
                     "type": "value",
                     "options": {
                       "wireguard_signature_blocked": {
-                        "text": "\ud83d\udee1 WG sig",
+                        "text": "WG sig",
                         "color": "light-blue"
                       }
                     }
@@ -880,7 +880,7 @@
                     "type": "value",
                     "options": {
                       "shadowsocks_active_probed": {
-                        "text": "\ud83d\udee1 SS probed",
+                        "text": "SS probed",
                         "color": "dark-blue"
                       }
                     }
@@ -889,7 +889,7 @@
                     "type": "value",
                     "options": {
                       "vpn_data_phase_blocked": {
-                        "text": "\ud83d\udce1 VPN data",
+                        "text": "VPN data",
                         "color": "purple"
                       }
                     }
@@ -898,7 +898,7 @@
                     "type": "value",
                     "options": {
                       "middlebox_http_manipulation": {
-                        "text": "\ud83e\udea4 middlebox",
+                        "text": "middlebox",
                         "color": "pink"
                       }
                     }
