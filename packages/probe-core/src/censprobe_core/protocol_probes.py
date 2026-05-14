@@ -38,6 +38,13 @@ logger = logging.getLogger(__name__)
 
 PROBE_TIMEOUT = 15.0
 
+# Black-hole sink for curl bodies in echo / throughput probes — we only
+# care about the wall-clock + bandwidth metrics, never the response body
+# (zero-byte payload for /ping, throwaway zeros for /throughput).
+# Hoisted to a constant (Sonar S1192) so the three curl invocations
+# below all reference the same literal.
+_CURL_BODY_SINK = "/dev/null"
+
 # Re-exported so existing callers that did `from
 # censprobe_core.protocol_probes import ECHO_PORTS` keep working — the
 # canonical home is censprobe_core.echo_ports.
@@ -505,7 +512,7 @@ async def proxy_echo(
         "curl",
         "-s",
         "-o",
-        "/dev/null",
+        _CURL_BODY_SINK,
         "--max-time",
         str(timeout),
         "-w",
@@ -587,7 +594,7 @@ async def proxy_throughput(
         "curl",
         "-s",
         "-o",
-        "/dev/null",
+        _CURL_BODY_SINK,
         "--max-time",
         str(n_timeout),
         # %{exitcode}: curl's own exit; %{speed_download}: bytes/sec
@@ -661,7 +668,7 @@ async def tunnel_throughput(
         "curl",
         "-s",
         "-o",
-        "/dev/null",
+        _CURL_BODY_SINK,
         "--max-time",
         str(n_timeout),
         # Same write-out tokens as proxy_throughput so the parse path
