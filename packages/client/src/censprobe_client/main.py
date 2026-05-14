@@ -309,6 +309,24 @@ async def _async_main(
             result = await factory(server_host, creds)
             results[name] = result
             _print_single_result(name, result)
+            # Structured INFO breakdown so a diagnostician reading the
+            # pasted log can verify each probe's verdict against the
+            # underlying timings. Decoupled from the operator-facing
+            # ``_print_single_result`` (Rich-formatted) so plain-text
+            # log dumps carry the same signal.
+            logger.info(
+                "probe[%s] verdict=%s elapsed=%.0fms rtt=%s throughput=%s error=%s",
+                name,
+                result.verdict,
+                result.elapsed_ms if result.elapsed_ms is not None else 0.0,
+                f"{result.rtt_ms:.0f}ms" if result.rtt_ms is not None else "n/a",
+                (
+                    f"{result.throughput_mbps:.2f}Mbps"
+                    if result.throughput_mbps is not None
+                    else "n/a"
+                ),
+                result.error or "none",
+            )
         except Exception as e:
             # ``logger.exception`` auto-attaches the traceback so we
             # don't have to thread the exception object into the
@@ -881,8 +899,16 @@ def _is_asymmetric_dpi_error(error: str | None) -> bool:
     return any(marker in error for marker in ASYMMETRIC_DPI_ERROR_MARKERS)
 
 
+_MTG_PROTOCOLS_FOR_DC_REACH: tuple[str, ...] = ("mtproto_proxy", "mtproto_proxy_alt")
+
+
 def _agreed_verdict(
-    client: Verdict, listener: Verdict, client_error: str | None = None
+    client: Verdict,
+    listener: Verdict,
+    client_error: str | None = None,
+    *,
+    protocol: str | None = None,
+    dc_reach_ok: bool | None = None,
 ) -> tuple[str, str]:
     """Combine client + listener verdicts into a final + comment.
 
@@ -941,6 +967,20 @@ def _agreed_verdict(
         and listener in (Verdict.OK, Verdict.HANDSHAKE_ONLY)
         and _is_asymmetric_dpi_error(client_error)
     ):
+        # Dual-vantage caveat (added 2026-05-14 after ya-b log review):
+        # the asymmetric-DPI shape is INDISTINGUISHABLE on the wire from
+        # "listener can't reach Telegram DCs to relay" (mtg accepts the
+        # client's FakeTLS WelcomePacket locally, then the inner resPQ
+        # never returns because there's no DC backend to forward to).
+        # If the listener's preflight already showed dc_reach_ok=False
+        # for an mtg-based protocol, prefer that explanation — it's the
+        # one with positive evidence (preflight TCP SYN to 149.154.0.0/16
+        # got dropped), not the speculative DPI attribution.
+        if protocol in _MTG_PROTOCOLS_FOR_DC_REACH and dc_reach_ok is False:
+            return (
+                str(Verdict.HANDSHAKE_ONLY),
+                "listener egress to Telegram DCs blocked — no DC relay possible",
+            )
         return (
             str(Verdict.HANDSHAKE_ONLY),
             "asymmetric DPI: handshake passed, data plane filtered",
@@ -997,7 +1037,29 @@ def _print_cross_verification(
             snap = LiveSnapshot()
 
         listener_v = _listener_verdict(snap)
-        final, note = _agreed_verdict(client_r.verdict, listener_v, client_r.error)
+        final, note = _agreed_verdict(
+            client_r.verdict,
+            listener_v,
+            client_r.error,
+            protocol=name,
+            dc_reach_ok=snap.dc_reach_ok,
+        )
+        # Structured INFO so the cross-verify decision is auditable from
+        # plain-text logs — the table goes through Rich and loses its
+        # column alignment in raw stdout dumps; the INFO line preserves
+        # the exact (client, listener, dc_reach_ok) → (final, note)
+        # mapping for after-the-fact review.
+        logger.info(
+            "cross-verify[%s] client=%s listener=%s dc_reach_ok=%s "
+            "client_error=%s → final=%s note=%s",
+            name,
+            client_r.verdict,
+            listener_v,
+            snap.dc_reach_ok,
+            client_r.error or "none",
+            final,
+            note or "agree",
+        )
         if note:
             disagreements += 1
             # ``client_overread`` is the only disagreement shape where the

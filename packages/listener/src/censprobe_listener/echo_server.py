@@ -24,6 +24,7 @@ import asyncio
 import contextlib
 import logging
 import time
+from collections.abc import Awaitable, Callable
 
 # Canonical home of the echo-port contract is probe-core (it is shared
 # with the client-side probe via :mod:`censprobe_core.protocol_probes`,
@@ -35,6 +36,20 @@ from censprobe_core.echo_ports import (
     SOCKS_ECHO_PORTS,
     TUN_ECHO_PORTS,
 )
+
+# Type alias for the wire-throughput byte-counter callback. Echo server
+# calls this before/after the /throughput body emission and computes
+# Mbps from the delta — see ``_serve_throughput`` for the rationale.
+ThroughputReader = Callable[[], Awaitable["int | None"]]
+
+# How long to poll the wire byte-counter after the body has been fully
+# pushed to the loopback writer. Counter ticks at link rate via TCP
+# backpressure (slow client = slow tick); we keep polling until two
+# consecutive 100 ms samples show no growth, with this hard ceiling
+# so a totally stuck transfer doesn't wedge the handler forever.
+_WIRE_THROUGHPUT_QUIESCE_MAX_SEC = 30.0
+_WIRE_THROUGHPUT_POLL_INTERVAL_SEC = 0.1
+_WIRE_THROUGHPUT_QUIESCE_SAMPLES = 3
 
 __all__ = ["ECHO_PORTS", "EchoServer"]
 
@@ -113,6 +128,15 @@ class EchoServer:
         # averaged, because the operator wants the most recent observation
         # not a smoothed history.
         self.throughput_mbps: dict[str, float | None] = dict.fromkeys(self.ports)
+        # Wire-throughput readers registered by SOCKS-tunneled responders
+        # (SS / VLESS+Reality / Hysteria2). Each callback reads the
+        # iptables byte counter on the tunnel binary's WAN-facing port —
+        # see SubprocessResponder.read_throughput_bytes. When present,
+        # the /throughput handler computes Mbps from counter delta rather
+        # than the loopback FIN-ACK time, eliminating the kernel-buffer-
+        # absorption inflation that made hysteria2 appear at 54 Mbps on
+        # a 5 Mbps cellular client uplink.
+        self._throughput_readers: dict[str, ThroughputReader] = {}
 
     async def start(self) -> None:
         # Bring up each port; on partial failure (e.g. one of the loopback
@@ -166,6 +190,25 @@ class EchoServer:
                 await old.wait_closed()
         self._servers[key] = srv
         logger.info("echo server: %s on %s:%d", proto, host, port)
+
+    def register_throughput_reader(self, proto: str, reader: ThroughputReader) -> None:
+        """Register a wire-throughput byte-counter reader for ``proto``.
+
+        Called by SubprocessResponder.start() after its iptables
+        accounting rule is installed. The /throughput handler picks up
+        the reader the next time a client probes; absence (or a reader
+        that returns None) signals "no wire-side counter" and falls back
+        to the loopback wait_closed timing.
+        """
+        self._throughput_readers[proto] = reader
+
+    def unregister_throughput_reader(self, proto: str) -> None:
+        """Drop the reader registered by :meth:`register_throughput_reader`.
+
+        Idempotent: missing-key removals are no-ops, so a half-failed
+        responder start that never registered won't crash on stop.
+        """
+        self._throughput_readers.pop(proto, None)
 
     async def add_tun_bind(self, proto: str, tun_ip: str) -> None:
         """Bind ``proto``'s echo port on a VPN responder's listener-side tun IP.
@@ -254,17 +297,32 @@ class EchoServer:
         request: bytes,
         writer: asyncio.StreamWriter,
     ) -> None:
-        """Stream N zero bytes back; measure transfer wall-clock duration.
+        """Stream N zero bytes back; measure transfer time on the WAN.
 
-        ``writer.wait_closed()`` is what actually meters the slow link:
-        for any payload that fits in the kernel send buffer, ``drain()``
-        returns immediately, but ``wait_closed`` blocks on the FIN-ACK
-        round-trip after the kernel has finished pushing the bytes
-        through the throttled tunnel. The measurement is approximate on
-        very fast / very small transfers (kernel buffer absorption hides
-        actual time-on-wire), but accurate within ~10% on anything that
-        takes more than ~1 second — which is exactly the regime where
-        we care about the number.
+        Two measurement methodologies live here:
+
+        1. **Wire-counter delta (preferred for SOCKS-tunneled protocols).**
+           When a responder has registered a wire byte-counter reader
+           (SS / VLESS+Reality / Hysteria-2 — :class:`SubprocessResponder`
+           installs an iptables OUTPUT --sport=<port> rule), we snapshot
+           the counter before emitting the body, push the body to the
+           loopback writer, and then poll the counter until consecutive
+           samples show no growth. ``Mbps = (bytes_delta * 8) / quiesce_time``
+           reflects the bytes that REALLY crossed the WAN — TCP back-pressure
+           from the slow client downlink throttles the tunnel binary's
+           WAN-write, which throttles the loopback-read, which delays the
+           counter ticks at line rate. Robust on cellular vantages where
+           the previous wait_closed methodology over-reported by 5–10×.
+
+        2. **wait_closed fallback (VPN protocols + no-iptables hosts).**
+           For OpenVPN / WireGuard / AmneziaWG the echo binds on the
+           listener-side tun IP, so loopback buffer absorption isn't a
+           factor — the bytes go through the kernel tun device, get
+           encapsulated, hit the WAN, and the FIN-ACK round-trip reflects
+           wire delivery. Also used when iptables wasn't available at
+           responder start (no CAP_NET_ADMIN, missing binary). Discards
+           anything that lands inside the kernel-buffer-absorption regime
+           (``_MIN_THROUGHPUT_DURATION_SEC`` / ``_MAX_PLAUSIBLE_MBPS``).
         """
         n = _parse_throughput_n(request)
         if n <= 0:
@@ -292,8 +350,17 @@ class EchoServer:
             b"Connection: close\r\n\r\n"
         )
 
+        reader = self._throughput_readers.get(proto)
+        bytes_before: int | None = None
+        if reader is not None:
+            try:
+                bytes_before = await reader()
+            except Exception as e:
+                logger.debug("throughput[%s] pre-read failed: %s", proto, e)
+                bytes_before = None
+
         t0 = time.monotonic()
-        duration: float | None = None
+        wait_closed_duration: float | None = None
         try:
             writer.write(headers)
             writer.write(body)
@@ -311,46 +378,158 @@ class EchoServer:
                     writer.wait_closed(),
                     timeout=_THROUGHPUT_RESPONSE_TIMEOUT_SEC,
                 )
-            duration = time.monotonic() - t0
+            wait_closed_duration = time.monotonic() - t0
         except TimeoutError:
-            duration = time.monotonic() - t0
+            wait_closed_duration = time.monotonic() - t0
         except Exception as e:
             logger.debug("throughput serve to %s aborted: %s", proto, e)
             return
 
-        if duration and duration > 0:
-            mbps = (n * 8) / duration / 1_000_000
-            # Listener-side throughput is fundamentally limited: the echo
-            # server sits on 127.0.0.1, behind the tunnel binary
-            # (sing-box/xray/hysteria) running on the same host. drain() and
-            # wait_closed() return when the loopback FIN-ACK is done — i.e.
-            # when the tunnel binary has buffered the bytes locally, NOT
-            # when they have egressed the tunnel and reached the operator.
-            # For payloads that fit in the kernel/loopback buffer (usually
-            # several MiB), the measurement collapses to "kernel buffer
-            # absorption time" and yields multi-Gbps numbers that have no
-            # physical meaning.  Discard the result when it lands in that
-            # regime so the dashboard / report carry an honest "not
-            # measured" instead of fabricated throughput.
-            if duration < _MIN_THROUGHPUT_DURATION_SEC or mbps > _MAX_PLAUSIBLE_MBPS:
-                logger.info(
-                    "throughput[%s]: discarded — %d bytes in %.3fs "
-                    "(would be %.0f Mbps; loopback buffer absorbed the write)",
-                    proto,
-                    n,
-                    duration,
-                    mbps,
-                )
-                self.throughput_mbps[proto] = None
+        # Try the wire-counter delta methodology first when available;
+        # fall back to wait_closed if the counter read failed mid-poll
+        # or the responder didn't register one. ``measured`` flag tells
+        # us "the counter was consulted and produced a final value
+        # (possibly None=no delta)" — distinct from "the counter chain
+        # was broken" where we want the legacy fallback.
+        if reader is not None and bytes_before is not None:
+            measured, mbps = await self._measure_throughput_via_counter(
+                proto=proto,
+                reader=reader,
+                bytes_before=bytes_before,
+                t0=t0,
+            )
+            if measured:
+                self.throughput_mbps[proto] = mbps
                 return
-            self.throughput_mbps[proto] = mbps
+            # Counter read returned None mid-poll — fall through to the
+            # wait_closed-based methodology below as a backup. The
+            # operator log already explained the fallback in the helper.
+
+        self._record_wait_closed_throughput(
+            proto=proto,
+            n=n,
+            duration=wait_closed_duration,
+        )
+
+    async def _measure_throughput_via_counter(
+        self,
+        *,
+        proto: str,
+        reader: ThroughputReader,
+        bytes_before: int,
+        t0: float,
+    ) -> tuple[bool, float | None]:
+        """Poll the WAN byte counter until quiesce; compute Mbps from delta.
+
+        Returns ``(measured, mbps)``:
+          * ``(True, mbps)`` — counter delivered a final delta; ``mbps``
+            is the computed value or ``None`` if the delta was zero
+            (legitimate "tunnel emitted no wire bytes" outcome — caller
+            stores None, does NOT fall back to wait_closed).
+          * ``(False, None)`` — the counter chain broke mid-poll
+            (iptables binary disappeared, ip6tables out of sync, etc).
+            Caller falls back to wait_closed timing.
+
+        The quiesce window is `_WIRE_THROUGHPUT_QUIESCE_SAMPLES ×
+        _WIRE_THROUGHPUT_POLL_INTERVAL_SEC` of no-growth — small enough
+        to avoid waiting for a phantom retransmit flurry, large enough
+        to ride out TCP's coalescing pauses on slow links. Hard ceiling
+        is ``_WIRE_THROUGHPUT_QUIESCE_MAX_SEC`` so a permanently stuck
+        transfer doesn't wedge the handler.
+        """
+        deadline = t0 + _WIRE_THROUGHPUT_QUIESCE_MAX_SEC
+        prev = bytes_before
+        no_growth = 0
+        last_total = bytes_before
+        last_t = t0
+        while time.monotonic() < deadline:
+            await asyncio.sleep(_WIRE_THROUGHPUT_POLL_INTERVAL_SEC)
+            try:
+                current = await reader()
+            except Exception as e:
+                logger.info(
+                    "throughput[%s] counter poll failed: %s — falling back",
+                    proto,
+                    e,
+                )
+                return False, None
+            if current is None:
+                logger.info(
+                    "throughput[%s] counter no longer available — falling back",
+                    proto,
+                )
+                return False, None
+            last_t = time.monotonic()
+            last_total = current
+            if current == prev:
+                no_growth += 1
+                if no_growth >= _WIRE_THROUGHPUT_QUIESCE_SAMPLES:
+                    break
+            else:
+                no_growth = 0
+                prev = current
+
+        delta_bytes = last_total - bytes_before
+        elapsed = last_t - t0
+        if delta_bytes <= 0 or elapsed <= 0:
             logger.info(
-                "throughput[%s]: %.2f Mbps (%d bytes in %.2fs)",
+                "throughput[%s] wire counter saw no delta over %.2fs — "
+                "tunnel binary didn't emit bytes (DPI silent-drop on the "
+                "WAN-side, or the probe ended before the kernel flushed). "
+                "Discarding the measurement.",
                 proto,
-                mbps,
+                elapsed,
+            )
+            return True, None
+        mbps = (delta_bytes * 8) / elapsed / 1_000_000
+        logger.info(
+            "throughput[%s]: %.2f Mbps (wire-counter: %d bytes over %.2fs) — "
+            "TCP backpressure throttled at line rate, methodology=iptables-delta",
+            proto,
+            mbps,
+            delta_bytes,
+            elapsed,
+        )
+        return True, mbps
+
+    def _record_wait_closed_throughput(
+        self,
+        *,
+        proto: str,
+        n: int,
+        duration: float | None,
+    ) -> None:
+        """Legacy wait_closed-based methodology — accurate for VPN protocols
+        (echo on tun-IP, real kernel encap) but unreliable for SOCKS-tunneled.
+
+        Kept as a fallback for: (a) VPN protocols where it's correct;
+        (b) hosts without CAP_NET_ADMIN where the iptables counter
+        install failed silently. Discards anything inside the kernel-
+        buffer-absorption regime so dashboards don't display fabricated
+        multi-Gbps values.
+        """
+        if not duration or duration <= 0:
+            return
+        mbps = (n * 8) / duration / 1_000_000
+        if duration < _MIN_THROUGHPUT_DURATION_SEC or mbps > _MAX_PLAUSIBLE_MBPS:
+            logger.info(
+                "throughput[%s]: discarded — %d bytes in %.3fs "
+                "(would be %.0f Mbps; loopback buffer absorbed the write)",
+                proto,
                 n,
                 duration,
+                mbps,
             )
+            self.throughput_mbps[proto] = None
+            return
+        self.throughput_mbps[proto] = mbps
+        logger.info(
+            "throughput[%s]: %.2f Mbps (%d bytes in %.2fs, methodology=wait_closed)",
+            proto,
+            mbps,
+            n,
+            duration,
+        )
 
     async def stop(self) -> None:
         # Snapshot the values then clear so an exception in wait_closed

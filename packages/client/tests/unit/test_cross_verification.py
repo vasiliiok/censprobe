@@ -207,3 +207,85 @@ class TestAsymmetricDpiDetection:
         )
         assert final == Verdict.HANDSHAKE_ONLY
         assert "client=BLOCKED" in note
+
+
+class TestDcReachOverridesAsymmetricDpi:
+    """Dual-RU vantage (ya-b run 2026-05-14): listener egress to Telegram
+    DCs is blocked at preflight (``dc_reach_ok=False``), but mtg emits
+    the WelcomePacket locally → iptables PSH+ACK ticks → listener
+    verdict OK. Client times out on resPQ → BLOCKED with the asymmetric-
+    DPI marker. The naive cross-verifier mis-attributes this to
+    client-side DPI; with the DC-reach signal threaded through, the
+    note becomes the actually-observed "listener can't relay to DC".
+    """
+
+    def test_mtg_proxy_with_dc_unreachable_renames_note(self) -> None:
+        final, note = _agreed_verdict(
+            Verdict.BLOCKED,
+            Verdict.OK,
+            client_error="orig_resPQ_len_timeout_post_init",
+            protocol="mtproto_proxy",
+            dc_reach_ok=False,
+        )
+        assert final == Verdict.HANDSHAKE_ONLY
+        assert "listener egress" in note.lower()
+        assert "telegram" in note.lower()
+        assert "asymmetric" not in note.lower()
+
+    def test_mtg_proxy_alt_with_dc_unreachable_renames_note(self) -> None:
+        # mtproto_proxy_alt uses the same mtg instance on an alternate
+        # port — the DC-reach override applies to both bind variants.
+        final, note = _agreed_verdict(
+            Verdict.BLOCKED,
+            Verdict.OK,
+            client_error="orig_resPQ_len_timeout_post_init",
+            protocol="mtproto_proxy_alt",
+            dc_reach_ok=False,
+        )
+        assert final == Verdict.HANDSHAKE_ONLY
+        assert "listener egress" in note.lower()
+
+    def test_mtg_proxy_with_dc_reachable_keeps_asymmetric_note(self) -> None:
+        # When DC IS reachable from the listener, the asymmetric-DPI
+        # attribution is the correct one — the listener can relay to
+        # the DC, so a client-side resPQ timeout really does mean the
+        # data plane is DPI-filtered (the MTS / Selectel→Vultr shape).
+        final, note = _agreed_verdict(
+            Verdict.BLOCKED,
+            Verdict.OK,
+            client_error="orig_resPQ_len_timeout_post_init",
+            protocol="mtproto_proxy",
+            dc_reach_ok=True,
+        )
+        assert final == Verdict.HANDSHAKE_ONLY
+        assert "asymmetric" in note.lower()
+        assert "listener egress" not in note.lower()
+
+    def test_non_mtg_protocol_ignores_dc_reach_signal(self) -> None:
+        # The override is scoped to mtg-based protocols. A shadowsocks
+        # asymmetric-DPI shape with dc_reach_ok=False must still report
+        # "asymmetric DPI" — DC reachability is irrelevant to SS.
+        final, note = _agreed_verdict(
+            Verdict.BLOCKED,
+            Verdict.OK,
+            client_error="orig_resPQ_len_timeout_post_init",
+            protocol="shadowsocks",
+            dc_reach_ok=False,
+        )
+        assert final == Verdict.HANDSHAKE_ONLY
+        assert "asymmetric" in note.lower()
+
+    def test_mtg_proxy_with_dc_reach_none_keeps_asymmetric_note(self) -> None:
+        # ``dc_reach_ok=None`` is the "no signal" path (preflight didn't
+        # run, or older listener). Default to asymmetric-DPI attribution
+        # to preserve pre-2026-05-14 behaviour on snapshots without the
+        # new field.
+        final, note = _agreed_verdict(
+            Verdict.BLOCKED,
+            Verdict.OK,
+            client_error="orig_resPQ_len_timeout_post_init",
+            protocol="mtproto_proxy",
+            dc_reach_ok=None,
+        )
+        assert final == Verdict.HANDSHAKE_ONLY
+        assert "asymmetric" in note.lower()

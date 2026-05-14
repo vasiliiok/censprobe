@@ -248,6 +248,25 @@ def _listener_udp_ports(enabled: list[str], ports_map: dict[str, int]) -> list[i
     return sorted(out)
 
 
+def _extract_dc_reach_ok(results: list[CheckResult]) -> bool | None:
+    """Pull the telegram-dc-reach pass/fail out of the preflight result list.
+
+    ``ok`` → True (at least one DC pingable from listener egress).
+    ``warn`` → False (0/N reachable — typical RU/BY vantages behind ТСПУ).
+    Anything else (``skip``, missing) → None (treat as "no signal" so we
+    don't override mtg verdicts on hosts where the check simply didn't run).
+    """
+    for r in results:
+        if r.name != "telegram-dc-reach":
+            continue
+        if r.status == "ok":
+            return True
+        if r.status == "warn":
+            return False
+        return None
+    return None
+
+
 def _print_preflight(results: list[CheckResult]) -> None:
     """Render pre-flight check results to the rich console.
 
@@ -389,11 +408,24 @@ async def _async_main(
     # before responders see them). Never aborts startup — operators may
     # not have permission to fix sysctls — but every WARN is loud.
     cfg = get_config()
-    _print_preflight(
-        await run_preflight(
-            udp_ports=_listener_udp_ports(cfg.protocols.enabled, cfg.protocols.ports)
-        )
+    preflight_results = await run_preflight(
+        udp_ports=_listener_udp_ports(cfg.protocols.enabled, cfg.protocols.ports)
     )
+    _print_preflight(preflight_results)
+    # Structured INFO summary mirroring the panel — operator-pasting
+    # logs to a diagnostician means the panel ANSI is stripped and the
+    # status-per-check signal would be lost. Emit one line per check
+    # with name + status + message so the same information survives a
+    # plain-text copy/paste.
+    for r in preflight_results:
+        logger.info("preflight[%s] %s: %s", r.status, r.name, r.message)
+    # Surface the telegram-dc-reach result as a kwarg threaded through
+    # to ``_finalize_protocol_result`` and the cross-verify snapshot.
+    # Listener can't relay client→DC if egress is blocked → mtg-based
+    # protocols cap at HANDSHAKE_ONLY instead of falsely promoting to OK
+    # when only the WelcomePacket leaked back to the client. ``None``
+    # when the check didn't run (e.g. unit-test stubs).
+    dc_reach_ok: bool | None = _extract_dc_reach_ok(preflight_results)
 
     # ── Step 1: Generate fresh credentials in memory ──────────────────────────
     # Each session gets its own one-time credential set; nothing is written
@@ -528,6 +560,13 @@ async def _async_main(
         # Keyed by protocol name; absence keeps the field None.
         if name in self_test_results:
             snap_dict["responder_self_test_ok"] = self_test_results[name]
+        # Telegram DC reachability from listener egress at preflight
+        # time. Only relevant to mtg-based protocols — the client
+        # cross-verifier reads it to distinguish "client DPI dropped
+        # the data plane" from "listener can't relay to DC". Other
+        # protocols leave the field None.
+        if name in ("mtproto_proxy", "mtproto_proxy_alt", "mtproto_orig"):
+            snap_dict["dc_reach_ok"] = dc_reach_ok
         final_snapshots[name] = snap_dict
     cred_server.commit_final_snapshots(final_snapshots)
     if echo_server is not None:
@@ -576,12 +615,30 @@ async def _async_main(
             name,
             responder,
             self_test_ok=self_test_results.get(name),
+            dc_reach_ok=dc_reach_ok if name in _MTG_PROTOCOLS else None,
         )
         pr.client_avg_throughput_mbps = client_throughput.get(name)
         if name == "mtproto_orig":
             override = _mtproto_orig_failure_note(responder, self_test_results.get(name))
             if override is not None:
                 pr.note = override
+        elif name in _MTG_PROTOCOLS and dc_reach_ok is False and pr.note is None:
+            # mtg accepted the FakeTLS WelcomePacket — that flips the
+            # iptables PSH+ACK counter to ≥1 → data_transfer_ok=True →
+            # verdict OK by default. But with DC egress blocked the inner
+            # Telegram protocol can never complete, so the OK is an
+            # artefact of WelcomePacket emission, not a working session.
+            # ``_finalize_protocol_result`` already capped the verdict at
+            # HANDSHAKE_ONLY for this case — surface the same context as
+            # a per-protocol note so it lands in the JSON report.
+            pr.note = (
+                "listener egress to Telegram DCs blocked at preflight "
+                "(telegram-dc-reach 0/N) — mtg accepted the FakeTLS "
+                "handshake locally but cannot relay to a real DC, so "
+                "client-side resPQ never arrives. The end-to-end protocol "
+                "is unusable from this listener vantage, independent of "
+                "any client-side DPI."
+            )
         results[name] = pr
 
     # Print final table
@@ -727,10 +784,14 @@ async def _stop_responders(responders: dict[str, Responder], timeout: float) -> 
         await asyncio.gather(*tasks.values(), return_exceptions=True)
 
 
+_MTG_PROTOCOLS: tuple[str, ...] = ("mtproto_proxy", "mtproto_proxy_alt")
+
+
 def _finalize_protocol_result(
     name: str,
     responder: Responder,
     self_test_ok: bool | None = None,
+    dc_reach_ok: bool | None = None,
 ) -> ProtocolResult:
     """Build ProtocolResult from a responder's post-stop snapshot.
 
@@ -743,6 +804,15 @@ def _finalize_protocol_result(
     client's cross-verification snapshot, but does NOT change the
     verdict. A wedged responder still produces BLOCKED — operator
     experience matches client experience.
+
+    ``dc_reach_ok`` is the preflight Telegram-DC-reach outcome. Only
+    consumed for ``_MTG_PROTOCOLS`` (mtproto_proxy / mtproto_proxy_alt):
+    when ``False`` (0/N reachable), the verdict is capped at
+    HANDSHAKE_ONLY even if data_transfer_ok=True — because the PSH+ACK
+    counter for these protocols can tick on just the WelcomePacket
+    emission and the inner Telegram protocol cannot complete without
+    DC relay. ``None`` is the no-signal value (check didn't run, or
+    not applicable to this protocol) — verdict logic is unchanged.
     """
     # Different responders expose the field under different historical
     # names; prefer `connection_count` (the canonical one) and fall back
@@ -771,6 +841,17 @@ def _finalize_protocol_result(
             avg_throughput = echo_server.throughput_mbps.get(name)
         except (AttributeError, TypeError):
             avg_throughput = None
+
+    # mtg-protocol DC-reach gate: with listener egress to Telegram DCs
+    # blocked, the iptables PSH+ACK counter can tick on just the
+    # WelcomePacket emission (mtg locally completes FakeTLS before
+    # attempting DC relay). data_transfer_ok=True alone is therefore
+    # over-optimistic — cap at HANDSHAKE_ONLY so the JSON report and the
+    # cross-verify table both reflect that the inner Telegram protocol
+    # never had a chance to complete. Other protocols (and the
+    # dc_reach_ok=True / dc_reach_ok=None paths) unchanged.
+    if name in _MTG_PROTOCOLS and dc_reach_ok is False:
+        data_ok = False
 
     pr = ProtocolResult(
         handshake_count=handshake_count,

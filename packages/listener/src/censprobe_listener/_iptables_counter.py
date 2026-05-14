@@ -114,12 +114,36 @@ async def install_counter(chain: str, rule_args: list[str], comment: str) -> boo
     return installed_anywhere
 
 
+async def read_counter_bytes(chain: str, comment: str) -> int:
+    """Sum the rule's BYTE counter (column 1) across iptables + ip6tables.
+
+    Counterpart to :func:`read_counter` which returns the packet count
+    (column 0). Bytes are what SOCKS-tunneled responders need to compute
+    wire-accurate throughput at the tunnel binary's WAN-facing port —
+    TCP backpressure from the slow client link forces the kernel to
+    drip-emit segments at line rate, so byte-count over time is the
+    authoritative wire-throughput metric.
+
+    Same iptables/ip6tables sum semantic as :func:`read_counter`. Returns
+    0 when iptables is unavailable or the rule isn't installed; callers
+    treat 0 as "no measurement" and fall back to wait_closed timing.
+    """
+    return await _scrape_counter_column(chain, comment, column=1)
+
+
 async def read_counter(chain: str, comment: str) -> int:
     """Sum the rule's pkt counter across iptables + ip6tables.
 
     Returning the sum (rather than the per-family pair) matches the
     "did ANY data segment from a real client tick the counter?"
     semantic the responders use to set ``data_transfer_ok``.
+    """
+    return await _scrape_counter_column(chain, comment, column=0)
+
+
+async def _scrape_counter_column(chain: str, comment: str, *, column: int) -> int:
+    """Shared scrape: read ``column`` (0=pkts, 1=bytes) summed across
+    iptables and ip6tables for the rule with ``--comment <comment>``.
     """
     total = 0
     for cmd in _IPTABLES_FAMILIES:
@@ -147,10 +171,10 @@ async def read_counter(chain: str, comment: str) -> int:
             if comment not in ln:
                 continue
             parts = ln.split()
-            if not parts:
+            if len(parts) <= column:
                 continue
             try:
-                total += int(parts[0])
+                total += int(parts[column])
             except ValueError:
                 continue
     return total

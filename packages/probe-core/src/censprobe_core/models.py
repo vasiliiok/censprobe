@@ -287,6 +287,18 @@ class LiveSnapshot(BaseModel):
     # ``live_snapshot()`` methods don't carry it so the fleet of
     # responders doesn't have to learn a new field.
     responder_self_test_ok: bool | None = None
+    # Listener-egress reachability to Telegram DCs (149.154.0.0/16:443)
+    # at preflight time. ``True`` = at least one DC pingable, ``False``
+    # = 0/N reachable (typical for RU/BY listener vantages behind ТСПУ),
+    # ``None`` = check not run or not relevant to this protocol.
+    # Populated only on mtproto_proxy / mtproto_proxy_alt / mtproto_orig
+    # snapshots — for these protocols the field distinguishes
+    # "client-side DPI filtered data plane" (dc_reach_ok=True, client
+    # times out on resPQ) from "listener can't relay to DC so no
+    # session is possible regardless of client path" (dc_reach_ok=False,
+    # same observable, totally different attribution). Other protocols
+    # leave it None.
+    dc_reach_ok: bool | None = None
 
 
 class ProtocolResult(BaseModel):

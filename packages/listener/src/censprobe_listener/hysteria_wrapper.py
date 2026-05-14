@@ -30,6 +30,9 @@ class HysteriaResponder(SubprocessResponder):
     # for sub-streams within an existing session, which double-counted the
     # same client and made the connection_count meaningless.
     handshake_log_pattern = "client connected"
+    # Hy2 = QUIC over UDP — drives the iptables-counter filter in the
+    # base class to ``--protocol udp`` instead of TCP/PSH+ACK.
+    transport = "udp"
 
     def __init__(
         self,

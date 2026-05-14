@@ -408,6 +408,15 @@ class CredServer:
                 # shut down the cred-server without truncating a polling
                 # client. Idempotent: ``Event.set()`` is no-op after first.
                 srv._snapshot_drained.set()
+                # Operator-facing INFO so a diagnostician reading logs
+                # can confirm the client successfully pulled the post-
+                # session counter state. ``self.client_address`` is
+                # (ip, port) per http.server convention.
+                logger.info(
+                    "snapshot served to %s (%d protocols)",
+                    self.client_address[0],
+                    len(final),
+                )
 
             def do_POST(self) -> None:  # noqa: N802
                 if self.path == "/stop":
