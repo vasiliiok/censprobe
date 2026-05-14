@@ -455,10 +455,11 @@ async def _tls_connect(
 
     try:
         loop = asyncio.get_running_loop()
-        result = await asyncio.wait_for(
-            loop.run_in_executor(None, _tls_handshake_blocking, ip, sni, port, ctx, t0, timeout),
-            timeout=timeout + 2,
-        )
+        # Python 3.11+ context manager (S7483) instead of asyncio.wait_for(..)
+        async with asyncio.timeout(timeout + 2):
+            result = await loop.run_in_executor(
+                None, _tls_handshake_blocking, ip, sni, port, ctx, t0, timeout
+            )
     except TimeoutError:
         evidence["error"] = "outer_timeout"
         # outer_timeout = the wrapper waited past ``timeout``+2 — the inner
@@ -509,7 +510,8 @@ async def _run_subprocess(
         stderr=asyncio.subprocess.PIPE if capture_stderr else asyncio.subprocess.DEVNULL,
     )
     try:
-        out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        async with asyncio.timeout(timeout):
+            out, err = await proc.communicate()
         return proc.returncode, out or b"", err or b""
     except TimeoutError:
         # Critical: kill + reap so we don't leak the child process.
@@ -862,10 +864,8 @@ async def _resolve_ip(domain: str) -> str | None:
     # 2) System resolver fallback — bounded so a hung resolver can't stall.
     try:
         loop = asyncio.get_running_loop()
-        infos = await asyncio.wait_for(
-            loop.getaddrinfo(domain, 443, type=socket.SOCK_STREAM),
-            timeout=5.0,
-        )
+        async with asyncio.timeout(5.0):
+            infos = await loop.getaddrinfo(domain, 443, type=socket.SOCK_STREAM)
         _LAST_RESOLVE_PATH[domain] = "system_resolver_fallback"
         return str(infos[0][4][0])
     except Exception:

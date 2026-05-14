@@ -190,7 +190,7 @@ def _check_dmesg_recent_drops() -> CheckResult:
     try:
         # ``dmesg --time-format reltime`` would be nice but isn't on
         # every distro; settle for raw and grep ourselves.
-        out = subprocess.run(  # noqa: S603 — fixed argv, no user input
+        out = subprocess.run(  # noqa: S603  # NOSONAR — fixed argv, no user input
             ["dmesg", "-T"],
             capture_output=True,
             text=True,

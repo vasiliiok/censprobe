@@ -476,9 +476,8 @@ async def _wait_port_listening(
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
-            _reader, writer = await asyncio.wait_for(
-                asyncio.open_connection(host, port), timeout=0.5
-            )
+            async with asyncio.timeout(0.5):
+                _reader, writer = await asyncio.open_connection(host, port)
             writer.close()
             # Reachability already proven by SYN-ACK; clean shutdown is
             # incidental and may race with peer-side close.
@@ -814,7 +813,8 @@ verb 1
             hs_ok = False
             while time.monotonic() - t0 < PROBE_TIMEOUT:
                 try:
-                    line_bytes = await asyncio.wait_for(proc_stdout.readline(), timeout=1.0)
+                    async with asyncio.timeout(1.0):
+                        line_bytes = await proc_stdout.readline()
                     if not line_bytes:
                         break
                     line = line_bytes.decode(errors="replace")
