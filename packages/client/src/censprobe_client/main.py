@@ -37,7 +37,7 @@ import click
 import pydantic
 from censprobe_core._log_format import format_cross_verify_line, format_probe_line
 from censprobe_core.config import load_config
-from censprobe_core.credentials_reader import parse_protocols_yaml
+from censprobe_core.credentials_reader import ProtocolCredentials, parse_protocols_yaml
 from censprobe_core.diagnostic_notes import (
     NOTE_ASYMMETRIC_DPI,
     NOTE_CLIENT_OVERREAD,
@@ -217,26 +217,21 @@ def main(
     _print_cross_verification(results, listener_snapshot)
 
 
-async def _async_main(
+async def _fetch_creds_or_exit(
     *,
     server_host: str,
     creds_port: int,
     creds_token: str,
     creds_cert_sha256: str,
-    no_jitter: bool,
-) -> tuple[dict[str, ProbeResult], dict[str, LiveSnapshot] | None]:
-    # ── Step 0: Load top-level config ────────────────────────────────────────
-    # proxy_throughput (called from the SS / VLESS+Reality / Hysteria-2
-    # probes after a successful echo) reads target_bytes / timeout_sec
-    # from cfg.throughput. Without this call get_config() raises and the
-    # broad except in the per-probe loop turns OK verdicts into ERROR.
-    try:
-        load_config(WORKSPACE)
-    except ValueError as e:
-        console.print(f"[red]Config error:[/red] {e}")
-        sys.exit(1)
+) -> ProtocolCredentials:
+    """Wrap _fetch_credentials with operator-facing error printing + sys.exit.
 
-    # ── Step 1: Fetch credentials from listener's one-shot HTTPS endpoint ────
+    Extracted from _async_main so the credential-fetch failure modes
+    (permanent, transient, schema, invalid-arg) don't pad the orchestrator's
+    cognitive complexity. Every error path exits the process with
+    actionable guidance — there's nothing the orchestrator could do
+    with the missing creds anyway.
+    """
     console.print(
         f"[dim]Fetching credentials from https://{server_host}:{creds_port}/creds...[/dim]"
     )
@@ -282,16 +277,20 @@ async def _async_main(
         sys.exit(1)
 
     console.print("[green]Credentials received[/green]")
+    return creds
 
-    # ── Step 2: Run probes in random order with jitter ────────────────────────
-    # Pull the list of enabled protocols from the credentials YAML.
-    # The listener writes `_protocols_enabled` into the body; the
-    # client mirrors that exact set so we never probe a protocol the
-    # listener didn't bring up. The field is required by
-    # parse_protocols_yaml — listener and client deploy in lockstep
-    # (same compose image), so a missing field is a schema-drift bug,
-    # not a back-compat scenario worth a silent fallback.
-    enabled_names = creds._protocols_enabled
+
+def _build_probe_jobs(enabled_names: list[str]) -> list[tuple[str, ProbeFactory]]:
+    """Resolve listener-advertised protocol names into (name, factory) pairs.
+
+    Pulls the list of enabled protocols from the credentials YAML. The
+    listener writes ``_protocols_enabled`` into the body; the client
+    mirrors that exact set so we never probe a protocol the listener
+    didn't bring up. The field is required by parse_protocols_yaml —
+    listener and client deploy in lockstep (same compose image), so a
+    missing field is a schema-drift bug, not a back-compat scenario
+    worth a silent fallback.
+    """
     valid_names = set(known_names())
     unknown = [n for n in enabled_names if n not in valid_names]
     if unknown:
@@ -314,7 +313,23 @@ async def _async_main(
 
     # Randomize order for opsec.
     random.shuffle(probe_jobs)
+    return probe_jobs
 
+
+async def _run_probe_loop(
+    probe_jobs: list[tuple[str, ProbeFactory]],
+    server_host: str,
+    creds: ProtocolCredentials,
+    *,
+    no_jitter: bool,
+) -> dict[str, ProbeResult]:
+    """Run each probe factory in sequence with opsec jitter between probes.
+
+    Extracted so per-probe try/except and the structured INFO logging
+    stay out of _async_main's CC budget. Returns a {name: result} map
+    — failures are coerced to Verdict.ERROR ProbeResults so the
+    cross-verify table downstream always has a row per protocol.
+    """
     results: dict[str, ProbeResult] = {}
     for i, (name, factory) in enumerate(probe_jobs):
         if not no_jitter and i > 0:
@@ -324,43 +339,85 @@ async def _async_main(
             await asyncio.sleep(random.uniform(0.5, 3.0))  # noqa: S311
 
         console.print(f"[dim]Probing {name}...[/dim]")
-        probe_t0 = time.monotonic()
-        try:
-            result = await factory(server_host, creds)
-            results[name] = result
-            _print_single_result(name, result)
-            # Structured INFO breakdown so a diagnostician reading the
-            # pasted log can verify each probe's verdict against the
-            # underlying timings. Decoupled from the operator-facing
-            # ``_print_single_result`` (Rich-formatted) so plain-text
-            # log dumps carry the same signal. Format lives in
-            # probe-core._log_format so a future column change ripples
-            # in one place.
-            logger.info(
-                "%s",
-                format_probe_line(
-                    name=name,
-                    verdict=result.verdict,
-                    elapsed_ms=result.elapsed_ms,
-                    rtt_ms=result.rtt_ms,
-                    throughput_mbps=result.throughput_mbps,
-                    error=result.error,
-                ),
-            )
-        except Exception as e:
-            # ``logger.exception`` auto-attaches the traceback so we
-            # don't have to thread the exception object into the
-            # format string (Sonar S8572). ``str(e)`` is still
-            # needed for the ProbeResult.error payload below.
-            # ``elapsed_ms`` is stamped here (not via the per-probe
-            # decorator) because exceptions bypass the decorator's
-            # post-return stamping.
-            logger.exception("Probe %s failed", name)
-            results[name] = ProbeResult(
-                verdict=Verdict.ERROR,
-                error=str(e),
-                elapsed_ms=(time.monotonic() - probe_t0) * 1000,
-            )
+        results[name] = await _run_one_probe(name, factory, server_host, creds)
+    return results
+
+
+async def _run_one_probe(
+    name: str,
+    factory: ProbeFactory,
+    server_host: str,
+    creds: ProtocolCredentials,
+) -> ProbeResult:
+    """Invoke ``factory`` and adapt failures into a ProbeResult.
+
+    ``elapsed_ms`` is stamped here (not via the per-probe decorator)
+    because exceptions bypass the decorator's post-return stamping —
+    we still want the operator to see how long a failing probe ran
+    before raising. Structured INFO line preserves the same shape as
+    successful probes so log-parsers can read both uniformly.
+    """
+    probe_t0 = time.monotonic()
+    try:
+        result = await factory(server_host, creds)
+        _print_single_result(name, result)
+        # Structured INFO breakdown so a diagnostician reading the
+        # pasted log can verify each probe's verdict against the
+        # underlying timings. Format lives in probe-core._log_format
+        # so a future column change ripples in one place.
+        logger.info(
+            "%s",
+            format_probe_line(
+                name=name,
+                verdict=result.verdict,
+                elapsed_ms=result.elapsed_ms,
+                rtt_ms=result.rtt_ms,
+                throughput_mbps=result.throughput_mbps,
+                error=result.error,
+            ),
+        )
+        return result
+    except Exception as e:
+        # ``logger.exception`` auto-attaches the traceback (Sonar S8572).
+        # ``str(e)`` is still needed for the ProbeResult.error payload.
+        logger.exception("Probe %s failed", name)
+        return ProbeResult(
+            verdict=Verdict.ERROR,
+            error=str(e),
+            elapsed_ms=(time.monotonic() - probe_t0) * 1000,
+        )
+
+
+async def _async_main(
+    *,
+    server_host: str,
+    creds_port: int,
+    creds_token: str,
+    creds_cert_sha256: str,
+    no_jitter: bool,
+) -> tuple[dict[str, ProbeResult], dict[str, LiveSnapshot] | None]:
+    # ── Step 0: Load top-level config ────────────────────────────────────────
+    # proxy_throughput (called from the SS / VLESS+Reality / Hysteria-2
+    # probes after a successful echo) reads target_bytes / timeout_sec
+    # from cfg.throughput. Without this call get_config() raises and the
+    # broad except in the per-probe loop turns OK verdicts into ERROR.
+    try:
+        load_config(WORKSPACE)
+    except ValueError as e:
+        console.print(f"[red]Config error:[/red] {e}")
+        sys.exit(1)
+
+    # ── Step 1: Fetch credentials from listener's one-shot HTTPS endpoint ────
+    creds = await _fetch_creds_or_exit(
+        server_host=server_host,
+        creds_port=creds_port,
+        creds_token=creds_token,
+        creds_cert_sha256=creds_cert_sha256,
+    )
+
+    # ── Step 2: Run probes in random order with jitter ────────────────────────
+    probe_jobs = _build_probe_jobs(creds._protocols_enabled)
+    results = await _run_probe_loop(probe_jobs, server_host, creds, no_jitter=no_jitter)
 
     # ── Step 3: Ask listener to stop, then fetch the final snapshot ──────────
     # The listener IS the ground truth: kernel-level counters, post-
