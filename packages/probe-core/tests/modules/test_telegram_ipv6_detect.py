@@ -74,9 +74,7 @@ class TestHasIpv6DefaultRoute:
         proc_route.write_text("incomplete line\n" + _route_line("0" * 32, "00", "eth0"))
         assert telegram_mod._has_ipv6_default_route() is True
 
-    def test_missing_proc_file_returns_false(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_missing_proc_file_returns_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # On hosts without /proc (BSD, Darwin CI, stripped containers),
         # conservatively report no v6 route.
         real_open = open
