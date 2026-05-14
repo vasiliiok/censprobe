@@ -404,41 +404,7 @@ def _cleanup_orphan_rules() -> CheckResult:
         if shutil.which(cmd) is None:
             skipped_families.append(cmd)
             continue
-        try:
-            listing = subprocess.run(  # noqa: S603 — fixed argv
-                [cmd, "-S"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-                check=False,
-            )
-        except (subprocess.SubprocessError, OSError):
-            continue
-        if listing.returncode != 0:
-            continue
-        for line in listing.stdout.splitlines():
-            # Lines starting with ``-A`` are rules in append form. Only
-            # ours carry the ``censprobe-`` comment marker.
-            if not line.startswith("-A "):
-                continue
-            if "censprobe-" not in line:
-                continue
-            # Convert ``-A CHAIN ...`` into ``-D CHAIN ...`` and re-run.
-            del_args = line.split()
-            del_args[0] = "-D"
-            try:
-                sub = subprocess.run(  # noqa: S603 — args derived from iptables -S
-                    [cmd, *del_args],
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                    check=False,
-                )
-            except (subprocess.SubprocessError, OSError):
-                continue
-            if sub.returncode == 0:
-                deleted_total += 1
-                logger.info("preflight: removed orphan %s rule (%s)", cmd, line[:80])
+        deleted_total += _delete_orphans_for_family(cmd)
 
     if deleted_total > 0:
         return CheckResult(
@@ -449,6 +415,85 @@ def _cleanup_orphan_rules() -> CheckResult:
     if len(skipped_families) == 2:
         return CheckResult("orphan-rules", "skip", "no iptables/ip6tables on PATH")
     return CheckResult("orphan-rules", "ok", "no orphan censprobe rules")
+
+
+def _delete_orphans_for_family(cmd: str) -> int:
+    """Scrape ``<cmd> -S`` for ``-A`` rules with our ``censprobe-`` marker
+    and delete each. Returns count of successfully-deleted rules.
+
+    Subprocess errors are swallowed — orphans are a hygiene concern, not
+    a hard failure. A missing/broken iptables means no orphans to clean;
+    next listener restart will retry. Per-family so the iptables/ip6tables
+    loop above stays linear and individual subprocess errors don't poison
+    the other family's scrape.
+    """
+    listing = _run_iptables_list(cmd)
+    if listing is None:
+        return 0
+    deleted = 0
+    for line in listing.splitlines():
+        if not _is_censprobe_rule_line(line):
+            continue
+        if _delete_one_rule(cmd, line):
+            deleted += 1
+            logger.info("preflight: removed orphan %s rule (%s)", cmd, line[:80])
+    return deleted
+
+
+def _run_iptables_list(cmd: str) -> str | None:
+    """``<cmd> -S`` → stdout or None on error / non-zero rc.
+
+    The returned string is the raw ``-A CHAIN ...`` block we parse in
+    the caller. Returning None vs "" distinguishes "subprocess broke"
+    from "subprocess succeeded but kernel has no rules" — both translate
+    to "no orphans to remove" downstream, so we collapse to None.
+    """
+    try:
+        listing = subprocess.run(  # noqa: S603  # NOSONAR — fixed argv
+            [cmd, "-S"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return None
+    if listing.returncode != 0:
+        return None
+    return listing.stdout
+
+
+def _is_censprobe_rule_line(line: str) -> bool:
+    """``-A CHAIN ... -m comment --comment "censprobe-..."`` — the shape
+    every responder uses for its accounting rule. Other lines (``-N``
+    custom-chain create, ``-P`` policy, plain ``-A`` without our marker)
+    are skipped.
+    """
+    return line.startswith("-A ") and "censprobe-" in line
+
+
+def _delete_one_rule(cmd: str, rule_line: str) -> bool:
+    """Convert ``-A CHAIN ...`` into ``-D CHAIN ...`` and re-run iptables.
+    Returns True iff the delete subprocess exited 0.
+
+    Args spliced from ``-S`` output via shlex-equivalent ``line.split()`` —
+    iptables emits its own escaped form, so this is safe (no operator
+    input flows here). The leading token is always ``-A`` which we flip
+    to ``-D`` in place.
+    """
+    del_args = rule_line.split()
+    del_args[0] = "-D"
+    try:
+        sub = subprocess.run(  # noqa: S603  # NOSONAR — args derived from iptables -S
+            [cmd, *del_args],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return False
+    return sub.returncode == 0
 
 
 async def _check_telegram_dc_reach(
