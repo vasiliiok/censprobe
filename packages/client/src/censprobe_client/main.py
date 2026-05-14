@@ -34,6 +34,7 @@ import time
 from pathlib import Path
 
 import click
+import pydantic
 from censprobe_core.config import load_config
 from censprobe_core.credentials_reader import parse_protocols_yaml
 from censprobe_core.models import LiveSnapshot, ProtocolResult, Verdict
@@ -492,8 +493,22 @@ def _fetch_snapshot(
         if isinstance(payload, dict) and "error" not in payload:
             try:
                 out[name] = LiveSnapshot.model_validate(payload)
-            except Exception as e:
-                logger.debug("invalid snapshot for %s: %s", name, e)
+            except pydantic.ValidationError as e:
+                # Listener/client version skew: a field rename, a new
+                # required field, or a type change in LiveSnapshot.
+                # Logged at WARNING (not DEBUG) so an operator pasting
+                # logs immediately sees the schema drift instead of
+                # puzzling over silently-empty snapshot cells.
+                logger.warning(
+                    "snapshot schema drift for %s — listener and client "
+                    "disagree on LiveSnapshot shape; falling back to "
+                    "empty snapshot. Validation errors: %s",
+                    name,
+                    [
+                        f"{'.'.join(str(part) for part in err['loc'])}: {err['msg']}"
+                        for err in e.errors()
+                    ],
+                )
                 out[name] = LiveSnapshot()
         else:
             out[name] = LiveSnapshot()

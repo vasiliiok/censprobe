@@ -37,6 +37,7 @@ from censprobe_core.models import LiveSnapshot
 from censprobe_core.utils import graceful_terminate
 
 from censprobe_listener._iptables_counter import (
+    InstallStatus,
     install_counter,
     read_counter,
     read_counter_sync,
@@ -101,6 +102,7 @@ class MTProxyOrigResponder:
         # the port so multiple mtproto_orig instances on the same host
         # (different ports) don't share a counter.
         self._counter_comment = f"censprobe-mtorig-{self.port}"
+        self._counter_status: InstallStatus = InstallStatus()
         # Set to True by start() when proxy-multi.conf's upstream IPs
         # are all unreachable from the listener's vantage — typically
         # an RU host where ТСПУ drops TCP/8888 to Telegram's proxy
@@ -206,7 +208,9 @@ class MTProxyOrigResponder:
         # 2-second settle window doesn't fly past an uninstalled rule
         # and produce a false zero-counter / BLOCKED verdict. Pre-2026-05-14
         # the install ran after sleep(2.0), leaving a real race window.
-        await install_counter("OUTPUT", self._counter_rule_args(), self._counter_comment)
+        self._counter_status = await install_counter(
+            "OUTPUT", self._counter_rule_args(), self._counter_comment
+        )
         # NOTE: no with_privsep() wrapper here — unlike mtg/xray/sing-box/hysteria,
         # mtproto-proxy performs its own privilege drop via ``-u nobody``
         # (line 186 above). Stacking setpriv on top would leave the binary
@@ -232,7 +236,8 @@ class MTProxyOrigResponder:
             if self._proc.stdout is not None:
                 with contextlib.suppress(Exception):
                     tail = await self._proc.stdout.read()
-            await remove_counter("OUTPUT", self._counter_rule_args())
+            await remove_counter("OUTPUT", self._counter_rule_args(), self._counter_status)
+            self._counter_status = InstallStatus()
             raise RuntimeError(f"mtproto-proxy failed to start: {tail.decode(errors='replace')}")
 
         self._log_task = asyncio.create_task(self._monitor_output())
@@ -259,7 +264,8 @@ class MTProxyOrigResponder:
         observed = await read_counter("OUTPUT", self._counter_comment)
         if observed > self.connection_count:
             self.connection_count = observed
-        await remove_counter("OUTPUT", self._counter_rule_args())
+        await remove_counter("OUTPUT", self._counter_rule_args(), self._counter_status)
+        self._counter_status = InstallStatus()
 
         if self._log_task is not None:
             self._log_task.cancel()

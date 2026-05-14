@@ -30,6 +30,7 @@ import asyncio
 import logging
 import shutil
 import subprocess
+from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,39 @@ logger = logging.getLogger(__name__)
 # arrives over the matching family; reads sum across families.
 _IPTABLES_FAMILIES = ("iptables", "ip6tables")
 
+
+@dataclass(frozen=True)
+class InstallStatus:
+    """Per-family iptables install outcome.
+
+    ``installed_families`` lists the family commands (e.g. ``("iptables",
+    "ip6tables")``) where the accounting rule is now present — could be
+    one, both, or neither. ``remove_counter`` consults this set to
+    remove ONLY the families it installed on, avoiding the prior bug
+    where a half-installed rule (iptables OK, ip6tables failed) would
+    cause cleanup to invoke ``ip6tables -D`` on a non-existent rule
+    and log spurious "rule does not exist" errors. Also makes
+    ``bool(status)`` meaningful: True iff at least one family is live.
+    """
+
+    installed_families: frozenset[str] = field(default_factory=frozenset)
+
+    def __bool__(self) -> bool:
+        return bool(self.installed_families)
+
+    @classmethod
+    def all(cls) -> InstallStatus:
+        """Pretend both families are installed.
+
+        Used by ``remove_counter`` callers that don't have an
+        :class:`InstallStatus` from the original :func:`install_counter`
+        call (e.g. cleanup-only paths, tests). Falls back to the
+        pre-2026-05 behaviour: attempt removal on every family and
+        suppress per-family errors.
+        """
+        return cls(frozenset(_IPTABLES_FAMILIES))
+
+
 # Per-call subprocess timeout. iptables operations on a healthy
 # kernel finish in ms; the only time they stall is when the kernel
 # is mid-NF-CONNTRACK exhaustion. Cap at 5 s so a stuck iptables
@@ -46,15 +80,23 @@ _IPTABLES_FAMILIES = ("iptables", "ip6tables")
 _IPTABLES_TIMEOUT_S = 5.0
 
 
-async def install_counter(chain: str, rule_args: list[str], comment: str) -> bool:
+async def install_counter(chain: str, rule_args: list[str], comment: str) -> InstallStatus:
     """Install the counter rule on iptables AND ip6tables.
 
-    Returns True if the rule is now in place on at least one
-    family (so the caller knows whether to expect non-zero reads).
+    Returns an :class:`InstallStatus` listing the families where the
+    rule is now in place — could be both, one, or neither. Callers
+    pass this back to :func:`remove_counter` for symmetric cleanup
+    (so a half-installed rule doesn't produce spurious
+    "rule does not exist" log noise on the family that never got it).
+
     Idempotent: uses ``-C`` to check before ``-A``, so re-installs
-    across listener restarts don't double-count.
+    across listener restarts don't double-count. A pre-existing rule
+    (left over from a crashed listener) counts as "installed" — we
+    leave it in place rather than re-adding and resetting the kernel
+    counter; ``_cleanup_orphan_rules`` already removed truly stale
+    rules at preflight before we got here.
     """
-    installed_anywhere = False
+    installed: set[str] = set()
     for cmd in _IPTABLES_FAMILIES:
         if shutil.which(cmd) is None:
             continue
@@ -75,13 +117,7 @@ async def install_counter(chain: str, rule_args: list[str], comment: str) -> boo
             logger.warning("%s -C %s for %r failed: %s", cmd, chain, comment, e)
             continue
         if check_rc == 0:
-            # Already present from a previous crashed listener — leave
-            # in place so the counter starts at zero (kernel resets
-            # counters on rule re-install via -R, but -C followed by
-            # nothing leaves the existing counter intact, which we want
-            # since `_cleanup_orphan_rules` in preflight already removed
-            # truly stale rules before we got here).
-            installed_anywhere = True
+            installed.add(cmd)
             continue
         try:
             add = await asyncio.wait_for(
@@ -110,8 +146,8 @@ async def install_counter(chain: str, rule_args: list[str], comment: str) -> boo
                 rc,
             )
             continue
-        installed_anywhere = True
-    return installed_anywhere
+        installed.add(cmd)
+    return InstallStatus(installed_families=frozenset(installed))
 
 
 async def read_counter_bytes(chain: str, comment: str) -> int:
@@ -180,7 +216,7 @@ async def _scrape_counter_column(chain: str, comment: str, *, column: int) -> in
     return total
 
 
-def read_counter_sync(chain: str, comment: str) -> int:
+def read_counter_sync(chain: str, comment: str, *, column: int = 0) -> int:
     """Synchronous twin of :func:`read_counter` for use from non-async
     contexts (specifically the cred-server's snapshot HTTP handler,
     which runs in a stdlib http.server thread without an event loop).
@@ -190,6 +226,12 @@ def read_counter_sync(chain: str, comment: str) -> int:
     async version would force the caller to bridge via
     ``asyncio.run_coroutine_threadsafe`` — adding a sync helper is
     less code and removes the cross-thread asyncio coupling.
+
+    ``column``: 0 = packets (default, matches async ``read_counter``);
+    1 = bytes (matches async ``read_counter_bytes``). Previously
+    hard-coded to column 0, which meant a future caller asking for
+    bytes would silently get packets — fixed to keep the sync/async
+    parity explicit.
 
     Errors are swallowed (returns 0) for the same best-effort reason
     as the async version: a missing iptables binary or a transient
@@ -213,24 +255,36 @@ def read_counter_sync(chain: str, comment: str) -> int:
             if comment not in ln:
                 continue
             parts = ln.split()
-            if not parts:
+            if len(parts) <= column:
                 continue
             try:
-                total += int(parts[0])
+                total += int(parts[column])
             except ValueError:
                 continue
     return total
 
 
-async def remove_counter(chain: str, rule_args: list[str]) -> None:
-    """Best-effort rule delete on both iptables and ip6tables.
+async def remove_counter(
+    chain: str,
+    rule_args: list[str],
+    status: InstallStatus | None = None,
+) -> None:
+    """Best-effort rule delete on the families that ``install_counter``
+    successfully populated.
 
-    Suppresses non-zero rc — if the rule doesn't exist (e.g. because
-    install failed earlier with no CAP_NET_ADMIN), we'd just be
-    deleting a phantom and the kernel rightly errors. Don't surface
-    that as a warning; it's the expected path.
+    Pass back the :class:`InstallStatus` returned by
+    :func:`install_counter` so this function only invokes ``-D`` on
+    families where the rule was actually installed — eliminates the
+    spurious "rule does not exist" log noise on the family that
+    silently failed at install time.
+
+    ``status=None`` is the back-compat path: try both families,
+    suppress per-family errors (the pre-2026-05 behaviour). Used by
+    cleanup-only call sites that don't have an InstallStatus handy
+    (e.g. ``preflight._cleanup_orphan_rules``).
     """
-    for cmd in _IPTABLES_FAMILIES:
+    families = status.installed_families if status is not None else _IPTABLES_FAMILIES
+    for cmd in families:
         if shutil.which(cmd) is None:
             continue
         try:

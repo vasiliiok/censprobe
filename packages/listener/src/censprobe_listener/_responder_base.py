@@ -45,6 +45,7 @@ from censprobe_core.protocol_registry import get_protocol
 from censprobe_core.utils import graceful_terminate, write_secret
 
 from censprobe_listener._iptables_counter import (
+    InstallStatus,
     install_counter,
     read_counter_bytes,
     remove_counter,
@@ -88,7 +89,7 @@ class SubprocessResponder(ABC):
         # when iptables is unavailable (no CAP_NET_ADMIN, alpine without
         # ip6tables, etc) — echo server then falls back to wait_closed.
         self._throughput_counter_comment = f"censprobe-throughput-{self.proto_label}-{self.port}"
-        self._throughput_counter_installed: bool = False
+        self._throughput_counter_status: InstallStatus = InstallStatus()
 
     # ── Subclass hooks ───────────────────────────────────────────────────────
 
@@ -162,7 +163,9 @@ class SubprocessResponder(ABC):
         self._log_task = asyncio.create_task(self._monitor_output())
         # Install the iptables byte-counter for wire-accurate throughput.
         # See _throughput_counter_comment docstring for the rationale.
-        self._throughput_counter_installed = await install_counter(
+        # The InstallStatus is stored so stop() can remove only the
+        # families that actually got the rule.
+        self._throughput_counter_status = await install_counter(
             "OUTPUT",
             self._throughput_counter_rule_args(),
             self._throughput_counter_comment,
@@ -172,7 +175,7 @@ class SubprocessResponder(ABC):
         # instead of timing wait_closed on loopback. Skipped when the
         # iptables install failed (no CAP_NET_ADMIN) — echo server then
         # falls back automatically.
-        if self._throughput_counter_installed and self.echo_server is not None:
+        if self._throughput_counter_status and self.echo_server is not None:
             self.echo_server.register_throughput_reader(
                 self.proto_label,
                 self.read_throughput_bytes,
@@ -182,7 +185,7 @@ class SubprocessResponder(ABC):
             self.proto_label,
             self.port,
             self.echo_port,
-            "wire" if self._throughput_counter_installed else "loopback-fallback",
+            "wire" if self._throughput_counter_status else "loopback-fallback",
         )
 
     async def stop(self) -> None:
@@ -197,12 +200,17 @@ class SubprocessResponder(ABC):
 
         # Remove the throughput counter BEFORE we kill the process — the
         # rule's counters are zeroed on delete, but echo_server already
-        # read them during the /throughput handler. Remove unconditionally
-        # so a half-installed rule on iptables (but not ip6tables, or
-        # vice versa) is still cleaned up.
-        if self._throughput_counter_installed:
-            await remove_counter("OUTPUT", self._throughput_counter_rule_args())
-            self._throughput_counter_installed = False
+        # read them during the /throughput handler. Passing the original
+        # InstallStatus means we only invoke ``-D`` on families where
+        # the rule actually went in — no spurious "rule does not exist"
+        # noise on a half-installed configuration.
+        if self._throughput_counter_status:
+            await remove_counter(
+                "OUTPUT",
+                self._throughput_counter_rule_args(),
+                self._throughput_counter_status,
+            )
+            self._throughput_counter_status = InstallStatus()
         # Drop the echo-server reader registration so a subsequent
         # /throughput probe doesn't try to read a now-removed iptables
         # rule. Idempotent — no-op if no reader was registered (counter
@@ -348,7 +356,7 @@ class SubprocessResponder(ABC):
         the loopback wait_closed timing. Otherwise returns the iptables
         + ip6tables sum so dual-stack clients account correctly.
         """
-        if not self._throughput_counter_installed:
+        if not self._throughput_counter_status:
             return None
         return await read_counter_bytes("OUTPUT", self._throughput_counter_comment)
 

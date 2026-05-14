@@ -25,6 +25,7 @@ from censprobe_core._privsep import setpriv_available, with_privsep
 from censprobe_core.models import LiveSnapshot
 
 from censprobe_listener._iptables_counter import (
+    InstallStatus,
     install_counter,
     read_counter,
     read_counter_sync,
@@ -54,6 +55,7 @@ class MTProxyResponder:
         # mtg instances on the same host (mtproto_proxy on TCP/443 +
         # mtproto_proxy_alt on TCP/8888) don't collide.
         self._counter_comment = f"censprobe-mtg-{self.port}"
+        self._counter_status: InstallStatus = InstallStatus()
         self._final_data_packets: int = 0
 
     async def start(self) -> None:
@@ -114,7 +116,9 @@ class MTProxyResponder:
             raise RuntimeError(f"mtg failed to start: {tail.decode(errors='replace')}")
 
         self._log_task = asyncio.create_task(self._monitor_output())
-        await install_counter("OUTPUT", self._counter_rule_args(), self._counter_comment)
+        self._counter_status = await install_counter(
+            "OUTPUT", self._counter_rule_args(), self._counter_comment
+        )
 
     async def stop(self) -> None:
         # Read the iptables counter BEFORE we tear down — the rule's
@@ -122,7 +126,8 @@ class MTProxyResponder:
         # across iptables + ip6tables so an IPv6 client also flips
         # ``data_transfer_ok``.
         self._final_data_packets = await read_counter("OUTPUT", self._counter_comment)
-        await remove_counter("OUTPUT", self._counter_rule_args())
+        await remove_counter("OUTPUT", self._counter_rule_args(), self._counter_status)
+        self._counter_status = InstallStatus()
 
         if self._log_task is not None:
             self._log_task.cancel()

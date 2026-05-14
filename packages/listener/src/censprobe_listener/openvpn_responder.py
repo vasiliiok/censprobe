@@ -20,6 +20,7 @@ from censprobe_core.models import LiveSnapshot
 from censprobe_core.utils import write_secret
 
 from censprobe_listener._iptables_counter import (
+    InstallStatus,
     install_counter,
     read_counter,
     read_counter_sync,
@@ -107,6 +108,7 @@ class OpenVPNResponder:
         # Comment that identifies our iptables INPUT counter rule. Per-port
         # so multiple OpenVPN responders on the same host don't collide.
         self._counter_comment = f"censprobe-ovpn-data-{self.port}"
+        self._counter_status: InstallStatus = InstallStatus()
 
     async def start(self) -> None:
         """Write config files and launch openvpn subprocess."""
@@ -165,7 +167,9 @@ verb 1
             tail = log_path.read_text(errors="replace") if log_path.exists() else "<no log>"
             raise RuntimeError(f"OpenVPN failed to start:\n{tail[-2000:]}")
         logger.info("OpenVPN responder started on UDP/%d (iface: %s)", self.port, _OVPN_SRV_IFACE)
-        await install_counter("INPUT", self._counter_rule_args(), self._counter_comment)
+        self._counter_status = await install_counter(
+            "INPUT", self._counter_rule_args(), self._counter_comment
+        )
         self._poll_task = asyncio.create_task(self._latch_auth_bytes())
         # Bind the OpenVPN /throughput endpoint on the listener-side tun
         # IP (10.200.0.1). The bind is gated on tun-up so the port is
@@ -325,7 +329,8 @@ verb 1
         # Sums across iptables + ip6tables so an IPv6 client also flips
         # ``data_transfer_ok``.
         self._final_data_packets = await read_counter("INPUT", self._counter_comment)
-        await remove_counter("INPUT", self._counter_rule_args())
+        await remove_counter("INPUT", self._counter_rule_args(), self._counter_status)
+        self._counter_status = InstallStatus()
         self._snapshot_taken = True
 
         if self._proc:
