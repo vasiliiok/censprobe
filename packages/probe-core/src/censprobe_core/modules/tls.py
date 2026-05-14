@@ -90,9 +90,13 @@ _AKAMAI_CIDRS = tuple(
     ipaddress.ip_network(c)
     for c in (
         "2.16.0.0/13",  # Akamai EU
-        "23.0.0.0/12",  # Akamai US
-        "104.64.0.0/10",  # Akamai NA (large block)
-        "184.24.0.0/13",  # Akamai
+        "23.0.0.0/12",  # Akamai US (23.0-23.15)
+        "23.32.0.0/11",  # Akamai NA (23.32-23.63) — verified rDNS *.akamaitechnologies.com
+        "92.122.0.0/15",  # Akamai EU (92.122-92.123) — Frankfurt edges seen for currenttime.tv
+        "104.64.0.0/10",  # Akamai NA (large block, 104.64-104.127)
+        "184.24.0.0/13",  # Akamai (184.24-184.31)
+        "184.50.0.0/15",  # Akamai (184.50-184.51) — AS20940 verified via rDNS
+        "184.84.0.0/14",  # Akamai EU (184.84-184.87) — Frankfurt edges for rferl.org / tiktok.com
     )
 )
 

@@ -38,7 +38,13 @@ class TestPickNeutralSni:
             "2.19.183.50",  # tiktok.com (Akamai)
             "2.21.240.78",  # related Akamai prefix
             "23.3.90.25",  # currenttime.tv via Akamai US
+            "23.36.162.204",  # tiktok.com via Akamai NA (23.32.0.0/11)
+            "92.123.133.187",  # currenttime.tv via Akamai EU Frankfurt
             "104.94.100.170",  # rferl.org via Akamai
+            "104.126.37.123",  # tiktok.com via Akamai 104.64/10
+            "184.50.55.55",  # Akamai NA (184.50.0.0/15)
+            "184.86.103.214",  # rferl.org via Akamai EU Frankfurt (184.84.0.0/14)
+            "184.86.103.223",  # tiktok.com via Akamai EU Frankfurt (184.84.0.0/14)
         ],
     )
     def test_akamai(self, ip: str) -> None:

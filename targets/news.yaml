@@ -14,8 +14,7 @@ targets:
       - https://novayagazeta.eu/
     expected_status: 200
     category: news
-    ech_advertised: true
-    notes: "Novaya Gazeta Europe, blocked in RU; advertises ECH via HTTPS-RR"
+    notes: "Novaya Gazeta Europe, blocked in RU. Cloudflare dropped ECH for this zone in 2026-05; HTTPS-RR has no ech= now. Re-enable ech_advertised once DoH returns ech= again."
 
   - domain: mediazona.ca
     urls:
