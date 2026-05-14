@@ -475,48 +475,7 @@ async def _async_main(
         sys.exit(1)
 
     # ── Step 3c: Post-responder preflight self-tests ─────────────────────────
-    # mtproto_orig is the only protocol with a self-test today — see
-    # ``run_mtproxy_orig_self_test`` for the rationale. Result is
-    # surfaced as a WARN in the preflight panel AND threaded into
-    # ``_finalize_protocol_result`` so a wedged-responder session
-    # downgrades BLOCKED → ERROR instead of falsely attributing a
-    # local responder bug to network censorship.
-    self_test_results: dict[str, bool] = {}
-    post_preflight: list[CheckResult] = []
-    if "mtproto_orig" in responders:
-        mt_orig = responders["mtproto_orig"]
-        if isinstance(mt_orig, SelfTestCapable) and mt_orig.unavailable:
-            # Responder deliberately skipped its subprocess launch
-            # because the C MTProxy binary's upstream Telegram fleet is
-            # unreachable from this vantage (typical RU host). Running
-            # the loopback self-test would just time out for 12 s and
-            # land in the same "False" branch — skip the wait and
-            # surface the diagnostic now.
-            alive = mt_orig.upstream_alive_count
-            total = mt_orig.upstream_total_count
-            post_preflight.append(
-                CheckResult(
-                    "mtproxy-orig-self-test",
-                    "warn",
-                    (
-                        f"skipped: mtproto-proxy not launched ({alive}/{total} "
-                        f"proxy-multi.conf upstreams reachable on TCP/8888). "
-                        f"mtproto_orig sessions WILL report BLOCKED — the "
-                        f"prune itself is positive evidence that Telegram's "
-                        f"DC fleet is unreachable from this vantage (typical "
-                        f"for RU hosts behind ТСПУ on TCP/8888 to "
-                        f"91.108.4.0/24 and 149.154.0.0/16)."
-                    ),
-                )
-            )
-            self_test_results["mtproto_orig"] = False
-        else:
-            st = await run_mtproxy_orig_self_test(
-                port=creds.mtproxy_orig_port,
-                secret_hex=creds.mtproxy_orig_secret,
-            )
-            post_preflight.append(st)
-            self_test_results["mtproto_orig"] = st.status == "ok"
+    self_test_results, post_preflight = await _run_post_responder_self_tests(responders, creds)
     if post_preflight:
         _print_preflight(post_preflight)
 
@@ -558,29 +517,7 @@ async def _async_main(
     # /snapshot then flips from 503 → 200 for the client's polling pull.
     # Doing this AFTER stop() makes the snapshot identical to what's
     # going into the JSON report — no more live-vs-final drift.
-    final_snapshots: dict[str, dict[str, Any]] = {}
-    for name, responder in responders.items():
-        try:
-            snap_dict = responder.live_snapshot().model_dump(mode="json")
-        except Exception as e:
-            snap_dict = {"error": f"{type(e).__name__}: {e}"}
-        # Inject the post-responder self-test result (computed in
-        # step 3c) into the committed snapshot so the client's
-        # cross-verification panel can apply the same BLOCKED→ERROR
-        # downgrade the listener will write into the JSON report.
-        # Keyed by protocol name; absence keeps the field None.
-        if name in self_test_results:
-            snap_dict["responder_self_test_ok"] = self_test_results[name]
-        # Telegram DC reachability from listener egress at preflight
-        # time. Only relevant to Telegram-flavoured protocols — the
-        # client cross-verifier reads it to distinguish "client DPI
-        # dropped the data plane" from "listener can't relay to DC".
-        # Other protocols leave the field None. Sourced from the
-        # protocol registry (``requires_telegram_dc``) so a future
-        # MTProto sibling is picked up automatically.
-        if requires_telegram_dc(name):
-            snap_dict["dc_reach_ok"] = dc_reach_ok
-        final_snapshots[name] = snap_dict
+    final_snapshots = _build_final_snapshots(responders, self_test_results, dc_reach_ok)
     cred_server.commit_final_snapshots(final_snapshots)
     if echo_server is not None:
         try:
@@ -622,23 +559,12 @@ async def _async_main(
     # absorption floor. Empty when an older client (no body) connects;
     # we keep ``avg_throughput_mbps`` as the fallback in that case.
     client_throughput = cred_server.client_throughput()
-    results: dict[str, ProtocolResult] = {}
-    for name, responder in responders.items():
-        pr = _finalize_protocol_result(
-            name,
-            responder,
-            self_test_ok=self_test_results.get(name),
-            dc_reach_ok=dc_reach_ok if is_mtg_protocol(name) else None,
-        )
-        pr.client_avg_throughput_mbps = client_throughput.get(name)
-        if name == "mtproto_orig":
-            override = _mtproto_orig_failure_note(responder, self_test_results.get(name))
-            if override is not None:
-                pr.note = override
-        # mtg dual-vantage note is set INSIDE _finalize_protocol_result —
-        # see the cap_at branch there. Centralising the rewrite next to
-        # the cap eliminates the prior risk of cap+note drift.
-        results[name] = pr
+    results = _finalize_session_results(
+        responders,
+        self_test_results=self_test_results,
+        dc_reach_ok=dc_reach_ok,
+        client_throughput=client_throughput,
+    )
 
     # Print final table
     _print_final_results(results, duration)
@@ -688,6 +614,138 @@ async def _async_main(
 # ─────────────────────────────────────────────────────────────────────────────
 # Responder lifecycle
 # ─────────────────────────────────────────────────────────────────────────────
+
+
+async def _run_post_responder_self_tests(
+    responders: dict[str, Responder],
+    creds: ProtocolCredentials,
+) -> tuple[dict[str, bool], list[CheckResult]]:
+    """Run startup loopback self-tests for protocols that ship one.
+
+    mtproto_orig is the only protocol with a self-test today — see
+    ``run_mtproxy_orig_self_test`` for the rationale. Result is
+    surfaced as a WARN in the preflight panel AND threaded into
+    ``_finalize_protocol_result`` so a wedged-responder session
+    downgrades BLOCKED → ERROR instead of falsely attributing a
+    local responder bug to network censorship.
+
+    Returns ``(self_test_results, post_preflight)``:
+      * ``self_test_results`` — ``{name: bool}`` for use by
+        ``_finalize_protocol_result``'s verdict logic.
+      * ``post_preflight`` — list of ``CheckResult`` to print AFTER
+        the responder-status table so the operator sees the prune /
+        self-test outcome alongside the per-protocol status rows.
+    """
+    self_test_results: dict[str, bool] = {}
+    post_preflight: list[CheckResult] = []
+    if "mtproto_orig" not in responders:
+        return self_test_results, post_preflight
+
+    mt_orig = responders["mtproto_orig"]
+    if isinstance(mt_orig, SelfTestCapable) and mt_orig.unavailable:
+        # Responder deliberately skipped its subprocess launch
+        # because the C MTProxy binary's upstream Telegram fleet is
+        # unreachable from this vantage (typical RU host). Running
+        # the loopback self-test would just time out for 12 s and
+        # land in the same "False" branch — skip the wait and
+        # surface the diagnostic now.
+        alive = mt_orig.upstream_alive_count
+        total = mt_orig.upstream_total_count
+        post_preflight.append(
+            CheckResult(
+                "mtproxy-orig-self-test",
+                "warn",
+                (
+                    f"skipped: mtproto-proxy not launched ({alive}/{total} "
+                    f"proxy-multi.conf upstreams reachable on TCP/8888). "
+                    f"mtproto_orig sessions WILL report BLOCKED — the "
+                    f"prune itself is positive evidence that Telegram's "
+                    f"DC fleet is unreachable from this vantage (typical "
+                    f"for RU hosts behind ТСПУ on TCP/8888 to "
+                    f"91.108.4.0/24 and 149.154.0.0/16)."
+                ),
+            )
+        )
+        self_test_results["mtproto_orig"] = False
+    else:
+        st = await run_mtproxy_orig_self_test(
+            port=creds.mtproxy_orig_port,
+            secret_hex=creds.mtproxy_orig_secret,
+        )
+        post_preflight.append(st)
+        self_test_results["mtproto_orig"] = st.status == "ok"
+    return self_test_results, post_preflight
+
+
+def _build_final_snapshots(
+    responders: dict[str, Responder],
+    self_test_results: dict[str, bool],
+    dc_reach_ok: bool | None,
+) -> dict[str, dict[str, Any]]:
+    """Capture per-responder live snapshots and decorate with cross-cutting fields.
+
+    Each responder's ``live_snapshot()`` carries the raw counter state
+    (handshakes, data_transfer_ok, optional rx_bytes). The cred-server
+    surfaces this via ``/snapshot`` for the client cross-verifier. We
+    decorate with:
+      * ``responder_self_test_ok`` — from Step 3c, so the client can
+        apply the same diagnostic-note logic the listener will write
+        into the JSON report.
+      * ``dc_reach_ok`` — only for protocols that need Telegram DC
+        reachability (per :func:`requires_telegram_dc`). Lets the
+        client tell ``client DPI dropped data plane`` apart from
+        ``listener can't relay to DC``.
+
+    Exceptions in ``live_snapshot()`` are swallowed and replaced with
+    an ``{"error": ...}`` placeholder — the client treats missing
+    counters as ``BLOCKED`` so a snapshot failure can't be confused
+    with a working protocol.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    for name, responder in responders.items():
+        try:
+            snap_dict = responder.live_snapshot().model_dump(mode="json")
+        except Exception as e:
+            snap_dict = {"error": f"{type(e).__name__}: {e}"}
+        if name in self_test_results:
+            snap_dict["responder_self_test_ok"] = self_test_results[name]
+        if requires_telegram_dc(name):
+            snap_dict["dc_reach_ok"] = dc_reach_ok
+        out[name] = snap_dict
+    return out
+
+
+def _finalize_session_results(
+    responders: dict[str, Responder],
+    *,
+    self_test_results: dict[str, bool],
+    dc_reach_ok: bool | None,
+    client_throughput: dict[str, float],
+) -> dict[str, ProtocolResult]:
+    """Build the per-protocol ``ProtocolResult`` for the JSON report.
+
+    Wraps :func:`_finalize_protocol_result` per responder + threads
+    in the client-side throughput (from the optional POST /stop body)
+    + applies the mtproto_orig failure-note override for the rare
+    non-RU "wedged daemon" shape. The mtg dual-vantage note is set
+    INSIDE _finalize_protocol_result via the cap_at branch — centralised
+    so cap and note can't drift apart.
+    """
+    results: dict[str, ProtocolResult] = {}
+    for name, responder in responders.items():
+        pr = _finalize_protocol_result(
+            name,
+            responder,
+            self_test_ok=self_test_results.get(name),
+            dc_reach_ok=dc_reach_ok if is_mtg_protocol(name) else None,
+        )
+        pr.client_avg_throughput_mbps = client_throughput.get(name)
+        if name == "mtproto_orig":
+            override = _mtproto_orig_failure_note(responder, self_test_results.get(name))
+            if override is not None:
+                pr.note = override
+        results[name] = pr
+    return results
 
 
 async def _start_responders(
