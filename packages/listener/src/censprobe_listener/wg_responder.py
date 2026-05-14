@@ -18,11 +18,15 @@ import logging
 import subprocess
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from censprobe_core.link_utils import delete_iface, rm_amneziawg_socket
 from censprobe_core.models import LiveSnapshot
 from censprobe_core.protocol_probes import AmneziaWGObfuscation
 from censprobe_core.utils import write_secret
+
+if TYPE_CHECKING:
+    from censprobe_listener.echo_server import EchoServer
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +124,7 @@ class WireGuardResponder:
         self._snapshot_taken: bool = False
         # Injected by the responder dispatch factory; used to bind the
         # /throughput endpoint on the listener-side tun IP after start().
-        self.echo_server: object | None = None
+        self.echo_server: EchoServer | None = None
 
     async def start(self) -> None:
         self._tmpdir = tempfile.TemporaryDirectory(prefix="censprobe_wg_")
@@ -299,7 +303,7 @@ class AmneziaWGResponder:
         self._snapshot_taken: bool = False
         # Injected by the responder dispatch factory; used to bind the
         # /throughput endpoint on the listener-side tun IP after start().
-        self.echo_server: object | None = None
+        self.echo_server: EchoServer | None = None
 
     async def start(self) -> None:
         self._tmpdir = tempfile.TemporaryDirectory(prefix="censprobe_awg_")

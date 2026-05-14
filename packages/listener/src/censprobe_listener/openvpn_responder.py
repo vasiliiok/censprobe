@@ -13,6 +13,7 @@ import contextlib
 import logging
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from censprobe_core.link_utils import delete_iface
 from censprobe_core.models import LiveSnapshot
@@ -24,6 +25,9 @@ from censprobe_listener._iptables_counter import (
     read_counter_sync,
     remove_counter,
 )
+
+if TYPE_CHECKING:
+    from censprobe_listener.echo_server import EchoServer
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +87,7 @@ class OpenVPNResponder:
         # EchoServer used to bind a /throughput endpoint on the listener-side
         # tun IP once openvpn has it up. Injected by the responder dispatch
         # factory; None means "no tun-bound throughput measurement".
-        self.echo_server: object | None = None
+        self.echo_server: EchoServer | None = None
         # Cached snapshot of connection/transfer state captured before teardown.
         self._final_handshake_count: int = 0
         self._final_bytes_received: int = 0
