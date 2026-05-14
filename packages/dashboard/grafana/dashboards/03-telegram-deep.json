@@ -177,30 +177,6 @@
                   {
                     "type": "value",
                     "options": {
-                      "IP_DROPPED": {
-                        "color": "red"
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "RST_INJECTED": {
-                        "color": "red"
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "REFUSED": {
-                        "color": "orange"
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
                       "THROTTLED": {
                         "color": "orange"
                       }

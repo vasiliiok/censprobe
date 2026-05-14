@@ -166,7 +166,7 @@
     {
       "id": 3,
       "title": "DoH Resolver Reachability",
-      "description": "Direct DoH endpoints (Cloudflare, Google, Mozilla). DOH_BLOCKED = \u0422\u0421\u041f\u0423 blocks the DoH endpoint itself; OK = encrypted DNS works.",
+      "description": "Direct DoH endpoints (Cloudflare, Google, Mozilla). BLOCKED with method=doh_blocked = \u0422\u0421\u041f\u0423 blocks the DoH endpoint itself; OK = encrypted DNS works.",
       "type": "table",
       "gridPos": {
         "x": 12,
@@ -219,14 +219,6 @@
                   {
                     "type": "value",
                     "options": {
-                      "DOH_BLOCKED": {
-                        "color": "red"
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
                       "BLOCKED": {
                         "color": "red"
                       }
@@ -264,7 +256,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT run.test_id AS server, test, target, verdict, method, notes FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE (run.test_id IN (${test_id:singlequote})) AND category = 'dns' AND verdict IN ('DNS_POISONING','DNS_BLOCKED','BLOCKED') ORDER BY verdict, target",
+          "rawSql": "SELECT run.test_id AS server, test, target, verdict, method, notes FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE (run.test_id IN (${test_id:singlequote})) AND category = 'dns' AND verdict IN ('BLOCKED') ORDER BY verdict, target",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -295,24 +287,8 @@
                   {
                     "type": "value",
                     "options": {
-                      "DNS_POISONING": {
-                        "color": "purple"
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "DNS_BLOCKED": {
-                        "color": "red"
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
                       "BLOCKED": {
-                        "color": "red"
+                        "color": "purple"
                       }
                     }
                   }
@@ -381,30 +357,6 @@
                     "options": {
                       "BLOCKED": {
                         "color": "red"
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "DNS_BLOCKED": {
-                        "color": "red"
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "DOH_BLOCKED": {
-                        "color": "red"
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "DNS_POISONING": {
-                        "color": "purple"
                       }
                     }
                   },

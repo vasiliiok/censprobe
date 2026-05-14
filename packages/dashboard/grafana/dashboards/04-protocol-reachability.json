@@ -110,24 +110,6 @@
                   {
                     "type": "value",
                     "options": {
-                      "IP_DROPPED": {
-                        "color": "red",
-                        "text": "\u2717 DROPPED"
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "REFUSED": {
-                        "color": "orange",
-                        "text": "REFUSED"
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
                       "HANDSHAKE_ONLY": {
                         "color": "yellow",
                         "text": "~ HS ONLY"

@@ -11,10 +11,10 @@ Three sequential downloads from speedtest.selectel.ru with different SNIs:
 
 Attribution: if only the trigger SNI runs at <25% of BOTH the correct and
 typo runs on the same uplink in the same run, that's SNI-level inspection
-(YOUTUBE_SNI_THROTTLED). The within-run relative comparison is robust to
-varying probe uplink — a baseline snapshot from a fast control VPS would
-mis-flag every narrow-uplink probe as throttled, which is why Method A
-(absolute baseline-derived threshold) was retired.
+(verdict=THROTTLED, method=sni_throttling). The within-run relative
+comparison is robust to varying probe uplink — a baseline snapshot from a
+fast control VPS would mis-flag every narrow-uplink probe as throttled,
+which is why Method A (absolute baseline-derived threshold) was retired.
 
 We use ``/100MB`` instead of ``/`` so the download runs long enough for the
 per-second throughput to dominate over RTT/TLS-handshake noise (the root
@@ -57,7 +57,7 @@ async def run_throttling_tests() -> list[TestResult]:
       * ``correct_sni`` / ``typo_sni`` / ``trigger_sni`` — the three
         SNIs sent to the same IP for the relative comparison;
       * ``bandwidth_ratio_threshold`` — the trigger/(min(correct,typo))
-        ratio below which the verdict flips to YOUTUBE_SNI_THROTTLED;
+        ratio below which the verdict flips to THROTTLED;
       * ``curl_timeout_sec`` — per-run curl timeout;
       * ``require_censoring_vantage`` — set to false to force the
         probe to run regardless of vantage country (useful when the
@@ -101,16 +101,16 @@ def _decide_method_b_verdict(
 ) -> Verdict:
     """Within-run relative bandwidth check for SNI throttling.
 
-    YOUTUBE_SNI_THROTTLED iff the trigger SNI is below ``threshold_ratio``
-    of BOTH the correct and typo SNIs on the same uplink in the same
-    run — i.e. the only plausible explanation is that the network
-    treats the trigger SNI differently. INCONCLUSIVE when any of the
-    three measurements failed (bw == 0); otherwise OK.
+    THROTTLED iff the trigger SNI is below ``threshold_ratio`` of BOTH
+    the correct and typo SNIs on the same uplink in the same run — i.e.
+    the only plausible explanation is that the network treats the
+    trigger SNI differently. INCONCLUSIVE when any of the three
+    measurements failed (bw == 0); otherwise OK.
     """
     if bw_correct <= 0 or bw_trigger <= 0 or bw_typo <= 0:
         return Verdict.INCONCLUSIVE
     if bw_trigger < bw_correct * threshold_ratio and bw_trigger < bw_typo * threshold_ratio:
-        return Verdict.YOUTUBE_SNI_THROTTLED
+        return Verdict.THROTTLED
     return Verdict.OK
 
 
@@ -172,7 +172,7 @@ async def _run_method_b_sni_probe(cfg: ThrottlingModuleConfig) -> TestResult | N
         cfg.bandwidth_ratio_threshold,
     )
 
-    method = BlockingMethod.SNI_THROTTLING if verdict == Verdict.YOUTUBE_SNI_THROTTLED else None
+    method = BlockingMethod.SNI_THROTTLING if verdict == Verdict.THROTTLED else None
 
     return TestResult(
         test="throttling_youtube_sni_probe_method_b",

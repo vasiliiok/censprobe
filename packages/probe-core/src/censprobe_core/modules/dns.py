@@ -9,13 +9,14 @@ Tests (per domain from targets/):
   5. Resolve via DoT: 1.1.1.1:853, 8.8.8.8:853
   6. Validate: TLS connect to returned IP + cert check (CERTainty approach)
 
-Verdicts:
-  OK               — all resolvers consistent, cert valid
-  DNS_POISONING    — system/ISP returns different IP with invalid cert
-  DNS_BLOCKED      — NXDOMAIN from ISP, correct from DoH
-  DOH_BLOCKED      — cannot connect to DoH endpoint
-  ANOMALY          — inconsistency without clear attribution
-  INCONCLUSIVE     — cert handshake failed, can't determine
+Outcomes (verdict + method):
+  OK                                          — all resolvers consistent, cert valid
+  BLOCKED + method=dns_poisoning              — system/ISP returns different IP
+                                                with invalid cert
+  BLOCKED + method=dns_blocked_nxdomain       — NXDOMAIN from ISP, correct from DoH
+  BLOCKED + method=doh_blocked                — cannot connect to DoH endpoint
+  ANOMALY                                     — inconsistency without clear attribution
+  INCONCLUSIVE                                — cert handshake failed, can't determine
 """
 
 from __future__ import annotations
@@ -257,7 +258,7 @@ def _build_nxdomain_result(domain: str, ev: _ResolverEvidence) -> TestResult:
             test=f"dns_{_slug(domain)}_system",
             category="dns",
             target=domain,
-            verdict=Verdict.DNS_BLOCKED,
+            verdict=Verdict.BLOCKED,
             method=BlockingMethod.DNS_BLOCKED_NXDOMAIN,
             evidence=common_evidence,
             confidence=0.9,
@@ -310,7 +311,7 @@ def _decide_dns_verdict(
             # cannot prove DNS poisoning per CERTainty PETS 2023 — the IP
             # could be authentic but serving a broken cert.
             return Verdict.ANOMALY, None, 0.4
-        return Verdict.DNS_POISONING, BlockingMethod.DNS_POISONING, 0.9
+        return Verdict.BLOCKED, BlockingMethod.DNS_POISONING, 0.9
     if cert_valid is True:
         return Verdict.OK, None, 0.9
     # cert_valid is None — connection failed for non-cert reasons

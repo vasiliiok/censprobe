@@ -244,7 +244,7 @@ async def _test_quic(host: str, port: int, name: str) -> TestResult:
                 test=name,
                 category="cloudflare",
                 target=f"udp://{host}:{port}",
-                verdict=Verdict.IP_DROPPED,
+                verdict=Verdict.BLOCKED,
                 method=BlockingMethod.QUIC_DROPPED,
                 evidence={
                     "error": "udp_timeout",
@@ -338,7 +338,8 @@ async def _test_warp_tcp(host: str, port: int, name: str) -> TestResult:
             test=name,
             category="cloudflare",
             target=f"tcp://{host}:{port}",
-            verdict=Verdict.REFUSED,
+            verdict=Verdict.BLOCKED,
+            method=BlockingMethod.TCP_REFUSED,
             evidence={"error": "connection_refused"},
         )
     except OSError as e:
@@ -634,12 +635,12 @@ async def _test_http(domain: str, url: str, expected_status: int) -> TestResult:
             r = await client.get(url)
         rtt_ms = (time.monotonic() - t0) * 1000
 
-        if r.status_code in (403, 451):
+        if r.status_code in (403, 429, 451):
             return TestResult(
                 test=test_name,
                 category="cloudflare",
                 target=url,
-                verdict=Verdict.GEOBLOCK_NOT_CENSORSHIP,
+                verdict=Verdict.SERVER_REFUSED,
                 rtt_ms=rtt_ms,
                 evidence={"status": r.status_code},
             )

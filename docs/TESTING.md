@@ -59,8 +59,8 @@ addopts = "-m 'not e2e and not network and not needs_wg and not needs_xray'"
 - **Конфиг-валидация** (`config.ProtocolsConfig._check_ports_cover_enabled`): missing port для enabled-протокола, orphan port-entry, неправильный диапазон.
 - **`validate_id`** (`utils.py`): `..`, `/`, `\x00`, U+200B, empty, max length — исключения с понятным сообщением.
 - **MTProto frame** (`modules.telegram._test_dc_port`): байт-точная сверка `b"\xef" + bytes([len//4]) + struct.pack("<qqi", 0, msg_id, 4)`.
-- **HTTP verdict** (`modules.http._verdict_from_response`): порядок проверок load-bearing — 200/403/451 + valid_tls → `GEOBLOCK_NOT_CENSORSHIP`, expected_status, body length.
-- **Throttling Method-B** (`modules.throttling._decide_method_b_verdict`): trigger < 0.25 × min(correct, typo) → `YOUTUBE_SNI_THROTTLED`; vantage не RU/BY → `INCONCLUSIVE`; деление на ноль.
+- **HTTP verdict** (`modules.http._verdict_from_response`): порядок проверок load-bearing — 200/403/429/451 + valid_tls → `SERVER_REFUSED`, expected_status, body length.
+- **Throttling Method-B** (`modules.throttling._decide_method_b_verdict`): trigger < 0.25 × min(correct, typo) → `THROTTLED`; vantage не RU/BY → `INCONCLUSIVE`; деление на ноль.
 - **TCP attribution** (`modules.tcp._majority`, `modules.tls._attribute_tls_failure`): tie-breaker, all-error, single result.
 - **AmneziaWG constraints** (`listener.credentials`): H1..H4 distinct + не 1..4, S1+56 ≠ S2.
 - **`creds_to_yaml` round-trip** + **`parse_protocols_yaml` fail-loud**: каждое операционное поле обязательно (метод шифра, SNI, AWG-обфускация, ключи); пропуск → `ValueError` с понятным сообщением.

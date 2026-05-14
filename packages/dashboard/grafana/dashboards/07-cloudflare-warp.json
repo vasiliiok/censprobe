@@ -115,7 +115,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT test, target, verdict, rtt_ms FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id IN (${test_id:singlequote}) AND category = 'cloudflare' AND test IN ('cloudflare_warp_engage_api','cloudflare_warp_connectivity_check','cloudflare_warp_zt_orchestration','cloudflare_warp_masque_anycast_tcp','cloudflare_warp_wg_anycast_tcp') ORDER BY test",
+          "rawSql": "SELECT test, target, verdict, rtt_ms FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id IN (${test_id:singlequote}) AND category = 'cloudflare' AND test IN ('cloudflare_warp_connectivity_check','cloudflare_warp_engage_api','cloudflare_warp_masque_anycast_tcp','cloudflare_warp_wg_anycast_tcp','cloudflare_warp_zt_orchestration') ORDER BY test",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -156,14 +156,6 @@
                     "options": {
                       "BLOCKED": {
                         "color": "red"
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "REFUSED": {
-                        "color": "orange"
                       }
                     }
                   },
@@ -246,22 +238,6 @@
                   {
                     "type": "value",
                     "options": {
-                      "IP_DROPPED": {
-                        "color": "red"
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "REFUSED": {
-                        "color": "orange"
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
                       "THROTTLED": {
                         "color": "orange"
                       }
@@ -286,7 +262,7 @@
                   {
                     "type": "value",
                     "options": {
-                      "GEOBLOCK_NOT_CENSORSHIP": {
+                      "SERVER_REFUSED": {
                         "color": "purple"
                       }
                     }
@@ -522,7 +498,7 @@
                   {
                     "type": "value",
                     "options": {
-                      "GEOBLOCK_NOT_CENSORSHIP": {
+                      "SERVER_REFUSED": {
                         "color": "purple"
                       }
                     }

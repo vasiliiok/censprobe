@@ -443,7 +443,10 @@ async def _tls_connect(
         )
     except TimeoutError:
         evidence["error"] = "outer_timeout"
-        return Verdict.IP_DROPPED, evidence
+        # outer_timeout = the wrapper waited past _TLS_TIMEOUT+2 — the inner
+        # blocking handshake never returned. Treat as BLOCKED with IP_DROPPED
+        # method (same as a pure connect-stage SYN drop on the wire).
+        return Verdict.BLOCKED, evidence
     except Exception as e:
         evidence["error"] = str(e)
         return Verdict.ERROR, evidence
@@ -463,7 +466,7 @@ def _attribute_tls_failure(verdict: Verdict, evidence: dict[str, Any]) -> Blocki
     err = evidence.get("error", "")
     if err == "connection_reset":
         return BlockingMethod.TCP_RST_AFTER_TLS_CH
-    if err == "timeout":
+    if err in ("timeout", "outer_timeout"):
         return BlockingMethod.IP_DROPPED
     if err in ("ssl_error", "cert_verification_failed"):
         return BlockingMethod.TLS_HANDSHAKE_FAILURE

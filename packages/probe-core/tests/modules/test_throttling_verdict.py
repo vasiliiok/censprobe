@@ -1,14 +1,13 @@
 """
 Tests for ``modules.throttling._decide_method_b_verdict``.
 
-Pure relative-bandwidth verdict. The function decides
-YOUTUBE_SNI_THROTTLED iff the trigger SNI is below ``threshold_ratio``
-of BOTH the correct and typo SNIs measured in the same run on the same
-uplink. Three branches:
+Pure relative-bandwidth verdict. The function decides THROTTLED iff
+the trigger SNI is below ``threshold_ratio`` of BOTH the correct and
+typo SNIs measured in the same run on the same uplink. Three branches:
 
   1. Any zero / missing measurement  → INCONCLUSIVE.
   2. Trigger < ratio × correct AND
-     trigger < ratio × typo          → YOUTUBE_SNI_THROTTLED.
+     trigger < ratio × typo          → THROTTLED.
   3. Otherwise                       → OK.
 """
 
@@ -42,9 +41,7 @@ class TestThrottlingDetected:
     def test_trigger_below_both_thresholds(self) -> None:
         # correct=100, typo=80 → 25% × 100 = 25, 25% × 80 = 20. Trigger=10
         # is below both → throttled.
-        assert (
-            _decide_method_b_verdict(100.0, 10.0, 80.0, THRESHOLD) == Verdict.YOUTUBE_SNI_THROTTLED
-        )
+        assert _decide_method_b_verdict(100.0, 10.0, 80.0, THRESHOLD) == Verdict.THROTTLED
 
     def test_at_exact_boundary_not_throttled(self) -> None:
         # `<` not `<=` — equality at the threshold is OK, not throttled.
@@ -73,5 +70,5 @@ class TestThresholdParameter:
         # Threshold 0.10 → trigger must be below 10% of both controls.
         # 12 < 25% × 100 = 25 (yes), 12 < 25% × 100 = 25 (yes) → THROTTLED at 0.25
         # 12 < 10% × 100 = 10 (no)              → OK at 0.10
-        assert _decide_method_b_verdict(100.0, 12.0, 100.0, 0.25) == Verdict.YOUTUBE_SNI_THROTTLED
+        assert _decide_method_b_verdict(100.0, 12.0, 100.0, 0.25) == Verdict.THROTTLED
         assert _decide_method_b_verdict(100.0, 12.0, 100.0, 0.10) == Verdict.OK

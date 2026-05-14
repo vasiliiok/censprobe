@@ -101,7 +101,7 @@
     {
       "id": 2,
       "title": "QUIC Test Results",
-      "description": "Raw UDP 443 QUIC probe results. IP_DROPPED = TSPU silently drops UDP 443. OK = UDP 443 passes, HTTP3 and WARP MASQUE are viable.",
+      "description": "Raw UDP 443 QUIC probe results. BLOCKED with method=ip_dropped = TSPU silently drops UDP 443. OK = UDP 443 passes, HTTP3 and WARP MASQUE are viable.",
       "type": "table",
       "gridPos": {
         "x": 5,
@@ -154,7 +154,7 @@
                   {
                     "type": "value",
                     "options": {
-                      "IP_DROPPED": {
+                      "BLOCKED": {
                         "color": "red"
                       }
                     }
@@ -303,14 +303,6 @@
               {
                 "id": "mappings",
                 "value": [
-                  {
-                    "type": "value",
-                    "options": {
-                      "IP_DROPPED": {
-                        "color": "red"
-                      }
-                    }
-                  },
                   {
                     "type": "value",
                     "options": {

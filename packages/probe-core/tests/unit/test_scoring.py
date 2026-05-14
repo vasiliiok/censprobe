@@ -92,13 +92,62 @@ class TestOkPct:
         ]
         assert _ok_pct(results) == pytest.approx(50.0)
 
-    def test_inconclusive_does_not_count_as_ok(self) -> None:
+    def test_inconclusive_excluded_from_denominator(self) -> None:
+        # NON_SCORING_VERDICTS = {SERVER_REFUSED, INCONCLUSIVE} — these
+        # are filtered out before the percent is computed. With 1 OK and
+        # 2 INCONCLUSIVE, the scoring-relevant pool is just [OK] → 100%.
+        # The pre-refactor behaviour treated INCONCLUSIVE as failure
+        # (1/3 ≈ 33.3%), which falsely penalised hosts whose only
+        # non-OK rows were "test not applicable" (no IPv6, no ECH).
         results = [
             _make_result(Verdict.OK),
             _make_result(Verdict.INCONCLUSIVE),
             _make_result(Verdict.INCONCLUSIVE),
         ]
-        assert _ok_pct(results) == pytest.approx(100.0 / 3)
+        assert _ok_pct(results) == pytest.approx(100.0)
+
+    def test_server_refused_excluded_from_denominator(self) -> None:
+        # SERVER_REFUSED is the 4xx-with-TLS bucket (Instagram 429 to
+        # cloud IP, NordVPN 403 from DE). The origin actively refused
+        # us — that is not network censorship and must not penalise the
+        # category score. Mixed [OK, SERVER_REFUSED] → 100%, not 50%.
+        results = [
+            _make_result(Verdict.OK),
+            _make_result(Verdict.SERVER_REFUSED),
+        ]
+        assert _ok_pct(results) == pytest.approx(100.0)
+
+    def test_all_non_scoring_returns_100_not_zero(self) -> None:
+        # A category whose tests were ALL SERVER_REFUSED or INCONCLUSIVE
+        # has nothing to penalise — returning 0 here would bottom out
+        # the score for a category that's simply not measurable, while
+        # the empty-list path (module crashed) still correctly returns 0.
+        results = [
+            _make_result(Verdict.INCONCLUSIVE),
+            _make_result(Verdict.SERVER_REFUSED),
+        ]
+        assert _ok_pct(results) == pytest.approx(100.0)
+
+    def test_anomaly_still_counts_against_score(self) -> None:
+        # ANOMALY is the ambiguous bucket (HTTP 5xx, DNS drift, middlebox
+        # echo mismatch). It is NOT in NON_SCORING_VERDICTS — a censor
+        # middlebox could inject 5xx pages, so excluding ANOMALY would
+        # create a free bypass for that attack.
+        results = [
+            _make_result(Verdict.OK),
+            _make_result(Verdict.ANOMALY),
+        ]
+        assert _ok_pct(results) == pytest.approx(50.0)
+
+    def test_error_still_counts_against_score(self) -> None:
+        # ERROR = our probe code crashed. Score should reflect that we
+        # have no usable measurement; pretending it's "not applicable"
+        # would let bugs in our own code silently boost reported health.
+        results = [
+            _make_result(Verdict.OK),
+            _make_result(Verdict.ERROR),
+        ]
+        assert _ok_pct(results) == pytest.approx(50.0)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -309,7 +358,7 @@ class TestComputeScores:
         results = [
             _make_result(Verdict.OK, category="http", rtt_ms=20.0),
             _make_result(
-                Verdict.YOUTUBE_SNI_THROTTLED,
+                Verdict.THROTTLED,
                 category="throttling",
                 test="throttling_youtube_sni_probe_method_b",
                 method=BlockingMethod.SNI_THROTTLING,
@@ -322,12 +371,12 @@ class TestComputeScores:
         assert scores.exit_score == pytest.approx(92.0)
 
     def test_detected_techniques_only_from_blocking_verdicts(self) -> None:
-        # GEOBLOCK_NOT_CENSORSHIP carries a method for context but must
-        # NOT contribute to detected techniques. INCONCLUSIVE same.
+        # SERVER_REFUSED carries a method for context but must NOT
+        # contribute to detected techniques. INCONCLUSIVE same.
         results = [
             _make_result(Verdict.BLOCKED, method=BlockingMethod.IP_DROPPED),
             _make_result(
-                Verdict.GEOBLOCK_NOT_CENSORSHIP,
+                Verdict.SERVER_REFUSED,
                 method=BlockingMethod.TLS_HANDSHAKE_FAILURE,
             ),
             _make_result(Verdict.INCONCLUSIVE, method=BlockingMethod.QUIC_DROPPED),

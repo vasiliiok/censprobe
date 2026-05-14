@@ -176,12 +176,12 @@ class TestSummarize:
                 verdict=Verdict.BLOCKED,
                 method=BlockingMethod.DNS_POISONING,
             ),
-            # GEOBLOCK_NOT_CENSORSHIP carries a method but must NOT count.
+            # SERVER_REFUSED carries a method but must NOT count.
             TestResult(
                 test="http_x",
                 category="http",
                 target="x",
-                verdict=Verdict.GEOBLOCK_NOT_CENSORSHIP,
+                verdict=Verdict.SERVER_REFUSED,
                 method=BlockingMethod.TLS_HANDSHAKE_FAILURE,
             ),
         ]

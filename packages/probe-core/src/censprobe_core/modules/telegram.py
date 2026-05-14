@@ -339,7 +339,8 @@ async def _test_dc_port(dc_id: int, ip_ver: str, ip: str, port: int) -> TestResu
             test=test_name,
             category="telegram",
             target=target,
-            verdict=Verdict.REFUSED,
+            verdict=Verdict.BLOCKED,
+            method=BlockingMethod.TCP_REFUSED,
             evidence={"error": "connection_refused"},
         )
     except OSError as e:

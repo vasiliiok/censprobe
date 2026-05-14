@@ -1,14 +1,16 @@
 """
-Tests for ``modules.tcp`` — single-attempt verdict attribution and the
+Tests for ``modules.tcp`` — single-attempt outcome attribution and the
 ``_majority`` aggregator.
 
 Two distinct concerns:
-  1. ``_single_tcp_attempt`` — translates socket errors into verdicts,
-     with a timing-based RST attribution: ConnectionRefusedError that
-     arrives faster than ``fast_rst_threshold_ms`` is treated as
-     RST_INJECTED (TSPU forging an RST), slower is REFUSED (host
-     genuinely closed port).
-  2. ``_majority`` — most-common-vote tie-breaker.
+  1. ``_single_tcp_attempt`` — translates socket errors into
+     (verdict, method) tuples, with a timing-based RST attribution:
+     ConnectionRefusedError that arrives faster than
+     ``fast_rst_threshold_ms`` is treated as
+     (BLOCKED, TCP_RST_INJECTION) (TSPU forging an RST), slower is
+     (BLOCKED, TCP_REFUSED) (host genuinely closed port).
+  2. ``_majority`` — most-common-vote tie-breaker over the
+     (verdict, method) tuples.
 """
 
 from __future__ import annotations
@@ -17,7 +19,7 @@ from typing import Any
 
 import pytest
 from censprobe_core.config import TcpModuleConfig
-from censprobe_core.models import Verdict
+from censprobe_core.models import BlockingMethod, Verdict
 from censprobe_core.modules import tcp as tcp_mod
 from censprobe_core.modules.tcp import _majority, _single_tcp_attempt
 
@@ -65,24 +67,31 @@ async def _passthrough_wait_for(coro: Any, **_kw: Any) -> Any:
 class TestMajority:
     def test_empty_returns_inconclusive(self) -> None:
         # No samples at all is a different signal from "tied" — we want
-        # INCONCLUSIVE, not ERROR.
-        assert _majority([]) == Verdict.INCONCLUSIVE
+        # (INCONCLUSIVE, None), not (ERROR, None).
+        assert _majority([]) == (Verdict.INCONCLUSIVE, None)
 
     def test_single_returns_that(self) -> None:
-        assert _majority([Verdict.OK]) == Verdict.OK
+        assert _majority([(Verdict.OK, None)]) == (Verdict.OK, None)
 
     def test_strict_majority(self) -> None:
-        verdicts = [Verdict.OK, Verdict.OK, Verdict.IP_DROPPED]
-        assert _majority(verdicts) == Verdict.OK
+        outcomes = [
+            (Verdict.OK, None),
+            (Verdict.OK, None),
+            (Verdict.BLOCKED, BlockingMethod.IP_DROPPED),
+        ]
+        assert _majority(outcomes) == (Verdict.OK, None)
 
     def test_tie_picks_first_in_dict_order(self) -> None:
         # Python dict insertion order: first key with the max count wins.
         # Pin this so a refactor doesn't silently change tie-break behaviour.
-        verdicts = [Verdict.RST_INJECTED, Verdict.OK]
-        assert _majority(verdicts) == Verdict.RST_INJECTED
+        outcomes = [
+            (Verdict.BLOCKED, BlockingMethod.TCP_RST_INJECTION),
+            (Verdict.OK, None),
+        ]
+        assert _majority(outcomes) == (Verdict.BLOCKED, BlockingMethod.TCP_RST_INJECTION)
 
     def test_all_errors(self) -> None:
-        assert _majority([Verdict.ERROR, Verdict.ERROR]) == Verdict.ERROR
+        assert _majority([(Verdict.ERROR, None), (Verdict.ERROR, None)]) == (Verdict.ERROR, None)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -96,8 +105,8 @@ async def test_ok_on_clean_connect(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(tcp_mod.asyncio, "open_connection", _fake_open)
     monkeypatch.setattr(tcp_mod.asyncio, "wait_for", _passthrough_wait_for)
-    verdict = await _single_tcp_attempt("1.2.3.4", 443, _cfg())
-    assert verdict == Verdict.OK
+    outcome = await _single_tcp_attempt("1.2.3.4", 443, _cfg())
+    assert outcome == (Verdict.OK, None)
 
 
 async def test_timeout_returns_ip_dropped(
@@ -108,14 +117,16 @@ async def test_timeout_returns_ip_dropped(
 
     monkeypatch.setattr(tcp_mod.asyncio, "open_connection", _fake_open)
     monkeypatch.setattr(tcp_mod.asyncio, "wait_for", _passthrough_wait_for)
-    verdict = await _single_tcp_attempt("1.2.3.4", 443, _cfg())
-    assert verdict == Verdict.IP_DROPPED
+    outcome = await _single_tcp_attempt("1.2.3.4", 443, _cfg())
+    assert outcome == (Verdict.BLOCKED, BlockingMethod.IP_DROPPED)
 
 
 async def test_fast_refused_is_rst_injected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # ConnectionRefused at 5 ms (well under 30 ms threshold) → RST_INJECTED.
+    # ConnectionRefused at 5 ms (well under 30 ms threshold) →
+    # (BLOCKED, TCP_RST_INJECTION). Vantage gating is applied later in
+    # the aggregator, not here.
     _patch_monotonic_sequence(monkeypatch, [0.000, 0.005])
 
     async def _fake_open(*_a: Any, **_kw: Any) -> Any:
@@ -123,14 +134,15 @@ async def test_fast_refused_is_rst_injected(
 
     monkeypatch.setattr(tcp_mod.asyncio, "open_connection", _fake_open)
     monkeypatch.setattr(tcp_mod.asyncio, "wait_for", _passthrough_wait_for)
-    verdict = await _single_tcp_attempt("1.2.3.4", 443, _cfg())
-    assert verdict == Verdict.RST_INJECTED
+    outcome = await _single_tcp_attempt("1.2.3.4", 443, _cfg())
+    assert outcome == (Verdict.BLOCKED, BlockingMethod.TCP_RST_INJECTION)
 
 
 async def test_slow_refused_is_refused(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # ConnectionRefused at 100 ms (above 30 ms threshold) → genuine REFUSED.
+    # ConnectionRefused at 100 ms (above 30 ms threshold) →
+    # (BLOCKED, TCP_REFUSED) — genuine host-side close.
     _patch_monotonic_sequence(monkeypatch, [0.000, 0.100])
 
     async def _fake_open(*_a: Any, **_kw: Any) -> Any:
@@ -138,15 +150,15 @@ async def test_slow_refused_is_refused(
 
     monkeypatch.setattr(tcp_mod.asyncio, "open_connection", _fake_open)
     monkeypatch.setattr(tcp_mod.asyncio, "wait_for", _passthrough_wait_for)
-    verdict = await _single_tcp_attempt("1.2.3.4", 443, _cfg())
-    assert verdict == Verdict.REFUSED
+    outcome = await _single_tcp_attempt("1.2.3.4", 443, _cfg())
+    assert outcome == (Verdict.BLOCKED, BlockingMethod.TCP_REFUSED)
 
 
 async def test_oserror_with_reset_keyword_uses_threshold(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # OSError("connection reset by peer") with elapsed > threshold →
-    # REFUSED (not RST_INJECTED).
+    # (BLOCKED, TCP_REFUSED) (not TCP_RST_INJECTION).
     _patch_monotonic_sequence(monkeypatch, [0.000, 0.080])
 
     async def _fake_open(*_a: Any, **_kw: Any) -> Any:
@@ -154,8 +166,8 @@ async def test_oserror_with_reset_keyword_uses_threshold(
 
     monkeypatch.setattr(tcp_mod.asyncio, "open_connection", _fake_open)
     monkeypatch.setattr(tcp_mod.asyncio, "wait_for", _passthrough_wait_for)
-    verdict = await _single_tcp_attempt("1.2.3.4", 443, _cfg())
-    assert verdict == Verdict.REFUSED
+    outcome = await _single_tcp_attempt("1.2.3.4", 443, _cfg())
+    assert outcome == (Verdict.BLOCKED, BlockingMethod.TCP_REFUSED)
 
 
 async def test_oserror_unrelated_returns_error(
@@ -168,5 +180,5 @@ async def test_oserror_unrelated_returns_error(
 
     monkeypatch.setattr(tcp_mod.asyncio, "open_connection", _fake_open)
     monkeypatch.setattr(tcp_mod.asyncio, "wait_for", _passthrough_wait_for)
-    verdict = await _single_tcp_attempt("1.2.3.4", 443, _cfg())
-    assert verdict == Verdict.ERROR
+    outcome = await _single_tcp_attempt("1.2.3.4", 443, _cfg())
+    assert outcome == (Verdict.ERROR, None)

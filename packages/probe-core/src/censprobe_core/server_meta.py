@@ -45,9 +45,9 @@ _TIMEOUT = httpx.Timeout(10.0)
 
 # Vantage country code (ISO-3166 alpha-2). Set once after server_meta
 # detection; consumed by measurement modules to gate censor-specific
-# attribution heuristics — e.g. tcp.py's <30 ms RST_INJECTED label
-# produces false positives from Frankfurt because anycast RTT to closed
-# ports is below the threshold without any censor in the path.
+# attribution heuristics — e.g. tcp.py's <30 ms BLOCKED+tcp_rst_injection
+# label produces false positives from Frankfurt because anycast RTT to
+# closed ports is below the threshold without any censor in the path.
 _VANTAGE_COUNTRY: str | None = None
 
 

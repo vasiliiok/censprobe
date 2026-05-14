@@ -3,7 +3,8 @@ modules/http.py — HTTP/HTTPS fetch and reachability classification.
 
 Tests:
   - HTTPS fetch: status, body length, TLS reachability (handshake by httpx)
-  - Geoblocking vs censorship distinction: 403/451 + valid cert → GEOBLOCK_NOT_CENSORSHIP
+  - Server-refusal vs network-censorship distinction: 403/429/451 + valid cert
+    → SERVER_REFUSED (excluded from score denominator)
   - Network-level interference attribution: TLS handshake failure, RST, IP drop
 
 Block-page fingerprinting was removed: modern Russian blocking happens at
@@ -76,16 +77,28 @@ def _verdict_from_response(
     """Decide the HTTP verdict from response signals alone.
 
     Order matters:
-      1. 403/451 with valid TLS → server-side geoblock, not network censorship.
+      1. 403/429/451 with valid TLS → server-side refusal, not network
+         censorship. TLS reached the origin and the origin replied —
+         403 (geoblock), 429 (rate-limit, common for cloud egress IPs),
+         451 (legal block). All three share the property "destination
+         server actively refused us"; lumping them as SERVER_REFUSED and
+         excluding from the score denominator stops the cloud-IP penalty
+         that hit Instagram/NordVPN reachability checks on every run.
       2. expected_status from targets/*.yaml → OK on match, ANOMALY otherwise.
       3. No expected_status: status==200 is OK, anything else is ANOMALY.
+
+    5xx is deliberately NOT in the SERVER_REFUSED bucket: a censor
+    middlebox can inject a fake 503 to mimic a legitimate outage, and
+    silently excluding such results from scoring would create a free
+    bypass for that attack. 5xx therefore falls through to ANOMALY,
+    which still counts in the denominator.
 
     Static body-length-range comparison was deliberately not implemented:
     modern sites (news, social) drift in body size between edges and
     revisions, producing false ANOMALY verdicts.
     """
-    if status in (403, 451) and tls_ok:
-        return Verdict.GEOBLOCK_NOT_CENSORSHIP, None
+    if status in (403, 429, 451) and tls_ok:
+        return Verdict.SERVER_REFUSED, None
     if expected_status is not None:
         return (Verdict.OK, None) if status == expected_status else (Verdict.ANOMALY, None)
     return (Verdict.OK, None) if status == 200 else (Verdict.ANOMALY, None)

@@ -19,6 +19,42 @@ from censprobe_core.subcategories import derive as _derive_subcategory
 logger = logging.getLogger(__name__)
 
 
+# Legacy verdict → (new_verdict, default_method) translation.
+#
+# The 2026-05 Verdict consolidation collapsed seven per-method verdicts
+# into BLOCKED + method, renamed YOUTUBE_SNI_THROTTLED → THROTTLED, and
+# renamed GEOBLOCK_NOT_CENSORSHIP → SERVER_REFUSED. JSON reports written
+# before that change still carry the old strings, and on-import we
+# rewrite them so the dashboards see one consistent taxonomy.
+#
+# default_method is filled in only when the legacy result didn't carry a
+# method of its own — the producer side did set method= for most of the
+# now-removed verdicts (the verdict and method were redundant), so the
+# producer-supplied method takes precedence and this fallback only fires
+# on the rare legacy rows where method was None.
+_LEGACY_VERDICT_TRANSLATION: dict[str, tuple[str, str | None]] = {
+    "DNS_POISONING": ("BLOCKED", "dns_poisoning"),
+    "DNS_BLOCKED": ("BLOCKED", "dns_blocked_nxdomain"),
+    "DOH_BLOCKED": ("BLOCKED", "doh_blocked"),
+    "IP_DROPPED": ("BLOCKED", "ip_dropped"),
+    "RST_INJECTED": ("BLOCKED", "tcp_rst_injection"),
+    "REFUSED": ("BLOCKED", "tcp_refused"),
+    "YOUTUBE_SNI_THROTTLED": ("THROTTLED", "sni_throttling"),
+    "GEOBLOCK_NOT_CENSORSHIP": ("SERVER_REFUSED", None),
+}
+
+
+def _translate_legacy_verdict(verdict: str, method: str | None) -> tuple[str, str | None]:
+    """Rewrite a (verdict, method) pair into the post-2026-05 taxonomy.
+
+    Idempotent: already-current verdicts pass through unchanged.
+    """
+    if verdict not in _LEGACY_VERDICT_TRANSLATION:
+        return verdict, method
+    new_verdict, default_method = _LEGACY_VERDICT_TRANSLATION[verdict]
+    return new_verdict, method or default_method
+
+
 def parse_report_meta(data: dict[str, Any]) -> dict[str, Any]:
     """Extract common metadata from a report dict.
 
@@ -72,6 +108,10 @@ def parse_solo_report(
         subcategory = r.get("subcategory")
         if not isinstance(subcategory, str) or not subcategory:
             subcategory = _derive_subcategory(test_name, category)
+        verdict_str = str(r.get("verdict") or "INCONCLUSIVE")
+        method_raw = r.get("method")
+        method_str = str(method_raw) if method_raw is not None else None
+        verdict_str, method_str = _translate_legacy_verdict(verdict_str, method_str)
         results.append(
             {
                 "report_file": path.name,
@@ -79,8 +119,8 @@ def parse_solo_report(
                 "category": category,
                 "subcategory": subcategory,
                 "target": str(r.get("target") or ""),
-                "verdict": str(r.get("verdict") or "INCONCLUSIVE"),
-                "method": r.get("method"),
+                "verdict": verdict_str,
+                "method": method_str,
                 "confidence": _to_float(r.get("confidence"), default=1.0),
                 "rtt_ms": _to_float(r.get("rtt_ms"), default=None),
                 "elapsed_ms": _to_float(r.get("elapsed_ms"), default=None),
@@ -161,10 +201,14 @@ def parse_listener_report(
     for protocol, pr in raw_proto.items():
         if not isinstance(pr, dict):
             continue
+        verdict_str = str(pr.get("verdict") or "BLOCKED")
+        # Listener-side protocol_results don't carry a method field, so
+        # the translation only needs to handle the verdict slot.
+        verdict_str, _ = _translate_legacy_verdict(verdict_str, None)
         protocol_results.append(
             {
                 "protocol": str(protocol),
-                "verdict": str(pr.get("verdict") or "BLOCKED"),
+                "verdict": verdict_str,
                 "handshake_count": _to_int(pr.get("handshake_count"), default=0),
                 "data_transfer_ok": bool(pr.get("data_transfer_ok")),
                 # Listener-measured sustained throughput. Older listener

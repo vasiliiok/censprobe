@@ -4,20 +4,22 @@ modules/tcp.py — TCP reachability measurement module.
 Tests TCP connectivity to (IP, port) pairs using asyncio.open_connection
 (full 3-way handshake — no raw sockets).
 
-Verdicts:
-  OK            — connect() succeeded
-  IP_DROPPED    — SYN sent, timeout (null-route / blackhole)
-  REFUSED       — legitimate RST from the host (port closed, service down)
-  RST_INJECTED  — ⚠ SUSPICION ONLY (not a confirmation). RST arrives in
-                  less than _SYN_FAST_RST_MS after connect(). This is a
-                  pure timing heuristic, NOT a TTL-anomaly analysis:
-                  low-latency networks (same DC, anycast, localhost) can
-                  legitimately return a REFUSED RST faster than the
-                  threshold. Surface this verdict as a lead — confirmation
-                  requires out-of-band TTL-delta capture which the MVP
-                  does not perform. Confidence is capped at 0.5 and the
-                  evidence dict carries an explicit signal=suspicion +
-                  disclaimer to keep this honest in dashboards.
+Outcomes (verdict + method):
+  OK                              — connect() succeeded
+  BLOCKED + method=IP_DROPPED     — SYN sent, timeout (null-route / blackhole)
+  BLOCKED + method=TCP_REFUSED    — legitimate RST from the host
+                                    (port closed, service down)
+  BLOCKED + method=TCP_RST_INJECTION  — ⚠ SUSPICION ONLY (not a confirmation).
+                                    RST arrives in less than fast_rst_threshold_ms
+                                    after connect(). Pure timing heuristic, NOT
+                                    a TTL-anomaly analysis: low-latency networks
+                                    (same DC, anycast, localhost) can legitimately
+                                    return a REFUSED RST faster than the threshold.
+                                    Surface as a lead — confirmation requires
+                                    out-of-band TTL-delta capture which the MVP
+                                    does not perform. Confidence capped at 0.5
+                                    and evidence carries signal=suspicion +
+                                    disclaimer to keep this honest in dashboards.
 
 True TTL-delta analysis requires raw sockets (eBPF or similar) and is
 deliberately not implemented in the MVP — we surface the heuristic RTT
@@ -43,6 +45,11 @@ from censprobe_core.utils import stamp_test_elapsed
 logger = logging.getLogger(__name__)
 
 
+# Internal attempt outcome — verdict + blocking method (None if not blocked).
+# Returned by _single_tcp_attempt and majority-voted in _test_tcp.
+_AttemptOutcome = tuple[Verdict, "BlockingMethod | None"]
+
+
 async def run_tcp_tests(
     targets: list[tuple[str, int]],  # (ip, port) pairs
     repeats: int = 3,
@@ -66,20 +73,19 @@ async def run_tcp_tests(
 async def _test_tcp(ip: str, port: int, repeats: int, cfg: TcpModuleConfig) -> TestResult:
     """Test TCP connectivity to ip:port."""
     target = f"{ip}:{port}"
-    verdicts = []
-    rtts = []
+    outcomes: list[_AttemptOutcome] = []
+    rtts: list[float] = []
 
     for _ in range(repeats):
         t0 = time.monotonic()
-        verdict = await _single_tcp_attempt(ip, port, cfg)
+        outcome = await _single_tcp_attempt(ip, port, cfg)
         rtt_ms = (time.monotonic() - t0) * 1000
-        verdicts.append(verdict)
+        outcomes.append(outcome)
         rtts.append(rtt_ms)
         await asyncio.sleep(0.5)  # small jitter between repeats
 
-    # Aggregate: majority wins
-    final_verdict = _majority(verdicts)
-    method: BlockingMethod | None = None
+    # Aggregate: majority wins on the (verdict, method) tuple
+    final_verdict, final_method = _majority(outcomes)
 
     # Vantage gating: the fast-RST heuristic is calibrated for inside-
     # censor vantages where a censor's RST is the only RST that arrives
@@ -87,16 +93,11 @@ async def _test_tcp(ip: str, port: int, repeats: int, cfg: TcpModuleConfig) -> T
     # ~5 ms) every closed port is sub-threshold and this heuristic
     # falsely paints a healthy network as RST-injected. Outside the
     # configured censoring countries (defaults: RU, BY) we downgrade
-    # the verdict to plain REFUSED.
-    if final_verdict == Verdict.RST_INJECTED and not is_censoring_vantage():
-        final_verdict = Verdict.REFUSED
+    # the method to plain TCP_REFUSED while keeping verdict=BLOCKED.
+    if final_method == BlockingMethod.TCP_RST_INJECTION and not is_censoring_vantage():
+        final_method = BlockingMethod.TCP_REFUSED
 
-    if final_verdict == Verdict.RST_INJECTED:
-        method = BlockingMethod.TCP_RST_INJECTION
-    elif final_verdict == Verdict.IP_DROPPED:
-        method = BlockingMethod.IP_DROPPED
-
-    # RST_INJECTED is a timing-only heuristic (fast RST below the
+    # TCP_RST_INJECTION is a timing-only heuristic (fast RST below the
     # configured threshold), NOT a TTL-delta verification. The flags
     # below — explicit confidence ≤ 0.5, evidence.signal="suspicion",
     # a long-form note — are all there so the dashboard, the CLI
@@ -105,9 +106,10 @@ async def _test_tcp(ip: str, port: int, repeats: int, cfg: TcpModuleConfig) -> T
     # would require raw-socket capture of incoming RST TTL and
     # comparison with the SYN-ACK TTL on the same path, which the MVP
     # doesn't do.
-    is_heuristic_rst = final_verdict == Verdict.RST_INJECTED
+    is_heuristic_rst = final_method == BlockingMethod.TCP_RST_INJECTION
     evidence: dict[str, object] = {
-        "all_verdicts": verdicts,
+        "all_verdicts": [str(v) for v, _ in outcomes],
+        "all_methods": [str(m) if m else None for _, m in outcomes],
         "rtts_ms": rtts,
         "rst_detection": "rtt_heuristic_no_scapy",
     }
@@ -126,7 +128,7 @@ async def _test_tcp(ip: str, port: int, repeats: int, cfg: TcpModuleConfig) -> T
         category="tcp",
         target=target,
         verdict=final_verdict,
-        method=method,
+        method=final_method,
         rtt_ms=min(rtts) if rtts else None,
         attempts=repeats,
         confidence=0.5 if is_heuristic_rst else 1.0,
@@ -143,8 +145,8 @@ async def _test_tcp(ip: str, port: int, repeats: int, cfg: TcpModuleConfig) -> T
     )
 
 
-async def _single_tcp_attempt(ip: str, port: int, cfg: TcpModuleConfig) -> Verdict:
-    """Attempt a single TCP connect and return the verdict."""
+async def _single_tcp_attempt(ip: str, port: int, cfg: TcpModuleConfig) -> _AttemptOutcome:
+    """Attempt a single TCP connect; return (verdict, method) tuple."""
     try:
         t0 = time.monotonic()
         _, writer = await asyncio.wait_for(
@@ -156,17 +158,17 @@ async def _single_tcp_attempt(ip: str, port: int, cfg: TcpModuleConfig) -> Verdi
         # is unnecessary and may race with peer-side close.
         with contextlib.suppress(Exception):
             await writer.wait_closed()
-        return Verdict.OK
+        return Verdict.OK, None
 
     except TimeoutError:
-        return Verdict.IP_DROPPED
+        return Verdict.BLOCKED, BlockingMethod.IP_DROPPED
 
     except ConnectionRefusedError:
         # Real RST from the host — port closed but host is alive
         elapsed_ms = (time.monotonic() - t0) * 1000
         if elapsed_ms < cfg.fast_rst_threshold_ms:
-            return Verdict.RST_INJECTED
-        return Verdict.REFUSED
+            return Verdict.BLOCKED, BlockingMethod.TCP_RST_INJECTION
+        return Verdict.BLOCKED, BlockingMethod.TCP_REFUSED
 
     except OSError as e:
         # Could be ECONNRESET (RST) or other socket error
@@ -174,21 +176,21 @@ async def _single_tcp_attempt(ip: str, port: int, cfg: TcpModuleConfig) -> Verdi
         err_str = str(e).lower()
         if "reset" in err_str or "refused" in err_str:
             if elapsed_ms < cfg.fast_rst_threshold_ms:
-                return Verdict.RST_INJECTED
-            return Verdict.REFUSED
-        return Verdict.ERROR
+                return Verdict.BLOCKED, BlockingMethod.TCP_RST_INJECTION
+            return Verdict.BLOCKED, BlockingMethod.TCP_REFUSED
+        return Verdict.ERROR, None
 
     except Exception:
-        return Verdict.ERROR
+        return Verdict.ERROR, None
 
 
-def _majority(verdicts: list[Verdict]) -> Verdict:
-    """Return most common verdict."""
-    if not verdicts:
-        return Verdict.INCONCLUSIVE
-    counts: dict[Verdict, int] = {}
-    for v in verdicts:
-        counts[v] = counts.get(v, 0) + 1
+def _majority(outcomes: list[_AttemptOutcome]) -> _AttemptOutcome:
+    """Return most common (verdict, method) tuple."""
+    if not outcomes:
+        return Verdict.INCONCLUSIVE, None
+    counts: dict[_AttemptOutcome, int] = {}
+    for o in outcomes:
+        counts[o] = counts.get(o, 0) + 1
     return max(counts, key=counts.get)  # type: ignore[arg-type]
 
 

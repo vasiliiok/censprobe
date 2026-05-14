@@ -59,7 +59,7 @@ modules:
     enabled: true
     repeats: 3
     syn_timeout_sec: 5.0
-    fast_rst_threshold_ms: 30      # below this → SUSPECTED RST_INJECTED
+    fast_rst_threshold_ms: 30      # below this → SUSPECTED method=tcp_rst_injection
     max_parallel: 16
 
   tls:

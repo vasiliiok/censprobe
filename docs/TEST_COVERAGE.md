@@ -33,7 +33,7 @@
 | `censprobe_core.protocol_probes._stamp_elapsed`, `censprobe_core.utils.stamp_test_elapsed` | `test_elapsed_ms_stamping.py` | 7 | decorator stamps `elapsed_ms` on `ProbeResult`/`TestResult` for both OK and error returns (regression: pre-2026-05 `(10ms)` display rendered TCP-connect time, not probe duration), preserves caller-supplied `elapsed_ms`, no-op on `None` return, exceptions propagate without stamp |
 | `censprobe_core.modules.dns._cert_san_covers_domain_family` | `test_dns_cert_san.py` | 18 | wildcard-apex relaxation, single-label match, RFC 6125 |
 | `censprobe_core.modules.tls._pick_neutral_sni` | `test_tls_neutral_sni.py` | 17 | per-IP-family neutral SNI selection (Cloudflare/Akamai/AWS prefixes) |
-| `censprobe_core.modules.http._verdict_from_response` (basic) | `test_http_classify.py` | 7 | 200/expected_status, 403/451 + valid_tls → `GEOBLOCK_NOT_CENSORSHIP` |
+| `censprobe_core.modules.http._verdict_from_response` (basic) | `test_http_classify.py` | 7 | 200/expected_status, 403/429/451 + valid_tls → `SERVER_REFUSED` |
 | `censprobe_core.models.ProtocolResult.finalize` | `test_protocol_result_finalize.py` | 6 | truth-table `(handshake_count, data_transfer_ok) → Verdict`; load-bearing case `(0, True) → OK` guards SOCKS-routed / mtproto_proxy log-parse drift from collapsing to false BLOCKED |
 
 #### Mocked-unit modules (`tests/modules/`, 10 файлов, 99 тестов)
@@ -42,13 +42,13 @@
 |------------|-----------|-------:|-------------|
 | `censprobe_core.modules.cloudflare` (builders) | `test_cloudflare_packets.py` | 12 | `_build_quic_vn_trigger` (long-header version=0x00000001, dst_cid_len, packet number 0), `_build_masque_probe_packet` (UDP encap, length, CID), `_build_wg_handshake_init` (148-byte payload, message_type=1, ephemeral key shape) |
 | `censprobe_core.modules.dns` | `test_dns_helpers.py` | 10 | `_parse_first_nameserver` (resolv.conf parsing), `_get_isp_resolver` (systemd-resolved fallback chain) |
-| `censprobe_core.modules.http._verdict_from_response` | `test_http_verdict.py` | 20 | 200/expected_status, 403/451 + valid_tls → `GEOBLOCK_NOT_CENSORSHIP` (порядок проверок load-bearing), body length / cap |
+| `censprobe_core.modules.http._verdict_from_response` | `test_http_verdict.py` | 20 | 200/expected_status, 403/429/451 + valid_tls → `SERVER_REFUSED` (порядок проверок load-bearing), body length / cap |
 | `censprobe_core.modules.middlebox._test_header_manipulation` | `test_middlebox_parsing.py` | 7 | OONI-style header field manipulation parsing |
-| `censprobe_core.modules.tcp` | `test_tcp.py` | 11 | `_single_tcp_attempt` (OK / IP_DROPPED / REFUSED / fast-RST → SUSPECTED RST_INJECTED только в RU vantage), `_majority` aggregator (tie-breaker, all-error, single result) |
+| `censprobe_core.modules.tcp` | `test_tcp.py` | 11 | `_single_tcp_attempt` (OK / BLOCKED+ip_dropped / BLOCKED+tcp_refused / fast-RST → BLOCKED+tcp_rst_injection только в RU vantage), `_majority` aggregator над `(verdict, method)` tuples |
 | `censprobe_core.modules.telegram` (`_compute_health_score`, `_ok_ratio`) | `test_telegram_health.py` | 11 | weighted avg dc:55%/web:25%/cdn:20%, `_ok_ratio` empty/all-OK/mixed |
 | `censprobe_core.modules.telegram` (`_compile_owned_patterns`, `_match_owned_cert`) | `test_telegram_owned_cert.py` | 8 | RFC 6125 wildcard semantics — single label match, no embedded wildcards, SAN/CN matching против `owned_cert_patterns` |
 | `censprobe_core.modules.throttling.run_throttling_tests` | `test_throttling_vantage.py` | 3 | off-vantage → INCONCLUSIVE marker (not real probe); on-vantage → real probe invoked with cfg.modules.throttling; `require_censoring_vantage=False` bypasses gate |
-| `censprobe_core.modules.throttling._decide_method_b_verdict` | `test_throttling_verdict.py` | 11 | trigger < 0.25 × min(correct, typo) → `YOUTUBE_SNI_THROTTLED`, INCONCLUSIVE при bw=0, OK иначе, division-by-zero |
+| `censprobe_core.modules.throttling._decide_method_b_verdict` | `test_throttling_verdict.py` | 11 | trigger < 0.25 × min(correct, typo) → `THROTTLED`, INCONCLUSIVE при bw=0, OK иначе, division-by-zero |
 | `censprobe_core.modules.tls._attribute_tls_failure` | `test_tls_attribution.py` | 7 | SNI-blocked vs cert-mismatch vs network-error attribution |
 
 #### Property-based (`tests/property/`, 3 файла, 12 тестов)

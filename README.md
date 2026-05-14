@@ -58,10 +58,10 @@
 Все вердикты считаются inline в момент прогона (не post-hoc):
 
 - **DNS** — CERTainty-style (PETS 2023): валидность TLS-сертификата на возвращённом IP + согласие с публичными DoH/DoT-резолверами.
-- **TCP reachability** — `OK` / `IP_DROPPED` (SYN/timeout = null-route) / `REFUSED` (legitimate RST). В RU vantage быстрый RST атрибутируется как `SUSPECTED RST_INJECTED` (DPI-инъекция).
+- **TCP reachability** — `OK` / `BLOCKED` с `method=ip_dropped` (SYN/timeout = null-route) / `method=tcp_refused` (legitimate RST). В RU vantage быстрый RST атрибутируется как `method=tcp_rst_injection` (DPI-инъекция, SUSPICION ONLY).
 - **TLS / SNI** — paired blocked-SNI / neutral-SNI handshake в одном прогоне; ECH-проба отдельно.
-- **HTTP** — `expected_status` из `targets/*.yaml` + отдельный `GEOBLOCK_NOT_CENSORSHIP` вердикт для 403/451 с валидным TLS (geoblock от провайдера, не цензура).
-- **SNI throttling (Method B)** — Vetrov/Habr 2024: три curl-прогона на один IP с разными SNI (correct / trigger=`googlevideo.com` / typo). Относительная разница bandwidth внутри одного запуска устойчива к разной ширине uplink'а.
+- **HTTP** — `expected_status` из `targets/*.yaml` + отдельный `SERVER_REFUSED` вердикт для 403/429/451 с валидным TLS (server-side refusal: geoblock / rate-limit / legal block — не сетевая цензура, исключается из знаменателя score'а).
+- **SNI throttling (Method B)** — Vetrov/Habr 2024: три curl-прогона на один IP с разными SNI (correct / trigger=`googlevideo.com` / typo). Verdict `THROTTLED` при `bw_trigger < ratio × min(correct, typo)`.
 - **Telegram reconcile** — DC IPv4/IPv6 на 443/80/5222, web/CDN, owned-cert match. Если cert chain валиден И SAN/CN попадает в `owned_cert_patterns` — это аутентичный Telegram-эндпоинт с misrouted cert (cdn1/cdn5 globally broken), не цензура. Reclassified `BLOCKED` → `INCONCLUSIVE`.
 - **Cloudflare/WARP/QUIC** — QUIC vn-trigger (UDP 443), WARP TCP control plane, MASQUE и WireGuard UDP fallback. QUIC-таймаут → `QUIC_DROPPED` (только в RU vantage).
 - **Middlebox / DPI** — OONI-style HTTP Header Field Manipulation + HTTP Invalid Request Line.
@@ -72,7 +72,7 @@
 
 Часть атрибуции откалибрована **для RU-вантажа**. По умолчанию censoring vantages: `[RU, BY]` (`vantage.censoring_countries` в `censprobe.yaml`).
 
-- `tcp.py` помечает быстрый RST как `RST_INJECTED` (только в censoring vantage; вне — heuristic отключён, downgrade в `REFUSED`).
+- `tcp.py` помечает быстрый RST как `method=tcp_rst_injection` (только в censoring vantage; вне — heuristic отключён, downgrade в `method=tcp_refused`).
 - `cloudflare.py` помечает QUIC-таймаут на UDP 443 как `QUIC_DROPPED` (только в censoring vantage).
 - `throttling.py` (Method B против `speedtest.selectel.ru`) полностью пропускается вне censoring vantage — относительная разница bandwidth доминируется географией, а не SNI-policy. Эмитит один `INCONCLUSIVE` маркер с `evidence.reason=non_censoring_vantage_method_b_skipped`.
 
@@ -314,7 +314,7 @@ docker compose --profile sync run --rm sync pull [OPTIONS]
 | Модуль | Поля (помимо `enabled`) |
 |--------|-------------------------|
 | `dns` | `repeats`, `doh_resolvers` (list of DoH URLs), `doh_timeout_sec`, `asn_lookup_backoff_sec` |
-| `tcp` | `repeats`, `syn_timeout_sec`, `fast_rst_threshold_ms` (RTT below = SUSPECTED RST_INJECTED), `max_parallel` |
+| `tcp` | `repeats`, `syn_timeout_sec`, `fast_rst_threshold_ms` (RTT below = SUSPECTED method=tcp_rst_injection), `max_parallel` |
 | `tls` | `repeats`, `timeout_sec`, `max_parallel` |
 | `http` | `repeats`, `body_cap_bytes`, `timeout_connect_sec`, `timeout_read_sec`, `max_parallel` |
 | `telegram` | `targets_file` (basename without .yaml), `timeout_sec` |
@@ -457,10 +457,10 @@ Verified live на трёх вантажах: vultr Frankfurt (вне TSPU) — 
 Упавший модуль отображается в `module_failures` summary, не сабатирует остальное.
 
 ### `dns.py`
-Per-domain ladder: системный resolver → ISP upstream (parsed from `/etc/resolv.conf` или systemd-resolved) → public 8.8.8.8 / 1.1.1.1 / 77.88.8.8 (Yandex) / 9.9.9.9 (Quad9) → DoH (`cloudflare-dns.com`, `dns.google`, `mozilla.cloudflare-dns.com`) → DoT (`1.1.1.1:853`, `8.8.8.8:853`). Для каждого IP — TLS-cert validation (CERTainty-style): chain проверяется строго через системный trust store, hostname сверяется вручную по SAN-листу с **apex-relaxation** (`*.example.com` считается покрывающим bare apex `example.com` — отражает реальную cert-архитектуру, например `*.dw.com`, без ложных DNS_POISONING на каждом запуске). Обогащение через `ipapi.is` (опционально через `IPAPI_IS_KEY`).
+Per-domain ladder: системный resolver → ISP upstream (parsed from `/etc/resolv.conf` или systemd-resolved) → public 8.8.8.8 / 1.1.1.1 / 77.88.8.8 (Yandex) / 9.9.9.9 (Quad9) → DoH (`cloudflare-dns.com`, `dns.google`, `mozilla.cloudflare-dns.com`) → DoT (`1.1.1.1:853`, `8.8.8.8:853`). Для каждого IP — TLS-cert validation (CERTainty-style): chain проверяется строго через системный trust store, hostname сверяется вручную по SAN-листу с **apex-relaxation** (`*.example.com` считается покрывающим bare apex `example.com` — отражает реальную cert-архитектуру, например `*.dw.com`, без ложных `BLOCKED + method=dns_poisoning` на каждом запуске). Обогащение через `ipapi.is` (опционально через `IPAPI_IS_KEY`).
 
 ### `tcp.py`
-Direct (ip, port) reachability с repeats. Verdicts: `OK` / `IP_DROPPED` (SYN timeout) / `REFUSED` (legitimate RST). В censoring vantage RTT ниже `fast_rst_threshold_ms` атрибутируется как `SUSPECTED RST_INJECTED`. `_majority` aggregator для устранения шума.
+Direct (ip, port) reachability с repeats. Outcomes: `OK` / `BLOCKED` с `method=ip_dropped` (SYN timeout) / `method=tcp_refused` (legitimate RST). В censoring vantage RTT ниже `fast_rst_threshold_ms` атрибутируется как `method=tcp_rst_injection` (SUSPICION ONLY). `_majority` aggregator над `(verdict, method)` для устранения шума.
 
 ### `tls.py`
 Paired handshake per (IP, domain): `tls_<domain>_sni_blocked` (SNI=domain, system trust store), `tls_<domain>_sni_neutral` (нейтральный SNI выбирается per-IP-family через `_pick_neutral_sni`: Cloudflare → `cloudflare.com`, Akamai → `www.akamai.com`, AWS CloudFront → `aws.amazon.com`, default → `cloudflare.com`), плюс ECH-проба. Раньше hardcoded `cloudflare.com` давал спурьезные `INCONCLUSIVE/ssl_error` на каждом не-CF edge'е (Akamai/AWS отвечают `TLSV1_ALERT_INTERNAL_ERROR` на чужой SNI). `_attribute_tls_failure` различает SNI-блокировку, cert-mismatch и network error.
@@ -468,8 +468,9 @@ Paired handshake per (IP, domain): `tls_<domain>_sni_blocked` (SNI=domain, syste
 ### `http.py`
 GET/HEAD с `expected_status` из targets. `_verdict_from_response`:
 - 200 + ожидаемый статус → `OK`
-- 403/451 + valid TLS → `GEOBLOCK_NOT_CENSORSHIP` (порядок проверок load-bearing)
-- неожиданный статус → `BLOCKED` с network attribution
+- 403/429/451 + valid TLS → `SERVER_REFUSED` (порядок проверок load-bearing; исключается из знаменателя `_ok_pct`)
+- 5xx + valid TLS → `ANOMALY` (НЕ `SERVER_REFUSED`: censor middlebox может инжектить 503-страницу)
+- неожиданный статус → `ANOMALY`
 - timeout/connection-reset → `BLOCKED` (DPI/middlebox)
 
 Body cap (`body_cap_bytes`, дефолт 512 KB) защита от bandwidth abuse при тестах через медленные uplink'и.
@@ -480,7 +481,7 @@ Method B (Vetrov/Habr 2024). Vantage-gated через `require_censoring_vantage
 - `--connect-to <correct_sni>:<trigger_sni>` (`trigger_sni=googlevideo.com`)
 - `--connect-to <correct_sni>:<typo_sni>` (`typo_sni=googleviideo.com`)
 
-Verdict `YOUTUBE_SNI_THROTTLED` если `bw_trigger < bandwidth_ratio_threshold × min(bw_correct, bw_typo)`. Robust к разной ширине uplink'а — относительная разница в одном запуске.
+Verdict `THROTTLED` (с `method=sni_throttling`) если `bw_trigger < bandwidth_ratio_threshold × min(bw_correct, bw_typo)`. Robust к разной ширине uplink'а — относительная разница в одном запуске.
 
 ### `telegram.py`
 DC reachability (5 DC × {v4, v6} × {443, 80, 5222}) + Web (`web.telegram.org`, `webk.telegram.org`, `weba.telegram.org`) + CDN (`cdn.telegram.org`, ...). MTProto abridged-frame для `_test_dc_port` byte-точно: `b"\xef" + bytes([len//4]) + struct.pack("<qqi", 0, msg_id, 4)`.

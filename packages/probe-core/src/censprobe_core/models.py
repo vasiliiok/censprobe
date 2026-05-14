@@ -30,30 +30,41 @@ from censprobe_core.subcategories import derive as _derive_subcategory
 
 
 class Verdict(StrEnum):
-    """Top-level verdict for a single test."""
+    """Top-level verdict for a single test.
+
+    Eight categorical outcomes, each with a unique semantic role. The
+    DNS/TCP-specific verdicts that previously duplicated ``BlockingMethod``
+    (DNS_POISONING, DNS_BLOCKED, DOH_BLOCKED, IP_DROPPED, RST_INJECTED,
+    REFUSED, YOUTUBE_SNI_THROTTLED) were consolidated in 2026-05 — the
+    "what kind of blocking" detail now lives exclusively on
+    :class:`BlockingMethod` while ``verdict`` stays at the categorical
+    level.
+
+    Score-effect contract (see :func:`scoring._ok_pct`):
+      * Counted as success: OK
+      * Counted as failure (denominator + not in numerator):
+        BLOCKED, HANDSHAKE_ONLY, ANOMALY, ERROR, THROTTLED
+      * Excluded from denominator entirely:
+        SERVER_REFUSED, INCONCLUSIVE
+    """
 
     OK = "OK"
     BLOCKED = "BLOCKED"
     HANDSHAKE_ONLY = "HANDSHAKE_ONLY"
+    SERVER_REFUSED = "SERVER_REFUSED"
     ANOMALY = "ANOMALY"
-    GEOBLOCK_NOT_CENSORSHIP = "GEOBLOCK_NOT_CENSORSHIP"
-    ERROR = "ERROR"
     INCONCLUSIVE = "INCONCLUSIVE"
-    # DNS-specific
-    DNS_POISONING = "DNS_POISONING"
-    DNS_BLOCKED = "DNS_BLOCKED"
-    DOH_BLOCKED = "DOH_BLOCKED"
-    # TCP-specific
-    IP_DROPPED = "IP_DROPPED"
-    RST_INJECTED = "RST_INJECTED"
-    REFUSED = "REFUSED"
-    # Throttling-specific (Method B is the only throttling test left;
-    # a generic THROTTLED verdict was retired with Method A).
-    YOUTUBE_SNI_THROTTLED = "YOUTUBE_SNI_THROTTLED"
+    ERROR = "ERROR"
+    THROTTLED = "THROTTLED"
 
 
 class BlockingMethod(StrEnum):
-    """Attribution of the blocking/censorship technique."""
+    """Attribution of the blocking/censorship technique.
+
+    Set on results with ``verdict == BLOCKED`` (or THROTTLED) to describe
+    exactly *how* the path was disrupted. Consumers read ``verdict`` to
+    decide pass/fail and ``method`` to attribute the cause.
+    """
 
     DNS_POISONING = "dns_poisoning"
     DNS_BLOCKED_NXDOMAIN = "dns_blocked_nxdomain"
@@ -61,6 +72,7 @@ class BlockingMethod(StrEnum):
     IP_DROPPED = "ip_dropped"
     TCP_RST_INJECTION = "tcp_rst_injection"
     TCP_RST_AFTER_TLS_CH = "tcp_rst_after_tls_ch"
+    TCP_REFUSED = "tcp_refused"
     TLS_HANDSHAKE_FAILURE = "tls_handshake_failure"
     ECH_BLOCKED = "ech_blocked"
     SNI_THROTTLING = "sni_throttling"

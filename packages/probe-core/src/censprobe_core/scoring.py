@@ -43,17 +43,13 @@ logger = logging.getLogger(__name__)
 # Verdicts that represent actual blocking / unreachable targets.
 # Single source of truth — runner._summarize and the dashboard "blocked"
 # filter import this so the three views (CLI summary, saved JSON summary,
-# Grafana) never disagree on what counts as blocked.
+# Grafana) never disagree on what counts as blocked. After the 2026-05
+# Verdict consolidation only BLOCKED and THROTTLED remain — DNS/TCP-layer
+# blocking variants moved to BlockingMethod and emit ``verdict=BLOCKED``.
 BLOCKING_VERDICTS: frozenset[Verdict] = frozenset(
     {
         Verdict.BLOCKED,
-        Verdict.DNS_BLOCKED,
-        Verdict.DOH_BLOCKED,
-        Verdict.DNS_POISONING,
-        Verdict.IP_DROPPED,
-        Verdict.RST_INJECTED,
-        Verdict.REFUSED,
-        Verdict.YOUTUBE_SNI_THROTTLED,
+        Verdict.THROTTLED,
     }
 )
 
@@ -65,6 +61,21 @@ BLOCKING_VERDICTS: frozenset[Verdict] = frozenset(
 # (e.g. forgetting `str()`) cannot silently miscount a category as
 # "other".
 BLOCKING_VERDICT_STRINGS: frozenset[str] = frozenset(str(v) for v in BLOCKING_VERDICTS)
+
+
+# Verdicts that are NOT a censorship signal AND should not be penalised in
+# percent-OK aggregations. SERVER_REFUSED = the server itself answered with
+# a 4xx refusal (TLS reached) — service-side decision, not network filtering.
+# INCONCLUSIVE = the test was not applicable (no IPv6, no ECH config,
+# non-censoring vantage, etc.) — no information either way. Excluding them
+# from ``_ok_pct``'s denominator keeps category scores honest: 31/31 OK on
+# HTTP (with 2 SERVER_REFUSED) reads as 100%, not 93.9%.
+NON_SCORING_VERDICTS: frozenset[Verdict] = frozenset(
+    {
+        Verdict.SERVER_REFUSED,
+        Verdict.INCONCLUSIVE,
+    }
+)
 
 
 def compute_scores(
@@ -93,9 +104,7 @@ def compute_scores(
     # ── Throttling detected ───────────────────────────────────────────────────
     # Only Method-B SNI throttling produces a non-OK verdict here.
     thr_results = [r for r in solo_results if r.category == "throttling"]
-    scores.throttling_detected = any(
-        r.verdict == Verdict.YOUTUBE_SNI_THROTTLED for r in thr_results
-    )
+    scores.throttling_detected = any(r.verdict == Verdict.THROTTLED for r in thr_results)
 
     # ── Telegram health ───────────────────────────────────────────────────────
     tg_health = next(
@@ -107,8 +116,8 @@ def compute_scores(
 
     # ── Detected techniques ───────────────────────────────────────────────────
     # Only collect from verdicts that represent actual blocking — INCONCLUSIVE
-    # and GEOBLOCK_NOT_CENSORSHIP results often have a method set (for context)
-    # but should not contribute to the detected-techniques list.
+    # and SERVER_REFUSED results often have a method set (for context) but
+    # should not contribute to the detected-techniques list.
     techniques: set[str] = set()
     for r in solo_results:
         if r.method and r.verdict in BLOCKING_VERDICTS:
@@ -248,21 +257,35 @@ def _log_scores(scores: ServerScores) -> None:
 
 
 def _ok_pct(results: list[TestResult]) -> float:
-    """Percent of OK results [0–100].
+    """Percent of OK results [0–100] over the *scoring-relevant* subset.
 
-    Returns 0.0 (NOT 50.0) when the result list is empty: a module that
-    crashed and produced zero results must not silently look the same
-    as "all targets passed cleanly at 50%". The neutral fallback was
-    masking module failures and the runner's `module_failures` flag
-    was never consumed downstream — so a half-broken probe scored ≥40
-    on multiple axes for free. With 0.0 the score correctly bottoms out
-    when data is missing; runner.summary still records which modules
-    failed for the dashboard.
+    The denominator is filtered through ``NON_SCORING_VERDICTS`` so
+    SERVER_REFUSED (the server itself refused, e.g. 403/429/451 from
+    Instagram or NordVPN to a cloud IP) and INCONCLUSIVE (test not
+    applicable — no IPv6, no ECH config, non-censoring vantage) don't
+    drag the percent down. The score should measure how much *network
+    censorship* the probe found, not how many third-party services
+    rate-limit cloud egress.
+
+    Empty input ⇒ 0.0 (NOT 50.0): a module that crashed and produced
+    zero results must not silently look the same as "all targets passed
+    cleanly at 50%". With 0.0 the score correctly bottoms out when data
+    is missing; runner.summary still records which modules failed for
+    the dashboard.
+
+    All-non-scoring input ⇒ 100.0: if every test was either SERVER_REFUSED
+    or INCONCLUSIVE, the category has nothing to penalise (we either know
+    it's not censorship or we have no signal). Returning 0 here would
+    mean a host whose only HTTP target happens to geoblock looks broken;
+    100 reflects "nothing measurable went wrong on our side".
     """
     if not results:
         return 0.0
-    ok = sum(1 for r in results if r.verdict == Verdict.OK)
-    return (ok / len(results)) * 100.0
+    scoring_relevant = [r for r in results if r.verdict not in NON_SCORING_VERDICTS]
+    if not scoring_relevant:
+        return 100.0
+    ok = sum(1 for r in scoring_relevant if r.verdict == Verdict.OK)
+    return (ok / len(scoring_relevant)) * 100.0
 
 
 def _protocol_reachability(

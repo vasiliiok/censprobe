@@ -333,6 +333,88 @@ _ADDITIVE_COLUMNS: tuple[tuple[str, str, str], ...] = (
 )
 
 
+# Idempotent in-place value migrations. Each entry rewrites legacy
+# string values in existing rows so dashboards (which filter on the new
+# enum) see historical data consistently. Safe on re-runs because every
+# UPDATE is conditional on the legacy value still being present.
+#
+# Added 2026-05 alongside the Verdict consolidation: seven legacy
+# verdicts (DNS_POISONING, DNS_BLOCKED, DOH_BLOCKED, IP_DROPPED,
+# RST_INJECTED, REFUSED, YOUTUBE_SNI_THROTTLED) folded into BLOCKED +
+# method; GEOBLOCK_NOT_CENSORSHIP renamed to SERVER_REFUSED. The
+# parser.py path translates on re-import, but operators who don't wipe
+# their DB still need the existing rows brought into shape.
+_VALUE_MIGRATIONS: tuple[tuple[str, str], ...] = (
+    # Verdict-only renames (verdict-method already consistent on producer side)
+    (
+        "UPDATE test_results SET verdict = 'SERVER_REFUSED' "
+        "WHERE verdict = 'GEOBLOCK_NOT_CENSORSHIP'",
+        "test_results.verdict GEOBLOCK_NOT_CENSORSHIP → SERVER_REFUSED",
+    ),
+    (
+        "UPDATE test_results SET verdict = 'THROTTLED' WHERE verdict = 'YOUTUBE_SNI_THROTTLED'",
+        "test_results.verdict YOUTUBE_SNI_THROTTLED → THROTTLED",
+    ),
+    # Per-method legacy verdicts → BLOCKED. Method is left untouched
+    # because the producer already wrote the correct attribution there
+    # (the verdict was redundant). Where a legacy row is missing a
+    # method, we fill it in from the verdict before flattening.
+    (
+        "UPDATE test_results SET method = 'dns_poisoning' "
+        "WHERE verdict = 'DNS_POISONING' AND method IS NULL",
+        "test_results.method backfill from DNS_POISONING",
+    ),
+    (
+        "UPDATE test_results SET method = 'dns_blocked_nxdomain' "
+        "WHERE verdict = 'DNS_BLOCKED' AND method IS NULL",
+        "test_results.method backfill from DNS_BLOCKED",
+    ),
+    (
+        "UPDATE test_results SET method = 'doh_blocked' "
+        "WHERE verdict = 'DOH_BLOCKED' AND method IS NULL",
+        "test_results.method backfill from DOH_BLOCKED",
+    ),
+    (
+        "UPDATE test_results SET method = 'ip_dropped' "
+        "WHERE verdict = 'IP_DROPPED' AND method IS NULL",
+        "test_results.method backfill from IP_DROPPED",
+    ),
+    (
+        "UPDATE test_results SET method = 'tcp_rst_injection' "
+        "WHERE verdict = 'RST_INJECTED' AND method IS NULL",
+        "test_results.method backfill from RST_INJECTED",
+    ),
+    (
+        "UPDATE test_results SET method = 'tcp_refused' "
+        "WHERE verdict = 'REFUSED' AND method IS NULL",
+        "test_results.method backfill from REFUSED",
+    ),
+    (
+        "UPDATE test_results SET verdict = 'BLOCKED' "
+        "WHERE verdict IN ('DNS_POISONING','DNS_BLOCKED','DOH_BLOCKED',"
+        "'IP_DROPPED','RST_INJECTED','REFUSED')",
+        "test_results.verdict legacy-blocking → BLOCKED",
+    ),
+    # protocol_results doesn't carry a method column — just rename the
+    # one rename that applies (verdict slot).
+    (
+        "UPDATE protocol_results SET verdict = 'SERVER_REFUSED' "
+        "WHERE verdict = 'GEOBLOCK_NOT_CENSORSHIP'",
+        "protocol_results.verdict GEOBLOCK_NOT_CENSORSHIP → SERVER_REFUSED",
+    ),
+    (
+        "UPDATE protocol_results SET verdict = 'THROTTLED' WHERE verdict = 'YOUTUBE_SNI_THROTTLED'",
+        "protocol_results.verdict YOUTUBE_SNI_THROTTLED → THROTTLED",
+    ),
+    (
+        "UPDATE protocol_results SET verdict = 'BLOCKED' "
+        "WHERE verdict IN ('DNS_POISONING','DNS_BLOCKED','DOH_BLOCKED',"
+        "'IP_DROPPED','RST_INJECTED','REFUSED')",
+        "protocol_results.verdict legacy-blocking → BLOCKED",
+    ),
+)
+
+
 async def init_db() -> None:
     """Create all tables (if missing) and apply additive-column migrations.
 
@@ -362,9 +444,18 @@ async def init_db() -> None:
                         f"ADD COLUMN IF NOT EXISTS {column_name} {ddl_type}"
                     )
                 )
+            total_rows_migrated = 0
+            for sql, label in _VALUE_MIGRATIONS:
+                result = await conn.execute(text(sql))
+                rowcount = result.rowcount or 0
+                if rowcount:
+                    logger.info("Value migration: %s — %d row(s)", label, rowcount)
+                    total_rows_migrated += rowcount
             logger.info(
-                "DB tables initialized; %d additive-column migration(s) checked",
+                "DB tables initialized; %d additive-column migration(s) "
+                "checked, %d historical row(s) migrated to new verdict taxonomy",
                 len(_ADDITIVE_COLUMNS),
+                total_rows_migrated,
             )
     except Exception as exc:  # noqa: BLE001 - re-raised below; we only sniff for one type to log a hint
         if _is_invalid_password_error(exc):

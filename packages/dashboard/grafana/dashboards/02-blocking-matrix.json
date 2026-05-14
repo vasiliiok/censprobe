@@ -108,64 +108,8 @@
                   {
                     "type": "value",
                     "options": {
-                      "DNS_BLOCKED": {
-                        "color": "red"
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "DOH_BLOCKED": {
-                        "color": "red"
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "IP_DROPPED": {
-                        "color": "red"
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "RST_INJECTED": {
-                        "color": "red"
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "REFUSED": {
-                        "color": "orange"
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
                       "THROTTLED": {
                         "color": "orange"
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "YOUTUBE_SNI_THROTTLED": {
-                        "color": "orange"
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "DNS_POISONING": {
-                        "color": "purple"
                       }
                     }
                   },
@@ -196,7 +140,7 @@
                   {
                     "type": "value",
                     "options": {
-                      "GEOBLOCK_NOT_CENSORSHIP": {
+                      "SERVER_REFUSED": {
                         "color": "purple"
                       }
                     }
@@ -232,7 +176,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT category, COUNT(*) AS blocked FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id IN (${test_id:singlequote}) AND verdict IN ('BLOCKED','DNS_BLOCKED','DOH_BLOCKED','DNS_POISONING','IP_DROPPED','RST_INJECTED','REFUSED','THROTTLED','YOUTUBE_SNI_THROTTLED') GROUP BY category ORDER BY blocked DESC",
+          "rawSql": "SELECT category, COUNT(*) AS blocked FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id IN (${test_id:singlequote}) AND verdict IN ('BLOCKED','THROTTLED') GROUP BY category ORDER BY blocked DESC",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -260,7 +204,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT target, verdict, method FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id IN (${test_id:singlequote}) AND verdict IN ('BLOCKED','DNS_BLOCKED','DOH_BLOCKED','DNS_POISONING','IP_DROPPED','RST_INJECTED','REFUSED','THROTTLED','YOUTUBE_SNI_THROTTLED') ORDER BY verdict, target LIMIT 50",
+          "rawSql": "SELECT target, verdict, method FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id IN (${test_id:singlequote}) AND verdict IN ('BLOCKED','THROTTLED') ORDER BY verdict, target LIMIT 50",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
