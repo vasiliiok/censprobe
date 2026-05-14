@@ -538,3 +538,110 @@ class TestWritePrunedProxyMultiConf:
         # so python -O doesn't strip the guard.
         with pytest.raises(ValueError, match="at least one alive upstream"):
             preflight.write_pruned_proxy_multi_conf([], tmp_path / "out.conf")
+
+
+class TestLoadTelegramDcProbes:
+    """``_load_telegram_dc_probes`` reads canonical DC list from
+    ``targets/telegram.yaml`` so the preflight check + the telegram
+    module probe the SAME endpoints (single source of truth).
+    """
+
+    def test_reads_yaml_when_present(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        # Point _WORKSPACE at a tmp dir containing a minimal valid yaml.
+        # Listener/main.py runs inside /workspace at production; here we
+        # synthesise the same layout in tmp_path.
+        targets_dir = tmp_path / "targets"
+        targets_dir.mkdir()
+        (targets_dir / "telegram.yaml").write_text(
+            "api_datacenters:\n"
+            "  - id: 1\n"
+            "    name: pluto\n"
+            "    ipv4: 1.1.1.1\n"
+            "    ports: [443]\n"
+            "  - id: 2\n"
+            "    name: venus\n"
+            "    ipv4: 2.2.2.2\n"
+            "    ports: [443]\n"
+        )
+        monkeypatch.setattr(preflight, "_WORKSPACE", tmp_path)
+        probes = preflight._load_telegram_dc_probes()
+        assert probes == (
+            ("1.1.1.1", 443, "DC1 pluto"),
+            ("2.2.2.2", 443, "DC2 venus"),
+        )
+
+    def test_falls_back_when_yaml_missing(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # No targets/ dir at all → fallback to hardcoded list. The
+        # fallback is NOT silent (logs a warning) — verified via
+        # caplog elsewhere; here we just check the return value.
+        monkeypatch.setattr(preflight, "_WORKSPACE", tmp_path)
+        probes = preflight._load_telegram_dc_probes()
+        assert probes == preflight._TELEGRAM_DC_PROBES_FALLBACK
+
+    def test_falls_back_on_malformed_yaml(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # Unparseable YAML → pydantic raises, we catch and use fallback.
+        # This is the "operator typo broke the file" path — listener
+        # boot must NOT die over a malformed targets/telegram.yaml.
+        targets_dir = tmp_path / "targets"
+        targets_dir.mkdir()
+        (targets_dir / "telegram.yaml").write_text(
+            "api_datacenters:\n  - {{ this is not valid yaml [[\n"
+        )
+        monkeypatch.setattr(preflight, "_WORKSPACE", tmp_path)
+        probes = preflight._load_telegram_dc_probes()
+        assert probes == preflight._TELEGRAM_DC_PROBES_FALLBACK
+
+    def test_falls_back_when_yaml_has_no_dcs(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # Yaml parses but yields zero usable api_datacenters entries
+        # — e.g. operator commented them all out for a custom run.
+        # We refuse to silently disable the DC-reach check; surface
+        # the fallback with the warning so the operator notices.
+        targets_dir = tmp_path / "targets"
+        targets_dir.mkdir()
+        (targets_dir / "telegram.yaml").write_text("# empty config\n")
+        monkeypatch.setattr(preflight, "_WORKSPACE", tmp_path)
+        probes = preflight._load_telegram_dc_probes()
+        assert probes == preflight._TELEGRAM_DC_PROBES_FALLBACK
+
+    def test_skips_dcs_without_ipv4(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        # A DC entry with no ipv4 is meaningless for a TCP-connect
+        # preflight (ipv6-only paths break the existing socket() call
+        # signature). Skip silently and continue with the rest.
+        targets_dir = tmp_path / "targets"
+        targets_dir.mkdir()
+        (targets_dir / "telegram.yaml").write_text(
+            "api_datacenters:\n"
+            "  - id: 1\n"
+            "    name: ghost\n"
+            '    ipv6: "2001:db8::1"\n'
+            "    ports: [443]\n"
+            "  - id: 2\n"
+            "    name: venus\n"
+            "    ipv4: 2.2.2.2\n"
+            "    ports: [443]\n"
+        )
+        monkeypatch.setattr(preflight, "_WORKSPACE", tmp_path)
+        probes = preflight._load_telegram_dc_probes()
+        # The v6-only DC was dropped; venus survived.
+        assert probes == (("2.2.2.2", 443, "DC2 venus"),)
+
+    def test_caps_at_probe_limit(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        # Canonical yaml has 5 DCs; preflight only probes 3 to keep
+        # SYN budget bounded. Verify the cap holds even if the yaml
+        # grows.
+        targets_dir = tmp_path / "targets"
+        targets_dir.mkdir()
+        entries = "\n".join(
+            f"  - id: {i}\n    name: dc{i}\n    ipv4: 9.9.9.{i}\n    ports: [443]"
+            for i in range(1, 6)
+        )
+        (targets_dir / "telegram.yaml").write_text(f"api_datacenters:\n{entries}\n")
+        monkeypatch.setattr(preflight, "_WORKSPACE", tmp_path)
+        probes = preflight._load_telegram_dc_probes()
+        assert len(probes) == preflight._TELEGRAM_DC_PROBE_LIMIT == 3

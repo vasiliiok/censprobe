@@ -57,20 +57,111 @@ _CONNTRACK_TARGET_MAX = 1_048_576
 _NF_MAX = Path("/proc/sys/net/netfilter/nf_conntrack_max")
 _NF_COUNT = Path("/proc/sys/net/netfilter/nf_conntrack_count")
 
-# Public Telegram DC IPv4 addresses. Sourced from
-# ``targets/telegram.yaml`` (which the solo package treats as
-# canonical) — duplicated here as a literal because the listener
-# image doesn't volume-mount the targets/ dir during all
-# deployments and we want this preflight to be self-contained.
+# Workspace mount point — where censprobe.yaml and targets/*.yaml live
+# in every deployment (compose mounts ``./:/workspace`` for all profiles).
+# Used by :func:`_load_telegram_dc_probes` to read the canonical DC list
+# from ``targets/telegram.yaml`` at preflight time.
+_WORKSPACE = Path("/workspace")
+
+# Path inside the workspace mount where the canonical Telegram DC
+# definitions live. Loaded once at preflight start; values flow into
+# :func:`_check_telegram_dc_reach` so the preflight check probes the
+# SAME endpoints that the telegram-module probes downstream — single
+# source of truth.
+_TELEGRAM_YAML_PATH = Path("targets/telegram.yaml")
+
+# Hardcoded fallback if ``targets/telegram.yaml`` is missing or
+# unparseable (image built without the workspace, dev workspace
+# moved). Listener boot never aborts on a missing yaml — we degrade
+# to this last-known-good list and surface a WARN so the operator
+# sees the fallback engaged. Updated 2026-05-14 from telegram.yaml.
 # Three DCs is enough to distinguish "all blocked" (all 3 fail)
-# from "one DC moved" (1-2 fail). If Telegram migrates an IP we
-# tolerate up to 2 stale entries before this preflight gives a
-# false WARN — refresh by re-reading the YAML on bump.
-_TELEGRAM_DC_PROBES: tuple[tuple[str, int, str], ...] = (
+# from "one DC moved" (1-2 fail).
+_TELEGRAM_DC_PROBES_FALLBACK: tuple[tuple[str, int, str], ...] = (
     ("149.154.175.53", 443, "DC1 pluto"),
     ("149.154.167.51", 443, "DC2 venus"),
     ("149.154.175.100", 443, "DC3 aurora"),
 )
+
+
+def _load_telegram_dc_probes() -> tuple[tuple[str, int, str], ...]:
+    """Read DC list from ``targets/telegram.yaml`` — single source of truth.
+
+    Falls back to :data:`_TELEGRAM_DC_PROBES_FALLBACK` when the yaml
+    is missing or unparseable, and logs a warning so the operator
+    sees that we're running on stale baked-in values. The fallback is
+    NOT silent because a stale list can mask a real DC migration —
+    if Telegram moves DC1 and our hardcoded ``149.154.175.53`` becomes
+    a dead address, the preflight would falsely flag every healthy
+    egress as "0/3 DCs reachable" without the operator knowing why.
+
+    Returns the first ``_TELEGRAM_DC_PROBE_LIMIT`` entries from
+    ``api_datacenters[]`` as ``(ipv4, port, "DC<id> <name>")`` tuples,
+    picking the first port from each DC's ``ports`` list (canonical
+    443 in current yaml).
+    """
+    # Local imports — preflight is imported at listener boot, before
+    # the asyncio loop is wired up. Loading probe-core's yaml parser
+    # at module-import time would force pydantic / yaml costs on every
+    # call site that touches preflight (e.g. unit tests). Lazy keeps
+    # the import graph shallow.
+    import yaml as _yaml
+    from censprobe_core.targets import TargetFile
+
+    yaml_path = _WORKSPACE / _TELEGRAM_YAML_PATH
+    if not yaml_path.exists():
+        logger.warning(
+            "preflight: %s missing — falling back to hardcoded DC list; "
+            "operator should rebuild image or check workspace mount",
+            yaml_path,
+        )
+        return _TELEGRAM_DC_PROBES_FALLBACK
+    try:
+        raw = _yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+        tf = TargetFile.model_validate(raw)
+    except Exception as e:
+        logger.warning(
+            "preflight: could not parse %s (%s) — falling back to hardcoded DC list",
+            yaml_path,
+            e,
+        )
+        return _TELEGRAM_DC_PROBES_FALLBACK
+
+    probes: list[tuple[str, int, str]] = []
+    for dc in tf.api_datacenters[:_TELEGRAM_DC_PROBE_LIMIT]:
+        if not dc.ipv4:
+            continue
+        # First v4 IP + first port — ``ports: [443, 80, 5222]`` in canonical
+        # yaml. 443 is the universally-reachable variant; 80 and 5222 are
+        # informational.
+        ipv4 = dc.ipv4[0]
+        port = dc.ports[0] if dc.ports else 443
+        # ``name`` is in the yaml (``name: pluto``) but TelegramDC's
+        # pydantic schema doesn't declare it as a typed field — it
+        # lands in ``model_extra`` thanks to ``extra="allow"``. Pull
+        # it from there so the operator-facing label stays consistent
+        # with the legacy hardcoded format ("DC<id> <name>").
+        extras = dc.model_extra or {}
+        name_raw = extras.get("name")
+        name = name_raw if isinstance(name_raw, str) and name_raw else None
+        display = f"DC{dc.id} {name}" if name else f"DC{dc.id}"
+        probes.append((ipv4, port, display))
+
+    if not probes:
+        logger.warning(
+            "preflight: %s parsed but yielded zero usable DC entries — "
+            "falling back to hardcoded list",
+            yaml_path,
+        )
+        return _TELEGRAM_DC_PROBES_FALLBACK
+    return tuple(probes)
+
+
+# Cap on how many DCs to probe at preflight. The full canonical list
+# has 5 DCs (pluto/venus/aurora/vesta/flora across Miami/Amsterdam/
+# Singapore); three is enough to distinguish "all blocked" from
+# "one DC moved" without 5× SYN budget at startup.
+_TELEGRAM_DC_PROBE_LIMIT = 3
 
 # The C MTProxy binary upstreams to Telegram DCs on TCP/8888 (not 443).
 # proxy-multi.conf is downloaded at image build time from
@@ -526,11 +617,12 @@ async def _check_telegram_dc_reach(
             await writer.wait_closed()
         return True
 
-    results = await asyncio.gather(*(_connect(ip, port) for ip, port, _ in _TELEGRAM_DC_PROBES))
+    probes = _load_telegram_dc_probes()
+    results = await asyncio.gather(*(_connect(ip, port) for ip, port, _ in probes))
     reachable = sum(1 for ok in results if ok)
-    total = len(_TELEGRAM_DC_PROBES)
+    total = len(probes)
     if reachable == 0:
-        names = ", ".join(name for _, _, name in _TELEGRAM_DC_PROBES)
+        names = ", ".join(name for _, _, name in probes)
         return CheckResult(
             "telegram-dc-reach",
             "warn",
