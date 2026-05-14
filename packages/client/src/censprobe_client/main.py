@@ -37,6 +37,12 @@ import click
 import pydantic
 from censprobe_core.config import load_config
 from censprobe_core.credentials_reader import parse_protocols_yaml
+from censprobe_core.diagnostic_notes import (
+    NOTE_ASYMMETRIC_DPI,
+    NOTE_CLIENT_OVERREAD,
+    NOTE_LISTENER_DC_UNREACHABLE_SHORT,
+    NOTE_LISTENER_SAW_DATA,
+)
 from censprobe_core.models import LiveSnapshot, ProtocolResult, Verdict
 from censprobe_core.protocol_probes import ASYMMETRIC_DPI_ERROR_MARKERS, ProbeResult
 from censprobe_core.protocol_registry import enabled_protocols, is_mtg_protocol, known_names
@@ -48,6 +54,18 @@ from rich.table import Table
 from censprobe_client._probe_dispatch import CLIENT_PROBES, ProbeFactory
 
 WORKSPACE = Path("/workspace")
+
+# Rich-color mapping for verdicts. Kept module-level so the two
+# Rich-rendered tables (per-probe results + cross-verify) use the same
+# palette — pre-2026-05 each table had its own copy, and a future
+# verdict enum addition required two parallel edits to stay consistent.
+# Unknown verdicts fall back to "white" at the call site via .get().
+_VERDICT_COLORS: dict[Verdict, str] = {
+    Verdict.OK: "green",
+    Verdict.HANDSHAKE_ONLY: "yellow",
+    Verdict.BLOCKED: "red",
+    Verdict.ERROR: "dim",
+}
 
 logging.basicConfig(
     level=logging.INFO,
@@ -837,12 +855,7 @@ def _print_results(results: dict[str, ProbeResult], server_host: str) -> None:
     table.add_column("Throughput", justify="right", width=14)
     table.add_column("Error", style="dim", width=32)
 
-    verdict_colors = {
-        Verdict.OK: "green",
-        Verdict.HANDSHAKE_ONLY: "yellow",
-        Verdict.BLOCKED: "red",
-        Verdict.ERROR: "dim",
-    }
+    verdict_colors = _VERDICT_COLORS
 
     ok_count = 0
     for name, r in results.items():
@@ -967,7 +980,7 @@ def _agreed_verdict(
         return str(listener), ""
     # Both sides disagree — listener wins by default, but flag it.
     if client == Verdict.OK:
-        return str(listener), "client overread (listener saw less)"
+        return str(listener), NOTE_CLIENT_OVERREAD
     # Asymmetric DPI: client got a read-timeout-after-handshake while
     # the listener saw the L4 handshake. Two distinct shapes verified
     # in pcap audits (see docstring); the listener counters cannot
@@ -989,16 +1002,10 @@ def _agreed_verdict(
         # one with positive evidence (preflight TCP SYN to 149.154.0.0/16
         # got dropped), not the speculative DPI attribution.
         if protocol is not None and is_mtg_protocol(protocol) and dc_reach_ok is False:
-            return (
-                str(Verdict.HANDSHAKE_ONLY),
-                "listener egress to Telegram DCs blocked — no DC relay possible",
-            )
-        return (
-            str(Verdict.HANDSHAKE_ONLY),
-            "asymmetric DPI: handshake passed, data plane filtered",
-        )
+            return (str(Verdict.HANDSHAKE_ONLY), NOTE_LISTENER_DC_UNREACHABLE_SHORT)
+        return (str(Verdict.HANDSHAKE_ONLY), NOTE_ASYMMETRIC_DPI)
     if listener == Verdict.OK:
-        return str(listener), "listener saw data the client missed"
+        return str(listener), NOTE_LISTENER_SAW_DATA
     # Both non-OK but different (e.g. HANDSHAKE_ONLY vs BLOCKED).
     return str(listener), f"client={client}"
 
@@ -1032,12 +1039,7 @@ def _print_cross_verification(
     table.add_column("Final", width=18)
     table.add_column("Note", style="dim", width=42)
 
-    verdict_color = {
-        Verdict.OK: "green",
-        Verdict.HANDSHAKE_ONLY: "yellow",
-        Verdict.BLOCKED: "red",
-        Verdict.ERROR: "dim",
-    }
+    verdict_color = _VERDICT_COLORS
 
     disagreements = 0
     client_overread = 0

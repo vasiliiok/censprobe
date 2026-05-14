@@ -22,7 +22,7 @@ Adding a new protocol:
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from censprobe_core.models import LiveSnapshot
 
@@ -76,6 +76,33 @@ class Responder(Protocol):
     # returns the same shape, so the cross-thread HTTP handler can
     # build a uniform JSON without dispatching by class.
     def live_snapshot(self) -> LiveSnapshot: ...
+
+
+@runtime_checkable
+class SelfTestCapable(Protocol):
+    """Subset of the Responder contract carrying a startup self-test.
+
+    Only :class:`MTProxyOrigResponder` implements this today (its C
+    MTProxy daemon can prune all upstreams and skip subprocess launch
+    at preflight, which is positive evidence of network-level Telegram
+    blocking). Captured as a Protocol so the listener-main code path
+    that dispatches on these fields stops using ``getattr(...)`` duck-
+    typing — mypy now flags any drift between the responder
+    implementation and the consumer.
+
+    Protocol is ``runtime_checkable`` so per-protocol main-loop branches
+    can do ``isinstance(responder, SelfTestCapable)`` instead of
+    string-comparing protocol names.
+    """
+
+    @property
+    def unavailable(self) -> bool: ...
+
+    @property
+    def upstream_alive_count(self) -> int: ...
+
+    @property
+    def upstream_total_count(self) -> int: ...
 
 
 # Each factory takes (creds, echo_server) and returns a fresh, unstarted

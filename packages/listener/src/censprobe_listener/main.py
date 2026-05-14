@@ -42,6 +42,7 @@ from typing import Any
 
 import click
 from censprobe_core.config import get_config, load_config
+from censprobe_core.diagnostic_notes import NOTE_LISTENER_DC_UNREACHABLE_LONG
 from censprobe_core.models import EndpointMeta, ListenerReport, ProtocolResult, Verdict
 from censprobe_core.protocol_registry import (
     enabled_protocols,
@@ -56,7 +57,11 @@ from rich.logging import RichHandler
 from rich.panel import Panel
 from rich.table import Table
 
-from censprobe_listener._responder_dispatch import LISTENER_RESPONDERS, Responder
+from censprobe_listener._responder_dispatch import (
+    LISTENER_RESPONDERS,
+    Responder,
+    SelfTestCapable,
+)
 from censprobe_listener.cred_server import CredServer, detect_external_ip
 from censprobe_listener.credentials import (
     ProtocolCredentials,
@@ -479,15 +484,15 @@ async def _async_main(
     post_preflight: list[CheckResult] = []
     if "mtproto_orig" in responders:
         mt_orig = responders["mtproto_orig"]
-        if getattr(mt_orig, "unavailable", False):
+        if isinstance(mt_orig, SelfTestCapable) and mt_orig.unavailable:
             # Responder deliberately skipped its subprocess launch
             # because the C MTProxy binary's upstream Telegram fleet is
             # unreachable from this vantage (typical RU host). Running
             # the loopback self-test would just time out for 12 s and
             # land in the same "False" branch — skip the wait and
             # surface the diagnostic now.
-            alive = getattr(mt_orig, "upstream_alive_count", 0)
-            total = getattr(mt_orig, "upstream_total_count", 0)
+            alive = mt_orig.upstream_alive_count
+            total = mt_orig.upstream_total_count
             post_preflight.append(
                 CheckResult(
                     "mtproxy-orig-self-test",
@@ -861,14 +866,7 @@ def _finalize_protocol_result(
     # without the trailing note block would silently drop the
     # attribution context.
     if cap_at is Verdict.HANDSHAKE_ONLY:
-        pr.note = (
-            "listener egress to Telegram DCs blocked at preflight "
-            "(telegram-dc-reach 0/N) — mtg accepted the FakeTLS "
-            "handshake locally but cannot relay to a real DC, so "
-            "client-side resPQ never arrives. The end-to-end protocol "
-            "is unusable from this listener vantage, independent of "
-            "any client-side DPI."
-        )
+        pr.note = NOTE_LISTENER_DC_UNREACHABLE_LONG
 
     return pr
 
@@ -905,9 +903,14 @@ def _mtproto_orig_failure_note(responder: Responder, self_test_ok: bool | None) 
     """
     if self_test_ok is not False:
         return None
-    alive = getattr(responder, "upstream_alive_count", 0)
-    total = getattr(responder, "upstream_total_count", 0)
-    if getattr(responder, "unavailable", False):
+    # mtproto_orig is the only SelfTestCapable responder today; if the
+    # protocol type widens in the future this branch already raises a
+    # mypy error rather than silently producing a useless note.
+    if not isinstance(responder, SelfTestCapable):
+        return None
+    alive = responder.upstream_alive_count
+    total = responder.upstream_total_count
+    if responder.unavailable:
         return (
             f"mtproto-proxy not launched: {alive}/{total} proxy-multi.conf "
             f"upstreams reachable on TCP/8888 — Telegram's proxy fleet is "
@@ -1064,13 +1067,12 @@ def _print_responder_status(
         port_str = f"{transport}/{port_value}"
         if spec.name in responders:
             responder = responders[spec.name]
-            if getattr(responder, "unavailable", False):
-                alive = getattr(responder, "upstream_alive_count", 0)
-                total = getattr(responder, "upstream_total_count", 0)
+            if isinstance(responder, SelfTestCapable) and responder.unavailable:
                 table.add_row(
                     spec.name,
                     port_str,
-                    f"[yellow]Skipped ({alive}/{total} upstreams)[/yellow]",
+                    f"[yellow]Skipped ({responder.upstream_alive_count}/"
+                    f"{responder.upstream_total_count} upstreams)[/yellow]",
                 )
             else:
                 table.add_row(spec.name, port_str, "[green]Running[/green]")
