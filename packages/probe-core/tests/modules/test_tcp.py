@@ -105,8 +105,10 @@ async def test_ok_on_clean_connect(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(tcp_mod.asyncio, "open_connection", _fake_open)
     monkeypatch.setattr(tcp_mod.asyncio, "wait_for", _passthrough_wait_for)
-    outcome = await _single_tcp_attempt("1.2.3.4", 443, _cfg())
+    outcome, kernel_rtt_us = await _single_tcp_attempt("1.2.3.4", 443, _cfg())
     assert outcome == (Verdict.OK, None)
+    # Kernel RTT comes from a fake writer with no real socket → None.
+    assert kernel_rtt_us is None
 
 
 async def test_timeout_returns_ip_dropped(
@@ -117,8 +119,10 @@ async def test_timeout_returns_ip_dropped(
 
     monkeypatch.setattr(tcp_mod.asyncio, "open_connection", _fake_open)
     monkeypatch.setattr(tcp_mod.asyncio, "wait_for", _passthrough_wait_for)
-    outcome = await _single_tcp_attempt("1.2.3.4", 443, _cfg())
+    outcome, kernel_rtt_us = await _single_tcp_attempt("1.2.3.4", 443, _cfg())
     assert outcome == (Verdict.BLOCKED, BlockingMethod.IP_DROPPED)
+    # No successful connect → no socket → no kernel RTT.
+    assert kernel_rtt_us is None
 
 
 async def test_fast_refused_is_rst_injected(
@@ -134,8 +138,9 @@ async def test_fast_refused_is_rst_injected(
 
     monkeypatch.setattr(tcp_mod.asyncio, "open_connection", _fake_open)
     monkeypatch.setattr(tcp_mod.asyncio, "wait_for", _passthrough_wait_for)
-    outcome = await _single_tcp_attempt("1.2.3.4", 443, _cfg())
+    outcome, kernel_rtt_us = await _single_tcp_attempt("1.2.3.4", 443, _cfg())
     assert outcome == (Verdict.BLOCKED, BlockingMethod.TCP_RST_INJECTION)
+    assert kernel_rtt_us is None
 
 
 async def test_slow_refused_is_refused(
@@ -150,8 +155,9 @@ async def test_slow_refused_is_refused(
 
     monkeypatch.setattr(tcp_mod.asyncio, "open_connection", _fake_open)
     monkeypatch.setattr(tcp_mod.asyncio, "wait_for", _passthrough_wait_for)
-    outcome = await _single_tcp_attempt("1.2.3.4", 443, _cfg())
+    outcome, kernel_rtt_us = await _single_tcp_attempt("1.2.3.4", 443, _cfg())
     assert outcome == (Verdict.BLOCKED, BlockingMethod.TCP_REFUSED)
+    assert kernel_rtt_us is None
 
 
 async def test_oserror_with_reset_keyword_uses_threshold(
@@ -166,8 +172,9 @@ async def test_oserror_with_reset_keyword_uses_threshold(
 
     monkeypatch.setattr(tcp_mod.asyncio, "open_connection", _fake_open)
     monkeypatch.setattr(tcp_mod.asyncio, "wait_for", _passthrough_wait_for)
-    outcome = await _single_tcp_attempt("1.2.3.4", 443, _cfg())
+    outcome, kernel_rtt_us = await _single_tcp_attempt("1.2.3.4", 443, _cfg())
     assert outcome == (Verdict.BLOCKED, BlockingMethod.TCP_REFUSED)
+    assert kernel_rtt_us is None
 
 
 async def test_oserror_unrelated_returns_error(
@@ -180,5 +187,6 @@ async def test_oserror_unrelated_returns_error(
 
     monkeypatch.setattr(tcp_mod.asyncio, "open_connection", _fake_open)
     monkeypatch.setattr(tcp_mod.asyncio, "wait_for", _passthrough_wait_for)
-    outcome = await _single_tcp_attempt("1.2.3.4", 443, _cfg())
+    outcome, kernel_rtt_us = await _single_tcp_attempt("1.2.3.4", 443, _cfg())
     assert outcome == (Verdict.ERROR, None)
+    assert kernel_rtt_us is None

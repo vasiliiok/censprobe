@@ -34,6 +34,7 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
+from censprobe_core._tcp_kernel_rtt import read_kernel_rtt_us
 from censprobe_core.config import get_config
 
 if TYPE_CHECKING:
@@ -48,6 +49,12 @@ logger = logging.getLogger(__name__)
 # Internal attempt outcome — verdict + blocking method (None if not blocked).
 # Returned by _single_tcp_attempt and majority-voted in _test_tcp.
 _AttemptOutcome = tuple[Verdict, "BlockingMethod | None"]
+
+
+# Sentinel meaning "kernel RTT not available for this attempt" — caller
+# falls back to wall-clock timing. Same shape as _AttemptOutcome (tuple
+# return) so the per-attempt loop in _test_tcp stays linear.
+_NO_KERNEL_RTT: int | None = None
 
 
 async def run_tcp_tests(
@@ -76,12 +83,25 @@ async def _test_tcp(ip: str, port: int, repeats: int, cfg: TcpModuleConfig) -> T
     outcomes: list[_AttemptOutcome] = []
     rtts: list[float] = []
 
+    # Per-attempt wall-clock fallbacks for when TCP_INFO is unavailable
+    # (non-Linux, getsockopt failure). Used only as a last resort — the
+    # kernel-side tcpi_rtt path is preferred because it's invariant to
+    # asyncio event-loop scheduling overhead (verified on Vultr 2026-05-14:
+    # under Phase-A load, wall-clock RTT inflated 100× while kernel RTT
+    # stayed accurate).
+    wallclock_rtts: list[float] = []
     for _ in range(repeats):
         t0 = time.monotonic()
-        outcome = await _single_tcp_attempt(ip, port, cfg)
-        rtt_ms = (time.monotonic() - t0) * 1000
+        outcome, kernel_rtt_us = await _single_tcp_attempt(ip, port, cfg)
+        wallclock_ms = (time.monotonic() - t0) * 1000
         outcomes.append(outcome)
-        rtts.append(rtt_ms)
+        wallclock_rtts.append(wallclock_ms)
+        # Prefer kernel-measured RTT when available — see
+        # ``_tcp_kernel_rtt.read_kernel_rtt_us`` for the rationale.
+        if kernel_rtt_us is not None:
+            rtts.append(kernel_rtt_us / 1000.0)
+        else:
+            rtts.append(wallclock_ms)
         await asyncio.sleep(0.5)  # small jitter between repeats
 
     # Aggregate: majority wins on the (verdict, method) tuple
@@ -107,10 +127,15 @@ async def _test_tcp(ip: str, port: int, repeats: int, cfg: TcpModuleConfig) -> T
     # comparison with the SYN-ACK TTL on the same path, which the MVP
     # doesn't do.
     is_heuristic_rst = final_method == BlockingMethod.TCP_RST_INJECTION
+    # rtts is what we report as rtt_ms (kernel-preferred); wallclock_rtts
+    # preserves the old measurement for evidence-only debugging — useful
+    # for spotting event-loop scheduling spikes (a wallclock value 100×
+    # the kernel rtt is the diagnostic signature of a busy Phase A).
     evidence: dict[str, object] = {
         "all_verdicts": [str(v) for v, _ in outcomes],
         "all_methods": [str(m) if m else None for _, m in outcomes],
         "rtts_ms": rtts,
+        "wallclock_rtts_ms": wallclock_rtts,
         "rst_detection": "rtt_heuristic_no_scapy",
     }
     if is_heuristic_rst:
@@ -145,30 +170,42 @@ async def _test_tcp(ip: str, port: int, repeats: int, cfg: TcpModuleConfig) -> T
     )
 
 
-async def _single_tcp_attempt(ip: str, port: int, cfg: TcpModuleConfig) -> _AttemptOutcome:
-    """Attempt a single TCP connect; return (verdict, method) tuple."""
+async def _single_tcp_attempt(
+    ip: str, port: int, cfg: TcpModuleConfig
+) -> tuple[_AttemptOutcome, int | None]:
+    """Attempt a single TCP connect; return ``(outcome, kernel_rtt_us)``.
+
+    ``kernel_rtt_us`` is the Linux ``tcpi_rtt`` reading taken immediately
+    after a successful connect — see ``_tcp_kernel_rtt`` module docstring
+    for why we prefer this over wall-clock timing. ``None`` on any
+    non-OK outcome or when TCP_INFO is unavailable; the caller falls
+    back to wall-clock RTT in that case.
+    """
     try:
         t0 = time.monotonic()
         _, writer = await asyncio.wait_for(
             asyncio.open_connection(ip, port),
             timeout=cfg.syn_timeout_sec,
         )
+        # Read kernel RTT BEFORE close() — once the socket enters
+        # FIN_WAIT/TIME_WAIT the kernel may reset tcpi_rtt to 0.
+        kernel_rtt_us = read_kernel_rtt_us(writer)
         writer.close()
         # We've already proven reachability with the SYN-ACK; clean shutdown
         # is unnecessary and may race with peer-side close.
         with contextlib.suppress(Exception):
             await writer.wait_closed()
-        return Verdict.OK, None
+        return (Verdict.OK, None), kernel_rtt_us
 
     except TimeoutError:
-        return Verdict.BLOCKED, BlockingMethod.IP_DROPPED
+        return (Verdict.BLOCKED, BlockingMethod.IP_DROPPED), _NO_KERNEL_RTT
 
     except ConnectionRefusedError:
         # Real RST from the host — port closed but host is alive
         elapsed_ms = (time.monotonic() - t0) * 1000
         if elapsed_ms < cfg.fast_rst_threshold_ms:
-            return Verdict.BLOCKED, BlockingMethod.TCP_RST_INJECTION
-        return Verdict.BLOCKED, BlockingMethod.TCP_REFUSED
+            return (Verdict.BLOCKED, BlockingMethod.TCP_RST_INJECTION), _NO_KERNEL_RTT
+        return (Verdict.BLOCKED, BlockingMethod.TCP_REFUSED), _NO_KERNEL_RTT
 
     except OSError as e:
         # Could be ECONNRESET (RST) or other socket error
@@ -176,10 +213,10 @@ async def _single_tcp_attempt(ip: str, port: int, cfg: TcpModuleConfig) -> _Atte
         err_str = str(e).lower()
         if "reset" in err_str or "refused" in err_str:
             if elapsed_ms < cfg.fast_rst_threshold_ms:
-                return Verdict.BLOCKED, BlockingMethod.TCP_RST_INJECTION
-            return Verdict.BLOCKED, BlockingMethod.TCP_REFUSED
+                return (Verdict.BLOCKED, BlockingMethod.TCP_RST_INJECTION), _NO_KERNEL_RTT
+            return (Verdict.BLOCKED, BlockingMethod.TCP_REFUSED), _NO_KERNEL_RTT
         logger.debug("tcp probe %s:%d OSError: %s", ip, port, e)
-        return Verdict.ERROR, None
+        return (Verdict.ERROR, None), _NO_KERNEL_RTT
 
     except Exception as e:
         # Defensive catch: any unexpected exception (TypeError, etc.)
@@ -187,7 +224,7 @@ async def _single_tcp_attempt(ip: str, port: int, cfg: TcpModuleConfig) -> _Atte
         # to a generic ERROR row without traceback. exc_info=True
         # produces the full stack at DEBUG level.
         logger.debug("tcp probe %s:%d unexpected: %s", ip, port, e, exc_info=True)
-        return Verdict.ERROR, None
+        return (Verdict.ERROR, None), _NO_KERNEL_RTT
 
 
 # Verdict severity for tie-breaking in :func:`_majority`. Lower value =
