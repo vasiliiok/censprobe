@@ -1,5 +1,5 @@
 {
-  "title": "08 — QUIC & ECH",
+  "title": "08 \u2014 QUIC & ECH",
   "uid": "censprobe-08",
   "tags": [
     "censprobe"
@@ -23,8 +23,8 @@
         },
         "query": "SELECT test_id FROM test_runs ORDER BY created_at DESC",
         "refresh": 2,
-        "multi": false,
-        "includeAll": false
+        "multi": true,
+        "includeAll": true
       }
     ]
   },
@@ -41,7 +41,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "**Jump to:** [01 Overview](/d/censprobe-01) · [02 Blocking Matrix](/d/censprobe-02) · [03 Telegram](/d/censprobe-03) · [04 Protocol Reachability](/d/censprobe-04) · [05 Technique Attribution](/d/censprobe-05) · [06 Compare Tests](/d/censprobe-06) · [07 Cloudflare & WARP](/d/censprobe-07) · [08 QUIC & ECH](/d/censprobe-08) · [09 DNS](/d/censprobe-09) · [10 TLS](/d/censprobe-10) · [11 Matrix Heatmap](/d/censprobe-11-matrix-heatmap)"
+        "content": "**Jump to:** [01 Overview](/d/censprobe-01?var-test_id=${test_id}) \u00b7 [02 Blocking Matrix](/d/censprobe-02?var-test_id=${test_id}) \u00b7 [03 Telegram](/d/censprobe-03?var-test_id=${test_id}) \u00b7 [04 Protocol Reachability](/d/censprobe-04?var-test_id=${test_id}) \u00b7 [05 Technique Attribution](/d/censprobe-05?var-test_id=${test_id}) \u00b7 [06 Compare Tests](/d/censprobe-06?var-test_id=${test_id}) \u00b7 [07 Cloudflare & WARP](/d/censprobe-07?var-test_id=${test_id}) \u00b7 [08 QUIC & ECH](/d/censprobe-08?var-test_id=${test_id}) \u00b7 [09 DNS](/d/censprobe-09?var-test_id=${test_id}) \u00b7 [10 TLS](/d/censprobe-10?var-test_id=${test_id}) \u00b7 [11 Matrix Heatmap](/d/censprobe-11-matrix-heatmap?var-test_id=${test_id})"
       }
     },
     {
@@ -61,7 +61,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT ROUND(100.0 * COUNT(*) FILTER (WHERE verdict = 'OK') / NULLIF(COUNT(*), 0)) AS \"QUIC Score\" FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND subcategory = 'cloudflare_quic'",
+          "rawSql": "SELECT ROUND(100.0 * COUNT(*) FILTER (WHERE verdict = 'OK') / NULLIF(COUNT(*), 0)) AS \"QUIC Score\" FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id IN (${test_id:singlequote}) AND subcategory = 'cloudflare_quic'",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -93,7 +93,8 @@
                 "value": 70
               }
             ]
-          }
+          },
+          "noValue": "\u2014"
         }
       }
     },
@@ -114,7 +115,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT test, target, verdict, method, rtt_ms, notes FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND subcategory = 'cloudflare_quic' ORDER BY test",
+          "rawSql": "SELECT test, target, verdict, method, rtt_ms, notes FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id IN (${test_id:singlequote}) AND subcategory = 'cloudflare_quic' ORDER BY test",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -134,8 +135,10 @@
             },
             "properties": [
               {
-                "id": "custom.displayMode",
-                "value": "color-background"
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
               },
               {
                 "id": "mappings",
@@ -188,7 +191,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT test, target, verdict, method, notes FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND subcategory = 'tls_ech' ORDER BY test",
+          "rawSql": "SELECT test, target, verdict, method, notes FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id IN (${test_id:singlequote}) AND subcategory = 'tls_ech' ORDER BY test",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -208,8 +211,10 @@
             },
             "properties": [
               {
-                "id": "custom.displayMode",
-                "value": "color-background"
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
               },
               {
                 "id": "mappings",
@@ -270,7 +275,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT category, test, target, verdict, method, rtt_ms, notes FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND method = 'quic_dropped' ORDER BY category, test",
+          "rawSql": "SELECT category, test, target, verdict, method, rtt_ms, notes FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id IN (${test_id:singlequote}) AND method = 'quic_dropped' ORDER BY category, test",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -290,8 +295,10 @@
             },
             "properties": [
               {
-                "id": "custom.displayMode",
-                "value": "color-background"
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
               },
               {
                 "id": "mappings",
@@ -343,7 +350,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT verdict, COUNT(*) AS count FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND subcategory = 'tls_ech' GROUP BY verdict ORDER BY count DESC",
+          "rawSql": "SELECT verdict, COUNT(*) AS count FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id IN (${test_id:singlequote}) AND subcategory = 'tls_ech' GROUP BY verdict ORDER BY count DESC",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -353,7 +360,27 @@
             "uid": "DS_CENSPROBE_PG"
           }
         }
-      ]
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "right",
+          "values": [
+            "value"
+          ]
+        },
+        "displayLabels": [
+          "name",
+          "percent"
+        ],
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": true
+        }
+      }
     },
     {
       "id": 6,
@@ -372,7 +399,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT ls.session_id, COALESCE(ls.client_meta->'asn'->>'org', '—') AS client_org, pr.verdict, pr.handshake_count, pr.data_transfer_ok, pr.avg_throughput_mbps FROM protocol_results pr JOIN listener_sessions ls ON ls.id = pr.session_id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE tr.test_id = ${test_id:sqlstring} AND pr.protocol = 'hysteria2' ORDER BY ls.session_id",
+          "rawSql": "SELECT ls.session_id, COALESCE(ls.client_meta->'asn'->>'org', '\u2014') AS client_org, pr.verdict, pr.handshake_count, pr.data_transfer_ok, pr.avg_throughput_mbps FROM protocol_results pr JOIN listener_sessions ls ON ls.id = pr.session_id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE tr.test_id IN (${test_id:singlequote}) AND pr.protocol = 'hysteria2' ORDER BY ls.session_id",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -392,8 +419,10 @@
             },
             "properties": [
               {
-                "id": "custom.displayMode",
-                "value": "color-background"
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
               },
               {
                 "id": "mappings",

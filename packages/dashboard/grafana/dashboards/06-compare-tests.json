@@ -1,5 +1,5 @@
 {
-  "title": "06 — Analytics & Compare",
+  "title": "06 \u2014 Analytics & Compare",
   "uid": "censprobe-06",
   "tags": [
     "censprobe"
@@ -221,7 +221,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "**Jump to:** [01 Overview](/d/censprobe-01) · [02 Blocking Matrix](/d/censprobe-02) · [03 Telegram](/d/censprobe-03) · [04 Protocol Reachability](/d/censprobe-04) · [05 Technique Attribution](/d/censprobe-05) · [06 Analytics & Compare](/d/censprobe-06) · [07 Cloudflare & WARP](/d/censprobe-07) · [08 QUIC & ECH](/d/censprobe-08) · [09 DNS](/d/censprobe-09) · [10 TLS](/d/censprobe-10) · [11 Matrix Heatmap](/d/censprobe-11-matrix-heatmap)"
+        "content": "**Jump to:** [01 Overview](/d/censprobe-01?var-test_id=${test_id}) \u00b7 [02 Blocking Matrix](/d/censprobe-02?var-test_id=${test_id}) \u00b7 [03 Telegram](/d/censprobe-03?var-test_id=${test_id}) \u00b7 [04 Protocol Reachability](/d/censprobe-04?var-test_id=${test_id}) \u00b7 [05 Technique Attribution](/d/censprobe-05?var-test_id=${test_id}) \u00b7 [06 Analytics & Compare](/d/censprobe-06?var-test_id=${test_id}) \u00b7 [07 Cloudflare & WARP](/d/censprobe-07?var-test_id=${test_id}) \u00b7 [08 QUIC & ECH](/d/censprobe-08?var-test_id=${test_id}) \u00b7 [09 DNS](/d/censprobe-09?var-test_id=${test_id}) \u00b7 [10 TLS](/d/censprobe-10?var-test_id=${test_id}) \u00b7 [11 Matrix Heatmap](/d/censprobe-11-matrix-heatmap?var-test_id=${test_id})"
       }
     },
     {
@@ -253,6 +253,32 @@
       ],
       "options": {
         "xField": "group_name"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 40
+              },
+              {
+                "color": "green",
+                "value": 70
+              }
+            ]
+          },
+          "min": 0,
+          "max": 100
+        }
       }
     },
     {
@@ -281,12 +307,17 @@
             "uid": "DS_CENSPROBE_PG"
           }
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "\u2014"
+        }
+      }
     },
     {
       "id": 5,
-      "title": "Score Trend Over Time",
-      "type": "timeseries",
+      "title": "Score by Group (most recent run)",
+      "type": "barchart",
       "gridPos": {
         "x": 0,
         "y": 12,
@@ -299,8 +330,8 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT test_runs.created_at AS \"time\", ${group_by:raw} AS metric, AVG(test_runs.overall_score) AS value FROM test_runs \nWHERE \n    (test_runs.server_meta->'asn'->>'org' IN (${var_company:singlequote}))\n    AND ('AS' || (test_runs.server_meta->'asn'->>'asn') IN (${var_asn:singlequote}))\n    AND (COALESCE(test_runs.server_meta->'datacenter'->>'name', 'No DC') IN (${var_datacenter:singlequote}))\n    AND (test_runs.server_meta->'location'->>'country_code' IN (${var_country:singlequote}))\n    AND (test_runs.test_id IN (${var_test_id:singlequote}))\n GROUP BY 1, 2 ORDER BY 1",
-          "format": "time_series",
+          "rawSql": "SELECT ${group_by:raw} AS metric, AVG(test_runs.overall_score) AS value FROM test_runs WHERE (test_runs.server_meta->'asn'->>'org' IN (${var_company:singlequote})) AND ('AS' || (test_runs.server_meta->'asn'->>'asn') IN (${var_asn:singlequote})) AND (COALESCE(test_runs.server_meta->'datacenter'->>'name', 'No DC') IN (${var_datacenter:singlequote})) AND (test_runs.server_meta->'location'->>'country_code' IN (${var_country:singlequote})) AND (test_runs.test_id IN (${var_test_id:singlequote})) AND test_runs.overall_score IS NOT NULL GROUP BY 1 ORDER BY value ASC",
+          "format": "table",
           "refId": "A",
           "editorMode": "code",
           "rawQuery": true,
@@ -309,7 +340,51 @@
             "uid": "DS_CENSPROBE_PG"
           }
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 40
+              },
+              {
+                "color": "green",
+                "value": 70
+              }
+            ]
+          },
+          "min": 0,
+          "max": 100,
+          "unit": "short",
+          "noValue": "\u2014"
+        },
+        "overrides": []
+      },
+      "description": "Latest overall_score per group. Use the time picker to scope; switch to a table for full history.",
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "auto",
+        "legend": {
+          "showLegend": false,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        },
+        "xField": "metric"
+      }
     },
     {
       "id": 3,
@@ -376,7 +451,7 @@
     {
       "id": 101,
       "type": "barchart",
-      "title": "Worst Telegram Health (top-20)",
+      "title": "Telegram Health \u2014 ranking (worst-first)",
       "description": "20 servers with the lowest telegram_health, worst first. Honours active filters.",
       "datasource": {
         "type": "postgres",
@@ -445,7 +520,7 @@
     {
       "id": 102,
       "type": "barchart",
-      "title": "Worst DNS Integrity (top-20)",
+      "title": "DNS Integrity \u2014 ranking (worst-first)",
       "description": "20 servers with the lowest DNS integrity, worst first. Honours active filters.",
       "datasource": {
         "type": "postgres",
@@ -514,7 +589,7 @@
     {
       "id": 103,
       "type": "barchart",
-      "title": "Worst TLS Integrity (top-20)",
+      "title": "TLS Integrity \u2014 ranking (worst-first)",
       "description": "20 servers with the lowest TLS integrity, worst first. Honours active filters.",
       "datasource": {
         "type": "postgres",
@@ -583,7 +658,7 @@
     {
       "id": 104,
       "type": "barchart",
-      "title": "Company × ${var_protocol} reachability (worst-first)",
+      "title": "Company \u00d7 ${var_protocol} reachability (worst-first)",
       "description": "% sessions with verdict=OK for the selected protocol, grouped by company. Worst-first.",
       "datasource": {
         "type": "postgres",
@@ -668,7 +743,7 @@
             "uid": "DS_CENSPROBE_PG"
           },
           "format": "table",
-          "rawSql": "SELECT \n  COALESCE(test_runs.server_meta->'asn'->>'org', '— unknown —') AS company,\n  ROUND(100.0 * SUM(CASE WHEN pr.verdict='OK' THEN 1 ELSE 0 END) /\n        NULLIF(COUNT(pr.id), 0), 1) AS \"% OK\",\n  COUNT(pr.id) AS sessions\nFROM test_runs\nJOIN listener_sessions ls ON ls.test_run_id = test_runs.id\nJOIN protocol_results pr ON pr.session_id = ls.id\nWHERE pr.protocol = ${var_protocol:singlequote}\n    AND (test_runs.server_meta->'asn'->>'org' IN (${var_company:singlequote}))\n    AND ('AS' || (test_runs.server_meta->'asn'->>'asn') IN (${var_asn:singlequote}))\n    AND (COALESCE(test_runs.server_meta->'datacenter'->>'name', 'No DC') IN (${var_datacenter:singlequote}))\n    AND (test_runs.server_meta->'location'->>'country_code' IN (${var_country:singlequote}))\n    AND (test_runs.test_id IN (${var_test_id:singlequote}))\n    AND (('Mobile' IN (${var_client_network:singlequote}) AND ls.is_mobile)\n         OR ('Whitelist' IN (${var_client_network:singlequote}) AND ls.is_whitelist)\n         OR ('Regular' IN (${var_client_network:singlequote}) AND NOT ls.is_mobile AND NOT ls.is_whitelist))\nGROUP BY company\nORDER BY \"% OK\" ASC NULLS FIRST",
+          "rawSql": "SELECT \n  COALESCE(test_runs.server_meta->'asn'->>'org', '\u2014 unknown \u2014') AS company,\n  ROUND(100.0 * SUM(CASE WHEN pr.verdict='OK' THEN 1 ELSE 0 END) /\n        NULLIF(COUNT(pr.id), 0), 1) AS \"% OK\",\n  COUNT(pr.id) AS sessions\nFROM test_runs\nJOIN listener_sessions ls ON ls.test_run_id = test_runs.id\nJOIN protocol_results pr ON pr.session_id = ls.id\nWHERE pr.protocol = ${var_protocol:singlequote}\n    AND (test_runs.server_meta->'asn'->>'org' IN (${var_company:singlequote}))\n    AND ('AS' || (test_runs.server_meta->'asn'->>'asn') IN (${var_asn:singlequote}))\n    AND (COALESCE(test_runs.server_meta->'datacenter'->>'name', 'No DC') IN (${var_datacenter:singlequote}))\n    AND (test_runs.server_meta->'location'->>'country_code' IN (${var_country:singlequote}))\n    AND (test_runs.test_id IN (${var_test_id:singlequote}))\n    AND (('Mobile' IN (${var_client_network:singlequote}) AND ls.is_mobile)\n         OR ('Whitelist' IN (${var_client_network:singlequote}) AND ls.is_whitelist)\n         OR ('Regular' IN (${var_client_network:singlequote}) AND NOT ls.is_mobile AND NOT ls.is_whitelist))\nGROUP BY company\nORDER BY \"% OK\" ASC NULLS FIRST",
           "refId": "A"
         }
       ]

@@ -471,11 +471,14 @@ def _apply_scores(
         # source files are removed from the workspace. The
         # reconciliation path in ``_import_one_test_dir`` can land here
         # if every solo report was deleted while listener reports remain.
+        # ``listener_session_count`` is NOT derived from solo data — it's
+        # the count of listener_sessions joined to this run — so keep it
+        # in sync even when solo data is absent.
         run.entry_score = None
         run.exit_score = None
         run.relay_score = None
         run.overall_score = None
-        run.listener_session_count = 0
+        run.listener_session_count = len(listener_reports)
         run.throttling_detected = False
         run.dns_integrity = None
         run.tls_integrity = None

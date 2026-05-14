@@ -20,7 +20,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "**Jump to:** [01 Overview](/d/censprobe-01) · [02 Blocking Matrix](/d/censprobe-02) · [03 Telegram](/d/censprobe-03) · [04 Protocol Reachability](/d/censprobe-04) · [05 Technique Attribution](/d/censprobe-05) · [06 Compare Tests](/d/censprobe-06) · [07 Cloudflare & WARP](/d/censprobe-07) · [08 QUIC & ECH](/d/censprobe-08) · [09 DNS](/d/censprobe-09) · [10 TLS](/d/censprobe-10) · [11 Matrix Heatmap](/d/censprobe-11-matrix-heatmap)"
+        "content": "**Jump to:** [01 Overview](/d/censprobe-01?var-test_id=${test_id}) \u00b7 [02 Blocking Matrix](/d/censprobe-02?var-test_id=${test_id}) \u00b7 [03 Telegram](/d/censprobe-03?var-test_id=${test_id}) \u00b7 [04 Protocol Reachability](/d/censprobe-04?var-test_id=${test_id}) \u00b7 [05 Technique Attribution](/d/censprobe-05?var-test_id=${test_id}) \u00b7 [06 Compare Tests](/d/censprobe-06?var-test_id=${test_id}) \u00b7 [07 Cloudflare & WARP](/d/censprobe-07?var-test_id=${test_id}) \u00b7 [08 QUIC & ECH](/d/censprobe-08?var-test_id=${test_id}) \u00b7 [09 DNS](/d/censprobe-09?var-test_id=${test_id}) \u00b7 [10 TLS](/d/censprobe-10?var-test_id=${test_id}) \u00b7 [11 Matrix Heatmap](/d/censprobe-11-matrix-heatmap?var-test_id=${test_id})"
       }
     },
     {
@@ -67,10 +67,10 @@
                   "index": 2,
                   "text": "BL"
                 },
-                "—": {
+                "\u2014": {
                   "color": "transparent",
                   "index": 3,
-                  "text": "—"
+                  "text": "\u2014"
                 }
               }
             }
@@ -142,7 +142,7 @@
             "uid": "DS_CENSPROBE_PG"
           },
           "format": "table",
-          "rawSql": "SELECT tr.test_id AS server,\n  SUM(CASE WHEN pr.verdict='BLOCKED' THEN 1 ELSE 0 END) AS blocked_count,\n  CASE\n    WHEN BOOL_OR(pr.protocol='openvpn' AND pr.verdict='BLOCKED') THEN 'BLOCKED'\n    WHEN BOOL_OR(pr.protocol='openvpn' AND pr.verdict='HANDSHAKE_ONLY') THEN 'HANDSHAKE_ONLY'\n    WHEN BOOL_OR(pr.protocol='openvpn' AND pr.verdict='OK') THEN 'OK'\n  END AS openvpn,\n  CASE\n    WHEN BOOL_OR(pr.protocol='wireguard' AND pr.verdict='BLOCKED') THEN 'BLOCKED'\n    WHEN BOOL_OR(pr.protocol='wireguard' AND pr.verdict='HANDSHAKE_ONLY') THEN 'HANDSHAKE_ONLY'\n    WHEN BOOL_OR(pr.protocol='wireguard' AND pr.verdict='OK') THEN 'OK'\n  END AS wireguard,\n  CASE\n    WHEN BOOL_OR(pr.protocol='amneziawg' AND pr.verdict='BLOCKED') THEN 'BLOCKED'\n    WHEN BOOL_OR(pr.protocol='amneziawg' AND pr.verdict='HANDSHAKE_ONLY') THEN 'HANDSHAKE_ONLY'\n    WHEN BOOL_OR(pr.protocol='amneziawg' AND pr.verdict='OK') THEN 'OK'\n  END AS amneziawg,\n  CASE\n    WHEN BOOL_OR(pr.protocol='shadowsocks' AND pr.verdict='BLOCKED') THEN 'BLOCKED'\n    WHEN BOOL_OR(pr.protocol='shadowsocks' AND pr.verdict='HANDSHAKE_ONLY') THEN 'HANDSHAKE_ONLY'\n    WHEN BOOL_OR(pr.protocol='shadowsocks' AND pr.verdict='OK') THEN 'OK'\n  END AS shadowsocks,\n  CASE\n    WHEN BOOL_OR(pr.protocol='vless_reality' AND pr.verdict='BLOCKED') THEN 'BLOCKED'\n    WHEN BOOL_OR(pr.protocol='vless_reality' AND pr.verdict='HANDSHAKE_ONLY') THEN 'HANDSHAKE_ONLY'\n    WHEN BOOL_OR(pr.protocol='vless_reality' AND pr.verdict='OK') THEN 'OK'\n  END AS vless_reality,\n  CASE\n    WHEN BOOL_OR(pr.protocol='hysteria2' AND pr.verdict='BLOCKED') THEN 'BLOCKED'\n    WHEN BOOL_OR(pr.protocol='hysteria2' AND pr.verdict='HANDSHAKE_ONLY') THEN 'HANDSHAKE_ONLY'\n    WHEN BOOL_OR(pr.protocol='hysteria2' AND pr.verdict='OK') THEN 'OK'\n  END AS hysteria2,\n  CASE\n    WHEN BOOL_OR(pr.protocol='mtproto_proxy' AND pr.verdict='BLOCKED') THEN 'BLOCKED'\n    WHEN BOOL_OR(pr.protocol='mtproto_proxy' AND pr.verdict='HANDSHAKE_ONLY') THEN 'HANDSHAKE_ONLY'\n    WHEN BOOL_OR(pr.protocol='mtproto_proxy' AND pr.verdict='OK') THEN 'OK'\n  END AS mtproto_proxy,\n  CASE\n    WHEN BOOL_OR(pr.protocol='mtproto_proxy_alt' AND pr.verdict='BLOCKED') THEN 'BLOCKED'\n    WHEN BOOL_OR(pr.protocol='mtproto_proxy_alt' AND pr.verdict='HANDSHAKE_ONLY') THEN 'HANDSHAKE_ONLY'\n    WHEN BOOL_OR(pr.protocol='mtproto_proxy_alt' AND pr.verdict='OK') THEN 'OK'\n  END AS mtproto_proxy_alt,\n  CASE\n    WHEN BOOL_OR(pr.protocol='mtproto_orig' AND pr.verdict='BLOCKED') THEN 'BLOCKED'\n    WHEN BOOL_OR(pr.protocol='mtproto_orig' AND pr.verdict='HANDSHAKE_ONLY') THEN 'HANDSHAKE_ONLY'\n    WHEN BOOL_OR(pr.protocol='mtproto_orig' AND pr.verdict='OK') THEN 'OK'\n  END AS mtproto_orig\nFROM test_runs tr\nJOIN listener_sessions ls ON ls.test_run_id = tr.id\nJOIN protocol_results pr ON pr.session_id = ls.id\nWHERE\n    (('Mobile' IN (${var_client_network:singlequote}) AND ls.is_mobile)\n     OR ('Whitelist' IN (${var_client_network:singlequote}) AND ls.is_whitelist)\n     OR ('Regular' IN (${var_client_network:singlequote}) AND NOT ls.is_mobile AND NOT ls.is_whitelist))\n    AND (tr.server_meta->'asn'->>'org' IN (${var_company:singlequote}))\nGROUP BY tr.test_id\nORDER BY blocked_count DESC, tr.test_id",
+          "rawSql": "SELECT tr.test_id AS server,\n  SUM(CASE WHEN pr.verdict='BLOCKED' THEN 1 ELSE 0 END) AS blocked_count,\n  CASE\n    WHEN BOOL_OR(pr.protocol='openvpn' AND pr.verdict='BLOCKED') THEN 'BLOCKED'\n    WHEN BOOL_OR(pr.protocol='openvpn' AND pr.verdict='HANDSHAKE_ONLY') THEN 'HANDSHAKE_ONLY'\n    WHEN BOOL_OR(pr.protocol='openvpn' AND pr.verdict='OK') THEN 'OK'\n  END AS openvpn,\n  CASE\n    WHEN BOOL_OR(pr.protocol='wireguard' AND pr.verdict='BLOCKED') THEN 'BLOCKED'\n    WHEN BOOL_OR(pr.protocol='wireguard' AND pr.verdict='HANDSHAKE_ONLY') THEN 'HANDSHAKE_ONLY'\n    WHEN BOOL_OR(pr.protocol='wireguard' AND pr.verdict='OK') THEN 'OK'\n  END AS wireguard,\n  CASE\n    WHEN BOOL_OR(pr.protocol='amneziawg' AND pr.verdict='BLOCKED') THEN 'BLOCKED'\n    WHEN BOOL_OR(pr.protocol='amneziawg' AND pr.verdict='HANDSHAKE_ONLY') THEN 'HANDSHAKE_ONLY'\n    WHEN BOOL_OR(pr.protocol='amneziawg' AND pr.verdict='OK') THEN 'OK'\n  END AS amneziawg,\n  CASE\n    WHEN BOOL_OR(pr.protocol='shadowsocks' AND pr.verdict='BLOCKED') THEN 'BLOCKED'\n    WHEN BOOL_OR(pr.protocol='shadowsocks' AND pr.verdict='HANDSHAKE_ONLY') THEN 'HANDSHAKE_ONLY'\n    WHEN BOOL_OR(pr.protocol='shadowsocks' AND pr.verdict='OK') THEN 'OK'\n  END AS shadowsocks,\n  CASE\n    WHEN BOOL_OR(pr.protocol='vless_reality' AND pr.verdict='BLOCKED') THEN 'BLOCKED'\n    WHEN BOOL_OR(pr.protocol='vless_reality' AND pr.verdict='HANDSHAKE_ONLY') THEN 'HANDSHAKE_ONLY'\n    WHEN BOOL_OR(pr.protocol='vless_reality' AND pr.verdict='OK') THEN 'OK'\n  END AS vless_reality,\n  CASE\n    WHEN BOOL_OR(pr.protocol='hysteria2' AND pr.verdict='BLOCKED') THEN 'BLOCKED'\n    WHEN BOOL_OR(pr.protocol='hysteria2' AND pr.verdict='HANDSHAKE_ONLY') THEN 'HANDSHAKE_ONLY'\n    WHEN BOOL_OR(pr.protocol='hysteria2' AND pr.verdict='OK') THEN 'OK'\n  END AS hysteria2,\n  CASE\n    WHEN BOOL_OR(pr.protocol='mtproto_proxy' AND pr.verdict='BLOCKED') THEN 'BLOCKED'\n    WHEN BOOL_OR(pr.protocol='mtproto_proxy' AND pr.verdict='HANDSHAKE_ONLY') THEN 'HANDSHAKE_ONLY'\n    WHEN BOOL_OR(pr.protocol='mtproto_proxy' AND pr.verdict='OK') THEN 'OK'\n  END AS mtproto_proxy,\n  CASE\n    WHEN BOOL_OR(pr.protocol='mtproto_proxy_alt' AND pr.verdict='BLOCKED') THEN 'BLOCKED'\n    WHEN BOOL_OR(pr.protocol='mtproto_proxy_alt' AND pr.verdict='HANDSHAKE_ONLY') THEN 'HANDSHAKE_ONLY'\n    WHEN BOOL_OR(pr.protocol='mtproto_proxy_alt' AND pr.verdict='OK') THEN 'OK'\n  END AS mtproto_proxy_alt,\n  CASE\n    WHEN BOOL_OR(pr.protocol='mtproto_orig' AND pr.verdict='BLOCKED') THEN 'BLOCKED'\n    WHEN BOOL_OR(pr.protocol='mtproto_orig' AND pr.verdict='HANDSHAKE_ONLY') THEN 'HANDSHAKE_ONLY'\n    WHEN BOOL_OR(pr.protocol='mtproto_orig' AND pr.verdict='OK') THEN 'OK'\n  END AS mtproto_orig\nFROM test_runs tr\nJOIN listener_sessions ls ON ls.test_run_id = tr.id\nJOIN protocol_results pr ON pr.session_id = ls.id\nWHERE\n    (('Mobile' IN (${var_client_network:singlequote}) AND ls.is_mobile)\n     OR ('Whitelist' IN (${var_client_network:singlequote}) AND ls.is_whitelist)\n     OR ('Regular' IN (${var_client_network:singlequote}) AND NOT ls.is_mobile AND NOT ls.is_whitelist))\n    AND (COALESCE(tr.server_meta->'asn'->>'org', '\u2014 (no solo)') IN (${var_company:singlequote}))\nGROUP BY tr.test_id\nORDER BY blocked_count DESC, tr.test_id",
           "refId": "A"
         }
       ]
@@ -150,7 +150,7 @@
     {
       "id": 2,
       "type": "table",
-      "title": "Protocols OK (%) per server × client network",
+      "title": "Protocols OK (%) per server \u00d7 client network",
       "description": "% of protocols verdict=OK per server, split by mobile/whitelist/regular client networks.",
       "datasource": {
         "type": "postgres",
@@ -217,7 +217,7 @@
             "uid": "DS_CENSPROBE_PG"
           },
           "format": "table",
-          "rawSql": "SELECT tr.test_id AS server,\n  ROUND(100.0 * COUNT(*) FILTER (WHERE ls.is_mobile AND pr.verdict='OK')\n        / NULLIF(COUNT(*) FILTER (WHERE ls.is_mobile), 0), 1) AS \"Mobile\",\n  ROUND(100.0 * COUNT(*) FILTER (WHERE ls.is_whitelist AND pr.verdict='OK')\n        / NULLIF(COUNT(*) FILTER (WHERE ls.is_whitelist), 0), 1) AS \"Whitelist\",\n  ROUND(100.0 * COUNT(*) FILTER (WHERE NOT ls.is_mobile AND NOT ls.is_whitelist AND pr.verdict='OK')\n        / NULLIF(COUNT(*) FILTER (WHERE NOT ls.is_mobile AND NOT ls.is_whitelist), 0), 1) AS \"Regular\"\nFROM test_runs tr\nJOIN listener_sessions ls ON ls.test_run_id = tr.id\nJOIN protocol_results pr ON pr.session_id = ls.id\nWHERE (tr.server_meta->'asn'->>'org' IN (${var_company:singlequote}))\nGROUP BY tr.test_id\nORDER BY tr.test_id",
+          "rawSql": "SELECT tr.test_id AS server,\n  ROUND(100.0 * COUNT(*) FILTER (WHERE ls.is_mobile AND pr.verdict='OK')\n        / NULLIF(COUNT(*) FILTER (WHERE ls.is_mobile), 0), 1) AS \"Mobile\",\n  ROUND(100.0 * COUNT(*) FILTER (WHERE ls.is_whitelist AND pr.verdict='OK')\n        / NULLIF(COUNT(*) FILTER (WHERE ls.is_whitelist), 0), 1) AS \"Whitelist\",\n  ROUND(100.0 * COUNT(*) FILTER (WHERE NOT ls.is_mobile AND NOT ls.is_whitelist AND pr.verdict='OK')\n        / NULLIF(COUNT(*) FILTER (WHERE NOT ls.is_mobile AND NOT ls.is_whitelist), 0), 1) AS \"Regular\"\nFROM test_runs tr\nJOIN listener_sessions ls ON ls.test_run_id = tr.id\nJOIN protocol_results pr ON pr.session_id = ls.id\nWHERE (COALESCE(tr.server_meta->'asn'->>'org', '\u2014 (no solo)') IN (${var_company:singlequote}))\nGROUP BY tr.test_id\nORDER BY tr.test_id",
           "refId": "A"
         }
       ]
@@ -239,7 +239,7 @@
           "type": "postgres",
           "uid": "DS_CENSPROBE_PG"
         },
-        "query": "SELECT DISTINCT server_meta->'asn'->>'org' FROM test_runs WHERE server_meta->'asn'->>'org' IS NOT NULL",
+        "query": "SELECT DISTINCT COALESCE(server_meta->'asn'->>'org', '\u2014 (no solo)') FROM test_runs",
         "multi": true,
         "includeAll": true,
         "refresh": 1
@@ -283,7 +283,7 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "11 — Matrix Heatmap",
+  "title": "11 \u2014 Matrix Heatmap",
   "uid": "censprobe-11-matrix-heatmap",
   "version": 3,
   "weekStart": ""

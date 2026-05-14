@@ -1,5 +1,5 @@
 {
-  "title": "07 — Cloudflare & WARP",
+  "title": "07 \u2014 Cloudflare & WARP",
   "uid": "censprobe-07",
   "tags": [
     "censprobe"
@@ -23,8 +23,8 @@
         },
         "query": "SELECT test_id FROM test_runs ORDER BY created_at DESC",
         "refresh": 2,
-        "multi": false,
-        "includeAll": false
+        "multi": true,
+        "includeAll": true
       }
     ]
   },
@@ -41,7 +41,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "**Jump to:** [01 Overview](/d/censprobe-01) · [02 Blocking Matrix](/d/censprobe-02) · [03 Telegram](/d/censprobe-03) · [04 Protocol Reachability](/d/censprobe-04) · [05 Technique Attribution](/d/censprobe-05) · [06 Compare Tests](/d/censprobe-06) · [07 Cloudflare & WARP](/d/censprobe-07) · [08 QUIC & ECH](/d/censprobe-08) · [09 DNS](/d/censprobe-09) · [10 TLS](/d/censprobe-10) · [11 Matrix Heatmap](/d/censprobe-11-matrix-heatmap)"
+        "content": "**Jump to:** [01 Overview](/d/censprobe-01?var-test_id=${test_id}) \u00b7 [02 Blocking Matrix](/d/censprobe-02?var-test_id=${test_id}) \u00b7 [03 Telegram](/d/censprobe-03?var-test_id=${test_id}) \u00b7 [04 Protocol Reachability](/d/censprobe-04?var-test_id=${test_id}) \u00b7 [05 Technique Attribution](/d/censprobe-05?var-test_id=${test_id}) \u00b7 [06 Compare Tests](/d/censprobe-06?var-test_id=${test_id}) \u00b7 [07 Cloudflare & WARP](/d/censprobe-07?var-test_id=${test_id}) \u00b7 [08 QUIC & ECH](/d/censprobe-08?var-test_id=${test_id}) \u00b7 [09 DNS](/d/censprobe-09?var-test_id=${test_id}) \u00b7 [10 TLS](/d/censprobe-10?var-test_id=${test_id}) \u00b7 [11 Matrix Heatmap](/d/censprobe-11-matrix-heatmap?var-test_id=${test_id})"
       }
     },
     {
@@ -61,7 +61,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT ROUND(100.0 * COUNT(*) FILTER (WHERE verdict = 'OK') / NULLIF(COUNT(*), 0)) AS \"Score\" FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND category = 'cloudflare' AND subcategory <> 'cloudflare_quic'",
+          "rawSql": "SELECT ROUND(100.0 * COUNT(*) FILTER (WHERE verdict = 'OK') / NULLIF(COUNT(*), 0)) AS \"Score\" FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id IN (${test_id:singlequote}) AND category = 'cloudflare' AND subcategory <> 'cloudflare_quic'",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -93,7 +93,8 @@
                 "value": 70
               }
             ]
-          }
+          },
+          "noValue": "\u2014"
         }
       }
     },
@@ -114,7 +115,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT test, target, verdict, rtt_ms FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND category = 'cloudflare' AND test IN ('cloudflare_warp_engage_api','cloudflare_warp_connectivity_check','cloudflare_warp_zt_orchestration','cloudflare_warp_masque_anycast_tcp','cloudflare_warp_wg_anycast_tcp') ORDER BY test",
+          "rawSql": "SELECT test, target, verdict, rtt_ms FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id IN (${test_id:singlequote}) AND category = 'cloudflare' AND test IN ('cloudflare_warp_engage_api','cloudflare_warp_connectivity_check','cloudflare_warp_zt_orchestration','cloudflare_warp_masque_anycast_tcp','cloudflare_warp_wg_anycast_tcp') ORDER BY test",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -134,8 +135,10 @@
             },
             "properties": [
               {
-                "id": "custom.displayMode",
-                "value": "color-background"
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
               },
               {
                 "id": "mappings",
@@ -196,7 +199,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT test, target, verdict, method, rtt_ms, confidence, notes FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND category = 'cloudflare' ORDER BY test",
+          "rawSql": "SELECT test, target, verdict, method, rtt_ms, confidence, notes FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id IN (${test_id:singlequote}) AND category = 'cloudflare' ORDER BY test",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -216,8 +219,10 @@
             },
             "properties": [
               {
-                "id": "custom.displayMode",
-                "value": "color-background"
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
               },
               {
                 "id": "mappings",
@@ -296,7 +301,7 @@
     {
       "id": 5,
       "title": "WARP MASQUE UDP Fallback Ports",
-      "description": "When UDP 443 is blocked by TSPU, WARP tries these fallback ports (4443, 8443). INCONCLUSIVE on timeout is normal — MASQUE silently drops unauthenticated datagrams.",
+      "description": "When UDP 443 is blocked by TSPU, WARP tries these fallback ports (4443, 8443). INCONCLUSIVE on timeout is normal \u2014 MASQUE silently drops unauthenticated datagrams.",
       "type": "table",
       "gridPos": {
         "x": 0,
@@ -310,7 +315,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT test, target, verdict, method, notes FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND subcategory = 'cloudflare_warp_udp_masque' ORDER BY test",
+          "rawSql": "SELECT test, target, verdict, method, notes FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id IN (${test_id:singlequote}) AND subcategory = 'cloudflare_warp_udp_masque' ORDER BY test",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -330,8 +335,10 @@
             },
             "properties": [
               {
-                "id": "custom.displayMode",
-                "value": "color-background"
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
               },
               {
                 "id": "mappings",
@@ -370,7 +377,7 @@
     {
       "id": 6,
       "title": "WARP WireGuard UDP Ports",
-      "description": "Legacy WARP protocol. UDP 2408 primary, UDP 4500 NAT-T fallback. INCONCLUSIVE on timeout — WG drops unauthenticated handshakes.",
+      "description": "Legacy WARP protocol. UDP 2408 primary, UDP 4500 NAT-T fallback. INCONCLUSIVE on timeout \u2014 WG drops unauthenticated handshakes.",
       "type": "table",
       "gridPos": {
         "x": 12,
@@ -384,7 +391,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT test, target, verdict, method, notes FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND subcategory = 'cloudflare_warp_udp_wg' ORDER BY test",
+          "rawSql": "SELECT test, target, verdict, method, notes FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id IN (${test_id:singlequote}) AND subcategory = 'cloudflare_warp_udp_wg' ORDER BY test",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -404,8 +411,10 @@
             },
             "properties": [
               {
-                "id": "custom.displayMode",
-                "value": "color-background"
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
               },
               {
                 "id": "mappings",
@@ -458,7 +467,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT test, target, verdict, method, rtt_ms FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND subcategory = 'cloudflare_http' ORDER BY test",
+          "rawSql": "SELECT test, target, verdict, method, rtt_ms FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id IN (${test_id:singlequote}) AND subcategory = 'cloudflare_http' ORDER BY test",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -478,8 +487,10 @@
             },
             "properties": [
               {
-                "id": "custom.displayMode",
-                "value": "color-background"
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
               },
               {
                 "id": "mappings",
@@ -539,7 +550,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT verdict, COUNT(*) AS count FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id = ${test_id:sqlstring} AND category = 'cloudflare' GROUP BY verdict ORDER BY count DESC",
+          "rawSql": "SELECT verdict, COUNT(*) AS count FROM test_results tr JOIN test_runs run ON run.id = tr.test_run_id WHERE run.test_id IN (${test_id:singlequote}) AND category = 'cloudflare' GROUP BY verdict ORDER BY count DESC",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -549,7 +560,27 @@
             "uid": "DS_CENSPROBE_PG"
           }
         }
-      ]
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "right",
+          "values": [
+            "value"
+          ]
+        },
+        "displayLabels": [
+          "name",
+          "percent"
+        ],
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": true
+        }
+      }
     }
   ]
 }

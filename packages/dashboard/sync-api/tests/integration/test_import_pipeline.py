@@ -376,10 +376,13 @@ class TestReconciliation:
     async def test_partial_solo_delete_clears_scores(
         self, workspace: Path, db_session: Any
     ) -> None:
-        """If solo is removed but listener stays, scores must be cleared.
+        """If solo is removed but listener stays, solo-derived scores must
+        be cleared but listener-derived counters must survive.
 
-        Otherwise the run shows stale ``entry_score`` etc. computed from
-        the deleted solo data — a worse UX than the "no data" state."""
+        ``listener_session_count`` is the count of joined listener_sessions
+        rows — orthogonal to solo data — so deleting solo must NOT zero it
+        out. Clearing it would hide listener-only runs from dashboards that
+        gate on ``listener_session_count > 0``."""
         from sync_api.db import TestRun
         from sync_api.main import _import_once
 
@@ -395,13 +398,15 @@ class TestReconciliation:
             await db_session.execute(select(TestRun).where(TestRun.test_id == "vu-1"))
         ).scalar_one()
         assert run.entry_score is not None
+        assert run.listener_session_count == 1
 
         solo_path.unlink()
         await _import_once()
         await db_session.refresh(run)
         assert run.entry_score is None
         assert run.overall_score is None
-        assert run.listener_session_count == 0
+        # Listener session survives the solo delete — count must reflect it.
+        assert run.listener_session_count == 1
 
     async def test_missing_reports_root_is_safe(self, workspace: Path, db_session: Any) -> None:
         """Safety guard: a missing ``reports/`` directory must NOT trigger

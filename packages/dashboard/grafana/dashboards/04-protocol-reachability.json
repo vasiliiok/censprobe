@@ -1,5 +1,5 @@
 {
-  "title": "04 — Protocol Reachability",
+  "title": "04 \u2014 Protocol Reachability",
   "uid": "censprobe-04",
   "tags": [
     "censprobe"
@@ -41,12 +41,12 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "**Jump to:** [01 Overview](/d/censprobe-01) · [02 Blocking Matrix](/d/censprobe-02) · [03 Telegram](/d/censprobe-03) · [04 Protocol Reachability](/d/censprobe-04) · [05 Technique Attribution](/d/censprobe-05) · [06 Compare Tests](/d/censprobe-06) · [07 Cloudflare & WARP](/d/censprobe-07) · [08 QUIC & ECH](/d/censprobe-08) · [09 DNS](/d/censprobe-09) · [10 TLS](/d/censprobe-10) · [11 Matrix Heatmap](/d/censprobe-11-matrix-heatmap)"
+        "content": "**Jump to:** [01 Overview](/d/censprobe-01?var-test_id=${test_id}) \u00b7 [02 Blocking Matrix](/d/censprobe-02?var-test_id=${test_id}) \u00b7 [03 Telegram](/d/censprobe-03?var-test_id=${test_id}) \u00b7 [04 Protocol Reachability](/d/censprobe-04?var-test_id=${test_id}) \u00b7 [05 Technique Attribution](/d/censprobe-05?var-test_id=${test_id}) \u00b7 [06 Compare Tests](/d/censprobe-06?var-test_id=${test_id}) \u00b7 [07 Cloudflare & WARP](/d/censprobe-07?var-test_id=${test_id}) \u00b7 [08 QUIC & ECH](/d/censprobe-08?var-test_id=${test_id}) \u00b7 [09 DNS](/d/censprobe-09?var-test_id=${test_id}) \u00b7 [10 TLS](/d/censprobe-10?var-test_id=${test_id}) \u00b7 [11 Matrix Heatmap](/d/censprobe-11-matrix-heatmap?var-test_id=${test_id})"
       }
     },
     {
       "id": 1,
-      "title": "Protocol × Session Reachability Matrix",
+      "title": "Protocol \u00d7 Session Reachability Matrix",
       "description": "Rows = client sessions, shows per-protocol connectivity verdict from each client network.",
       "type": "table",
       "gridPos": {
@@ -61,7 +61,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT tr.test_id AS server, ls.session_id, COALESCE(ls.client_meta->'asn'->>'org', '—') AS client_org, pr.protocol, pr.verdict, pr.handshake_count, pr.data_transfer_ok, pr.avg_throughput_mbps, pr.throughput_throttled, pr.note FROM protocol_results pr JOIN listener_sessions ls ON ls.id = pr.session_id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE (tr.test_id IN (${test_id:singlequote})) ORDER BY ls.session_id, pr.protocol",
+          "rawSql": "SELECT tr.test_id AS server, ls.session_id, COALESCE(ls.client_meta->'asn'->>'org', '\u2014') AS client_org, pr.protocol, pr.verdict, pr.handshake_count, pr.data_transfer_ok, pr.avg_throughput_mbps, pr.throughput_throttled, pr.note FROM protocol_results pr JOIN listener_sessions ls ON ls.id = pr.session_id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE (tr.test_id IN (${test_id:singlequote})) ORDER BY ls.session_id, pr.protocol",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -81,8 +81,10 @@
             },
             "properties": [
               {
-                "id": "custom.displayMode",
-                "value": "color-background"
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
               },
               {
                 "id": "mappings",
@@ -92,7 +94,7 @@
                     "options": {
                       "OK": {
                         "color": "green",
-                        "text": "✓ CONNECTED"
+                        "text": "\u2713 CONNECTED"
                       }
                     }
                   },
@@ -101,7 +103,7 @@
                     "options": {
                       "BLOCKED": {
                         "color": "red",
-                        "text": "✗ BLOCKED"
+                        "text": "\u2717 BLOCKED"
                       }
                     }
                   },
@@ -110,7 +112,7 @@
                     "options": {
                       "IP_DROPPED": {
                         "color": "red",
-                        "text": "✗ DROPPED"
+                        "text": "\u2717 DROPPED"
                       }
                     }
                   },
@@ -165,7 +167,7 @@
               },
               {
                 "id": "noValue",
-                "value": "—"
+                "value": "\u2014"
               }
             ]
           },
@@ -180,8 +182,10 @@
                 "value": "Throttled"
               },
               {
-                "id": "custom.displayMode",
-                "value": "color-background"
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
               },
               {
                 "id": "mappings",
@@ -220,7 +224,7 @@
               },
               {
                 "id": "noValue",
-                "value": "—"
+                "value": "\u2014"
               },
               {
                 "id": "custom.cellOptions",
@@ -270,6 +274,55 @@
         "stacking": {
           "mode": "normal"
         }
+      },
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "connected"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "handshake_only"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "blocked"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
       }
     },
     {
@@ -288,7 +341,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT tr.test_id AS server, ls.session_id, ls.started_at, ls.duration_sec, ls.client_connected, COALESCE(ls.client_meta->'asn'->>'org', '—') AS client_org, COALESCE(ls.client_meta->'location'->>'city', '—') AS city, CASE WHEN ls.client_meta->>'is_mobile' = 'true' THEN 'mobile' WHEN ls.client_meta->>'is_datacenter' = 'true' THEN 'datacenter' ELSE 'residential' END AS client_type, COUNT(pr.id) AS protocols, COUNT(*) FILTER (WHERE pr.verdict='OK') AS ok_protocols FROM listener_sessions ls LEFT JOIN protocol_results pr ON pr.session_id = ls.id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE (tr.test_id IN (${test_id:singlequote})) GROUP BY tr.test_id, ls.id, ls.session_id, ls.started_at, ls.duration_sec, ls.client_connected, ls.client_meta ORDER BY tr.test_id, ls.started_at DESC",
+          "rawSql": "SELECT tr.test_id AS server, ls.session_id, ls.started_at, ls.duration_sec, ls.client_connected, COALESCE(ls.client_meta->'asn'->>'org', '\u2014') AS client_org, COALESCE(ls.client_meta->'location'->>'city', '\u2014') AS city, CASE WHEN ls.client_meta->>'is_mobile' = 'true' THEN 'mobile' WHEN ls.client_meta->>'is_datacenter' = 'true' THEN 'datacenter' ELSE 'residential' END AS client_type, COUNT(pr.id) AS protocols, COUNT(*) FILTER (WHERE pr.verdict='OK') AS ok_protocols FROM listener_sessions ls LEFT JOIN protocol_results pr ON pr.session_id = ls.id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE (tr.test_id IN (${test_id:singlequote})) GROUP BY tr.test_id, ls.id, ls.session_id, ls.started_at, ls.duration_sec, ls.client_connected, ls.client_meta ORDER BY tr.test_id, ls.started_at DESC",
           "format": "table",
           "refId": "A",
           "editorMode": "code",

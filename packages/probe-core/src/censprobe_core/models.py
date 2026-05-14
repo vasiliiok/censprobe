@@ -400,9 +400,13 @@ class ServerScores(BaseModel):
     # reachability and overall is averaged over (exit, relay) only. Used
     # by CLI/dashboard to label the score as partial.
     listener_session_count: int = 0
-    telegram_health: float = 0.0
-    dns_integrity: float = 0.0
-    tls_integrity: float = 0.0
+    # None means the solo profile didn't run that category at all
+    # (distinct from 0.0, which means "ran but every target was BLOCKED").
+    # Dashboards render None as "—" so operators don't read a missing
+    # category as a critical failure.
+    telegram_health: float | None = None
+    dns_integrity: float | None = None
+    tls_integrity: float | None = None
     throttling_detected: bool = False
     recommended_protocols: list[str] = Field(default_factory=list)
     detected_techniques: list[str] = Field(default_factory=list)

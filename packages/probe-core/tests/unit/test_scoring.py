@@ -183,9 +183,9 @@ class TestProtocolReachability:
 class TestComputeScores:
     def test_empty_results_produces_floor_scores(self) -> None:
         scores = compute_scores([], None)
-        # No solo data: dns/tls integrity = 0 (empty = 0 by design),
-        # uplink_quality = 0, latency_score = 0.5 (neutral).
-        # protocol_reach = 0.5 (no listener reports).
+        # No solo data: dns/tls integrity = None (category not tested,
+        # distinct from "tested but 0% OK"). uplink_quality = 0,
+        # latency_score = 0.5 (neutral). protocol_reach = 0.5 (no listener).
         # entry = (0.5*0.6 + 0.0*0.3 + 0.5*0.1) * 100 = 35.0
         assert scores.entry_score == pytest.approx(35.0)
         # exit = (0.0*0.6 + 0.0*0.4) * 100 = 0.0
@@ -195,8 +195,9 @@ class TestComputeScores:
         # No listener → overall = mean(exit, relay) = (0 + 15) / 2 = 7.5
         assert scores.listener_session_count == 0
         assert scores.overall == pytest.approx(7.5)
-        assert scores.dns_integrity == pytest.approx(0.0)
-        assert scores.tls_integrity == pytest.approx(0.0)
+        assert scores.dns_integrity is None
+        assert scores.tls_integrity is None
+        assert scores.telegram_health is None
         assert scores.throttling_detected is False
         assert scores.detected_techniques == []
 

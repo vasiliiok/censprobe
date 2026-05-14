@@ -84,11 +84,11 @@ def compute_scores(
 
     # ── DNS integrity ─────────────────────────────────────────────────────────
     dns_results = [r for r in solo_results if r.category == "dns"]
-    scores.dns_integrity = _ok_pct(dns_results)
+    scores.dns_integrity = _ok_pct(dns_results) if dns_results else None
 
     # ── TLS integrity ─────────────────────────────────────────────────────────
     tls_results = [r for r in solo_results if r.category == "tls"]
-    scores.tls_integrity = _ok_pct(tls_results)
+    scores.tls_integrity = _ok_pct(tls_results) if tls_results else None
 
     # ── Throttling detected ───────────────────────────────────────────────────
     # Only Method-B SNI throttling produces a non-OK verdict here.
