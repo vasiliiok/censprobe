@@ -235,50 +235,10 @@ def _try_install_notrack(ports_udp: Sequence[int]) -> CheckResult:
     installed: list[int] = []
     failed: list[int] = []
     for port in ports_udp:
-        # -C checks; -I prepends idempotently if missing. Using -C avoids
-        # appending duplicate rules across listener restarts.
-        for direction in ("PREROUTING", "OUTPUT"):
-            check = subprocess.run(  # noqa: S603
-                [
-                    "iptables",
-                    "-t",
-                    "raw",
-                    "-C",
-                    direction,
-                    "-p",
-                    "udp",
-                    "--dport" if direction == "PREROUTING" else "--sport",
-                    str(port),
-                    "-j",
-                    "NOTRACK",
-                ],
-                capture_output=True,
-                check=False,
-            )
-            if check.returncode == 0:
-                continue  # already present
-            add = subprocess.run(  # noqa: S603
-                [
-                    "iptables",
-                    "-t",
-                    "raw",
-                    "-I",
-                    direction,
-                    "-p",
-                    "udp",
-                    "--dport" if direction == "PREROUTING" else "--sport",
-                    str(port),
-                    "-j",
-                    "NOTRACK",
-                ],
-                capture_output=True,
-                check=False,
-            )
-            if add.returncode != 0:
-                failed.append(port)
-                break
-        else:
+        if _install_notrack_for_port(port):
             installed.append(port)
+        else:
+            failed.append(port)
 
     if installed and not failed:
         return CheckResult(
@@ -296,6 +256,47 @@ def _try_install_notrack(ports_udp: Sequence[int]) -> CheckResult:
             ),
         )
     return CheckResult("notrack-autosetup", "skip", "no UDP ports to NOTRACK")
+
+
+def _install_notrack_for_port(port: int) -> bool:
+    """Install NOTRACK in both PREROUTING (--dport) and OUTPUT (--sport)
+    for one UDP ``port``. Returns True iff both directions ended in a
+    success state — either pre-existing (``-C`` rc=0) or freshly added
+    (``-I`` rc=0). False if EITHER direction failed to add a missing
+    rule; the per-port atomic semantic means we don't report a half-
+    installed port as OK to the caller.
+
+    Each subprocess.run uses ``check=False`` because rc≠0 is the normal
+    "rule absent" signal we drive control flow on — raising would be
+    noise. ``capture_output=True`` suppresses stderr spam ("Bad rule
+    (does a matching rule exist...)") since we only need the return
+    code.
+    """
+    for direction in ("PREROUTING", "OUTPUT"):
+        port_arg = "--dport" if direction == "PREROUTING" else "--sport"
+        # -C checks; -I prepends idempotently if missing. Using -C avoids
+        # appending duplicate rules across listener restarts.
+        check = subprocess.run(  # noqa: S603  # NOSONAR — fixed argv, port is int
+            [
+                "iptables", "-t", "raw", "-C", direction,
+                "-p", "udp", port_arg, str(port), "-j", "NOTRACK",
+            ],
+            capture_output=True,
+            check=False,
+        )  # fmt: skip
+        if check.returncode == 0:
+            continue  # already present
+        add = subprocess.run(  # noqa: S603  # NOSONAR — fixed argv, port is int
+            [
+                "iptables", "-t", "raw", "-I", direction,
+                "-p", "udp", port_arg, str(port), "-j", "NOTRACK",
+            ],
+            capture_output=True,
+            check=False,
+        )  # fmt: skip
+        if add.returncode != 0:
+            return False
+    return True
 
 
 def _check_iptables_capability() -> CheckResult:
