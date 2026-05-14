@@ -461,7 +461,191 @@
             "uid": "DS_CENSPROBE_PG"
           }
         }
-      ]
+      ],
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "method"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Method"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "dns_poisoning": {
+                        "text": "\ud83e\udda0 DNS poison",
+                        "color": "orange"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "dns_blocked_nxdomain": {
+                        "text": "\u2716 NXDOMAIN",
+                        "color": "dark-orange"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "doh_blocked": {
+                        "text": "\ud83d\udd12 DoH blocked",
+                        "color": "light-orange"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "ip_dropped": {
+                        "text": "\ud83d\udca7 IP dropped",
+                        "color": "semi-dark-red"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "tcp_rst_injection": {
+                        "text": "\u26a1 RST inject",
+                        "color": "red"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "tcp_rst_after_tls_ch": {
+                        "text": "\u26a1 RST after CH",
+                        "color": "magenta"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "tcp_refused": {
+                        "text": "\u2715 refused",
+                        "color": "dark-red"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "tls_handshake_failure": {
+                        "text": "\ud83d\udd10 TLS fail",
+                        "color": "purple"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "ech_blocked": {
+                        "text": "\ud83d\udd10 ECH blocked",
+                        "color": "light-purple"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "sni_throttling": {
+                        "text": "\ud83d\udc22 SNI throttle",
+                        "color": "dark-purple"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "quic_dropped": {
+                        "text": "\ud83d\udca7 QUIC dropped",
+                        "color": "yellow"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "openvpn_signature_blocked": {
+                        "text": "\ud83d\udee1 OVPN sig",
+                        "color": "blue"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "wireguard_signature_blocked": {
+                        "text": "\ud83d\udee1 WG sig",
+                        "color": "light-blue"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "shadowsocks_active_probed": {
+                        "text": "\ud83d\udee1 SS probed",
+                        "color": "dark-blue"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "vpn_data_phase_blocked": {
+                        "text": "\ud83d\udce1 VPN data",
+                        "color": "purple"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "middlebox_http_manipulation": {
+                        "text": "\ud83e\udea4 middlebox",
+                        "color": "pink"
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "unknown": {
+                        "text": "?",
+                        "color": "text"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "noValue",
+                "value": "\u2014"
+              }
+            ]
+          }
+        ]
+      }
     },
     {
       "id": 10,

@@ -80,6 +80,10 @@ class OpenVPNResponder:
         self._proc: asyncio.subprocess.Process | None = None
         self._config_dir: tempfile.TemporaryDirectory[str] | None = None
         self._status_path: Path | None = None
+        # EchoServer used to bind a /throughput endpoint on the listener-side
+        # tun IP once openvpn has it up. Injected by the responder dispatch
+        # factory; None means "no tun-bound throughput measurement".
+        self.echo_server: object | None = None
         # Cached snapshot of connection/transfer state captured before teardown.
         self._final_handshake_count: int = 0
         self._final_bytes_received: int = 0
@@ -159,6 +163,23 @@ verb 1
         logger.info("OpenVPN responder started on UDP/%d (iface: %s)", self.port, _OVPN_SRV_IFACE)
         await install_counter("INPUT", self._counter_rule_args(), self._counter_comment)
         self._poll_task = asyncio.create_task(self._latch_auth_bytes())
+        # Bind the OpenVPN /throughput endpoint on the listener-side tun
+        # IP (10.200.0.1). The bind is gated on tun-up so the port is
+        # never exposed on a public interface — only packets routed
+        # through the tun reach it. Failure here is non-fatal: the
+        # responder still works without throughput measurement.
+        await self._try_bind_tun_echo()
+
+    async def _try_bind_tun_echo(self) -> None:
+        """Best-effort add_tun_bind — log and continue on any failure."""
+        from censprobe_core.echo_ports import VPN_TUN_LISTENER_IPS
+
+        if self.echo_server is None:
+            return
+        try:
+            await self.echo_server.add_tun_bind("openvpn", VPN_TUN_LISTENER_IPS["openvpn"])
+        except Exception as e:
+            logger.warning("openvpn: tun-echo bind failed (%s); throughput unavailable", e)
 
     async def _latch_auth_bytes(self) -> None:
         """Periodically read the status file and latch the running max.
@@ -280,6 +301,14 @@ verb 1
             with contextlib.suppress(asyncio.CancelledError):
                 await self._poll_task
             self._poll_task = None
+        # Tear down the tun-bound echo before the tun device goes away —
+        # the bound socket would otherwise be orphaned on a now-vanished
+        # IP. Safe if start() never reached the bind step.
+        if self.echo_server is not None:
+            from censprobe_core.echo_ports import VPN_TUN_LISTENER_IPS
+
+            with contextlib.suppress(Exception):
+                await self.echo_server.remove_tun_bind("openvpn", VPN_TUN_LISTENER_IPS["openvpn"])
         # Capture status BEFORE teardown so data_transfer_ok is observable.
         # Use max(latched, current) so a probe that finished long ago is
         # still visible even if openvpn has zeroed the per-peer counter

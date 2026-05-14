@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ParamSpec
 
-from censprobe_core.echo_ports import ECHO_PORTS
+from censprobe_core.echo_ports import ECHO_PORTS, TUN_ECHO_PORTS, VPN_TUN_LISTENER_IPS
 from censprobe_core.link_utils import async_delete_iface, async_rm_amneziawg_socket
 from censprobe_core.models import Verdict
 from censprobe_core.utils import graceful_terminate
@@ -117,10 +117,15 @@ class ProbeResult:
     # return paths.
     elapsed_ms: float | None = None
     error: str | None = None
-    # Sustained-data signal — populated only for SS / VLESS / Hy2 (the
-    # three SOCKS-routed protocols that go through the listener echo
-    # server). OpenVPN / WG / AmneziaWG keep `None` because their
-    # data-phase verification is a single ping, not a bulk download.
+    # Sustained-data signal — populated for every protocol whose data
+    # phase carries real bytes:
+    #   * SOCKS-routed protocols (SS / VLESS / Hy2) — measured through
+    #     the SOCKS proxy to the loopback echo on 127.0.0.1.
+    #   * VPN protocols (OpenVPN / WG / AmneziaWG) — measured directly
+    #     through the tun to the listener-side echo bound on the
+    #     listener tun IP (see :data:`VPN_TUN_LISTENER_IPS`).
+    # MTProto protocols stay `None` because they speak MTProto (not
+    # plain HTTP) and our echo doesn't talk back in MTProto framing.
     #
     # NOT used as a scoring criterion: a slow VPS with a narrow uplink
     # would otherwise be penalised for non-censorship reasons. The value
@@ -620,6 +625,70 @@ async def proxy_throughput(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Direct (tun-routed) throughput probe — OpenVPN / WG / AmneziaWG.
+# Mirrors ``proxy_throughput`` but the curl runs against the listener-side
+# tun IP without going through a SOCKS proxy. Bandwidth measured the same
+# way (curl's ``%{speed_download}`` averaged over the transfer).
+# ─────────────────────────────────────────────────────────────────────────────
+async def tunnel_throughput(
+    target_host: str,
+    target_port: int,
+    target_bytes: int | None = None,
+    timeout: float | None = None,
+) -> tuple[float | None, bool]:
+    """Download ``target_bytes`` from the listener echo direct via the tun.
+
+    Used by ``probe_openvpn`` / ``probe_wireguard`` / ``probe_amneziawg``
+    after data_ok==True to surface the same sustained-throughput signal
+    the SOCKS-routed probes already produce via ``proxy_throughput``.
+    The listener side binds an HTTP echo at
+    ``http://<listener_tun_ip>:<port>/throughput?bytes=N`` only AFTER its
+    tun is up (see :meth:`EchoServer.add_tun_bind`), so this curl is
+    routed by the kernel through the tun device and meters real link
+    capacity rather than loopback buffer absorption.
+
+    Return shape matches ``proxy_throughput`` so the caller can swap in
+    either function without changing the result handling.
+    """
+    from censprobe_core.config import get_config
+
+    tcfg = get_config().throughput
+    if not tcfg.enabled:
+        return None, False
+    n_bytes = target_bytes if target_bytes is not None else tcfg.target_bytes
+    n_timeout = timeout if timeout is not None else tcfg.timeout_sec
+    cmd = [
+        "curl",
+        "-s",
+        "-o",
+        "/dev/null",
+        "--max-time",
+        str(n_timeout),
+        # Same write-out tokens as proxy_throughput so the parse path
+        # below is identical.
+        "-w",
+        "%{exitcode} %{speed_download} %{size_download}",
+        f"http://{target_host}:{target_port}/throughput?bytes={n_bytes}",
+    ]
+    code, out, _err = await run_cmd(cmd, timeout=n_timeout + 2)
+    parts = out.strip().split()
+    if len(parts) < 3:
+        return None, False
+    try:
+        exit_code = int(parts[0])
+        speed_bps = float(parts[1])
+        size = int(parts[2])
+    except ValueError:
+        return None, False
+
+    if exit_code == 28:
+        return None, True
+    if code != 0 or size <= 0:
+        return None, False
+    return (speed_bps * 8) / 1_000_000, False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # OpenVPN probe
 # ─────────────────────────────────────────────────────────────────────────────
 @_stamp_elapsed
@@ -699,6 +768,17 @@ verb 1
                     if ok:
                         result.data_ok = True
                         result.verdict = Verdict.OK
+                        # Sustained-throughput follow-up via the
+                        # listener-side echo bound on 10.200.0.1:9994 by
+                        # OpenVPNResponder.start(). Informational only —
+                        # never affects the verdict (a narrow uplink must
+                        # not look like censorship).
+                        mbps, throttled = await tunnel_throughput(
+                            VPN_TUN_LISTENER_IPS["openvpn"],
+                            TUN_ECHO_PORTS["openvpn"],
+                        )
+                        result.throughput_mbps = mbps
+                        result.throughput_throttled = throttled
                         # Keep the existing rtt_ms (time-to-handshake from
                         # OpenVPN's "Initialization Sequence Completed"
                         # marker) — that's the metric operators are used
@@ -817,6 +897,14 @@ PersistentKeepalive = 25
                     if rx > 0:
                         result.data_ok = True
                         result.verdict = Verdict.OK
+                        # Sustained-throughput follow-up — informational
+                        # only, never affects the verdict.
+                        mbps, throttled = await tunnel_throughput(
+                            VPN_TUN_LISTENER_IPS["wireguard"],
+                            TUN_ECHO_PORTS["wireguard"],
+                        )
+                        result.throughput_mbps = mbps
+                        result.throughput_throttled = throttled
         finally:
             # Try `wg-quick down` first (also drops routes/rules); fall
             # back to a hard `ip link del` so a leftover interface never
@@ -915,6 +1003,14 @@ PersistentKeepalive = 25
                     if rx > 0:
                         result.data_ok = True
                         result.verdict = Verdict.OK
+                        # Sustained-throughput follow-up — informational
+                        # only, never affects the verdict.
+                        mbps, throttled = await tunnel_throughput(
+                            VPN_TUN_LISTENER_IPS["amneziawg"],
+                            TUN_ECHO_PORTS["amneziawg"],
+                        )
+                        result.throughput_mbps = mbps
+                        result.throughput_throttled = throttled
         finally:
             # awg-quick down handles routing/socket cleanup when the conf
             # is still readable; the hard fallbacks ensure no leftovers.

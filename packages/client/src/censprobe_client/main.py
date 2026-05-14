@@ -726,10 +726,12 @@ def _print_results(results: dict[str, ProbeResult], server_host: str) -> None:
     # probes RTT will be milliseconds while Elapsed is up to 15 s.
     table.add_column("Elapsed", justify="right", width=10)
     table.add_column("RTT", justify="right", width=10)
-    # Client-side throughput as observed by curl through the SOCKS
-    # tunnel. Populated only for SS / VLESS / Hy2 (the three protocols
-    # that route through the listener echo server). For OpenVPN / WG /
-    # AWG we still show "—" because they do not run a bulk download.
+    # Client-side throughput as observed by curl through the tunnel.
+    # SOCKS-routed protocols (SS / VLESS / Hy2) measure through their
+    # SOCKS proxy to a 127.0.0.1 echo; VPN protocols (OpenVPN / WG /
+    # AWG) measure directly through the tun to a listener-side echo
+    # bound on the tun IP. MTProto protocols still show "—" — their
+    # data phase isn't HTTP so we don't run a bulk download.
     # The "throttled" suffix appears when the download did not finish
     # inside the timeout — strong signal that the data plane is
     # heavily rate-limited. NEVER used by scoring.

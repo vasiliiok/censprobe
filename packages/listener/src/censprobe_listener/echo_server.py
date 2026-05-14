@@ -30,7 +30,11 @@ import time
 # so a single source of truth eliminates silent drift). Re-exported here
 # for back-compat with the responder modules that imported it from this
 # file historically.
-from censprobe_core.echo_ports import ECHO_PORTS
+from censprobe_core.echo_ports import (
+    ECHO_PORTS,
+    SOCKS_ECHO_PORTS,
+    TUN_ECHO_PORTS,
+)
 
 __all__ = ["ECHO_PORTS", "EchoServer"]
 
@@ -66,11 +70,42 @@ _MAX_PLAUSIBLE_MBPS = 2000.0
 
 
 class EchoServer:
-    """Single-process asyncio TCP echo server with per-port counters."""
+    """Single-process asyncio TCP echo server with per-port counters.
+
+    Bind topology:
+      * SOCKS-routed protocols (shadowsocks / vless_reality / hysteria2) —
+        bound on 127.0.0.1 at :meth:`start`, reachable only through the
+        protocol's SOCKS responder.
+      * VPN protocols (openvpn / wireguard / amneziawg) — NOT bound at
+        :meth:`start`. Instead, each VPN responder calls
+        :meth:`add_tun_bind` after its tun device is up; the echo server
+        binds the corresponding port on the listener-side tun IP, so the
+        socket only accepts traffic that routes through the tun and is
+        never exposed on any public interface. :meth:`stop` tears down
+        both kinds.
+
+    Per-protocol counters (``connection_counts``, ``bytes_counts``,
+    ``throughput_mbps``) are pre-allocated for every protocol in
+    :data:`ECHO_PORTS` whether or not it ends up bound — keeps the
+    snapshot shape stable for downstream consumers.
+    """
 
     def __init__(self, ports: dict[str, int] | None = None) -> None:
         self.ports = dict(ports) if ports is not None else dict(ECHO_PORTS)
-        self._servers: list[asyncio.base_events.Server] = []
+        # Initial-bind set: SOCKS-routed protocols only. VPN protocols
+        # join this set via add_tun_bind() after their tun is up. The
+        # custom ``ports`` override is honoured as-is for test scenarios
+        # that want to bind everything immediately on 127.0.0.1.
+        if ports is None:
+            self._initial_bind_ports = dict(SOCKS_ECHO_PORTS)
+        else:
+            self._initial_bind_ports = dict(self.ports)
+        # Servers are tracked per-bind so add_tun_bind / stop can manage
+        # them independently. The key for SOCKS ports is the protocol
+        # name; tun-side binds use a synthetic ``f"{proto}@{ip}"`` key
+        # so a probe that re-runs the same protocol in a single session
+        # can rebind cleanly.
+        self._servers: dict[str, asyncio.base_events.Server] = {}
         self.connection_counts: dict[str, int] = dict.fromkeys(self.ports, 0)
         self.bytes_counts: dict[str, int] = dict.fromkeys(self.ports, 0)
         # Latest /throughput measurement per protocol — None until a probe
@@ -87,34 +122,85 @@ class EchoServer:
         # treats any exception here as "no echo server" and continues —
         # without this rollback, those orphan servers would survive.
         try:
-            for proto, port in self.ports.items():
-                # `reuse_address=True` lets us rebind to the same port even
-                # if the previous listener died with sockets still in
-                # TIME_WAIT — without it, a fast restart hits "address
-                # already in use". asyncio enables it by default on POSIX
-                # but we set it explicitly so the behaviour doesn't depend
-                # on platform defaults.
-                # Capture `proto` by default-arg binding so each spawned
-                # server keeps its own protocol label (closing over the
-                # loop variable would give every server the last value).
-                async def _client_cb(
-                    r: asyncio.StreamReader,
-                    w: asyncio.StreamWriter,
-                    p: str = proto,
-                ) -> None:
-                    await self._handle(r, w, p)
-
-                srv = await asyncio.start_server(
-                    _client_cb,
-                    host="127.0.0.1",
-                    port=port,
-                    reuse_address=True,
-                )
-                self._servers.append(srv)
-                logger.info("echo server: %s on 127.0.0.1:%d", proto, port)
+            for proto, port in self._initial_bind_ports.items():
+                await self._bind_one(proto=proto, host="127.0.0.1", port=port, key=proto)
         except Exception:
             await self.stop()
             raise
+
+    async def _bind_one(self, *, proto: str, host: str, port: int, key: str) -> None:
+        """Open one listening socket on ``(host, port)`` for ``proto``.
+
+        ``reuse_address=True`` lets us rebind to the same port even if the
+        previous listener died with sockets still in TIME_WAIT — without
+        it, a fast restart hits "address already in use". asyncio enables
+        it by default on POSIX but we set it explicitly so the behaviour
+        doesn't depend on platform defaults.
+
+        Capture ``proto`` by default-arg binding inside ``_client_cb`` so
+        each spawned server keeps its own protocol label (closing over
+        the loop variable would give every server the last value).
+        """
+
+        async def _client_cb(
+            r: asyncio.StreamReader,
+            w: asyncio.StreamWriter,
+            p: str = proto,
+        ) -> None:
+            await self._handle(r, w, p)
+
+        srv = await asyncio.start_server(
+            _client_cb,
+            host=host,
+            port=port,
+            reuse_address=True,
+        )
+        # Replace any previous bind under the same key (e.g. a leftover
+        # tun bind from a half-torn-down session); the new socket inherits
+        # the counters because they live at the protocol level, not the
+        # bind level.
+        if key in self._servers:
+            old = self._servers.pop(key)
+            old.close()
+            with contextlib.suppress(Exception):
+                await old.wait_closed()
+        self._servers[key] = srv
+        logger.info("echo server: %s on %s:%d", proto, host, port)
+
+    async def add_tun_bind(self, proto: str, tun_ip: str) -> None:
+        """Bind ``proto``'s echo port on a VPN responder's listener-side tun IP.
+
+        Called by openvpn / wireguard / amneziawg responders after their
+        tun device is up. The bind only succeeds once the kernel knows
+        about ``tun_ip``, which guarantees the socket is reachable solely
+        through the tun (no host-network exposure).
+
+        Idempotent against responder restarts — re-binding with the same
+        ``(proto, tun_ip)`` replaces any previous server under the same
+        key.
+        """
+        port = TUN_ECHO_PORTS.get(proto)
+        if port is None:
+            raise ValueError(
+                f"add_tun_bind: {proto!r} is not a VPN protocol (known: {sorted(TUN_ECHO_PORTS)})"
+            )
+        key = f"{proto}@{tun_ip}"
+        await self._bind_one(proto=proto, host=tun_ip, port=port, key=key)
+
+    async def remove_tun_bind(self, proto: str, tun_ip: str) -> None:
+        """Tear down the bind registered by :meth:`add_tun_bind`.
+
+        Safe to call when no matching bind exists (e.g. responder stop()
+        races with start() failure) — the missing-key case is a no-op.
+        """
+        key = f"{proto}@{tun_ip}"
+        srv = self._servers.pop(key, None)
+        if srv is None:
+            return
+        srv.close()
+        with contextlib.suppress(Exception):
+            await srv.wait_closed()
+        logger.info("echo server: %s on %s removed", proto, tun_ip)
 
     async def _handle(
         self,
@@ -267,14 +353,17 @@ class EchoServer:
             )
 
     async def stop(self) -> None:
-        for srv in self._servers:
+        # Snapshot the values then clear so an exception in wait_closed
+        # leaves _servers empty (start() can be re-called).
+        servers = list(self._servers.values())
+        self._servers.clear()
+        for srv in servers:
             srv.close()
-        for srv in self._servers:
+        for srv in servers:
             # Servers may already be in the process of shutting down by
             # the time we reach this loop (SIGTERM races) — suppress.
             with contextlib.suppress(Exception):
                 await srv.wait_closed()
-        self._servers.clear()
 
     def snapshot(self) -> dict[str, dict[str, float | int | None]]:
         """Return per-protocol {connections, bytes, throughput_mbps}."""

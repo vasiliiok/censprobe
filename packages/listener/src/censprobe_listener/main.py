@@ -742,10 +742,13 @@ def _finalize_protocol_result(
 
     data_ok = bool(getattr(responder, "data_transfer_ok", False))
 
-    # Throughput: only the SOCKS-routed responders expose
-    # ``echo_server`` (injected in _start_responders). For OpenVPN /
-    # WG / AWG the attribute is missing or None — leave the field
-    # unset so the report carries an honest "not measured".
+    # Throughput: every protocol-with-an-echo-bind exposes
+    # ``echo_server`` (injected in _start_responders). For SOCKS-routed
+    # protocols (SS / VLESS / Hy2) the bind is on 127.0.0.1 from
+    # EchoServer.start(); for VPN protocols (OpenVPN / WG / AWG) the
+    # bind is on the listener-side tun IP, added by the responder via
+    # add_tun_bind() once the tun is up. MTProto responders don't carry
+    # a /throughput endpoint and leave the field unset.
     avg_throughput: float | None = None
     echo_server = getattr(responder, "echo_server", None)
     if echo_server is not None:

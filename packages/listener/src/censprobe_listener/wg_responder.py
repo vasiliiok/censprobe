@@ -118,6 +118,9 @@ class WireGuardResponder:
         self._final_hs_count: int = 0
         self._final_rx_bytes: int = 0
         self._snapshot_taken: bool = False
+        # Injected by the responder dispatch factory; used to bind the
+        # /throughput endpoint on the listener-side tun IP after start().
+        self.echo_server: object | None = None
 
     async def start(self) -> None:
         self._tmpdir = tempfile.TemporaryDirectory(prefix="censprobe_wg_")
@@ -185,6 +188,16 @@ AllowedIPs = 10.202.0.2/32
 
         await loop.run_in_executor(None, _bring_up)
         logger.info("WireGuard responder started on UDP/%d (iface: %s)", self.port, self.interface)
+        # Bind /throughput on the tun IP so the client can curl through
+        # the established tunnel after the handshake. Non-fatal on
+        # failure — the responder still works without it.
+        if self.echo_server is not None:
+            from censprobe_core.echo_ports import VPN_TUN_LISTENER_IPS
+
+            try:
+                await self.echo_server.add_tun_bind("wireguard", VPN_TUN_LISTENER_IPS["wireguard"])
+            except Exception as e:
+                logger.warning("wg: tun-echo bind failed (%s); throughput unavailable", e)
 
     async def stop(self) -> None:
         # Snapshot peer stats BEFORE tearing the interface down.
@@ -192,6 +205,15 @@ AllowedIPs = 10.202.0.2/32
         self._final_hs_count = hs
         self._final_rx_bytes = rx
         self._snapshot_taken = True
+
+        # Tear down /throughput bind before the tun disappears.
+        if self.echo_server is not None:
+            from censprobe_core.echo_ports import VPN_TUN_LISTENER_IPS
+
+            with contextlib.suppress(Exception):
+                await self.echo_server.remove_tun_bind(
+                    "wireguard", VPN_TUN_LISTENER_IPS["wireguard"]
+                )
 
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, delete_iface, self.interface)
@@ -275,6 +297,9 @@ class AmneziaWGResponder:
         self._final_hs_count: int = 0
         self._final_rx_bytes: int = 0
         self._snapshot_taken: bool = False
+        # Injected by the responder dispatch factory; used to bind the
+        # /throughput endpoint on the listener-side tun IP after start().
+        self.echo_server: object | None = None
 
     async def start(self) -> None:
         self._tmpdir = tempfile.TemporaryDirectory(prefix="censprobe_awg_")
@@ -327,6 +352,15 @@ AllowedIPs = 10.201.0.2/32
 
         await loop.run_in_executor(None, _start)
         logger.info("AmneziaWG responder started on UDP/%d", self.port)
+        # Bind /throughput on the tun IP — see WireGuardResponder.start
+        # for the symmetric pattern. Failure is non-fatal.
+        if self.echo_server is not None:
+            from censprobe_core.echo_ports import VPN_TUN_LISTENER_IPS
+
+            try:
+                await self.echo_server.add_tun_bind("amneziawg", VPN_TUN_LISTENER_IPS["amneziawg"])
+            except Exception as e:
+                logger.warning("awg: tun-echo bind failed (%s); throughput unavailable", e)
 
     async def stop(self) -> None:
         # Snapshot stats BEFORE teardown.
@@ -334,6 +368,15 @@ AllowedIPs = 10.201.0.2/32
         self._final_hs_count = hs
         self._final_rx_bytes = rx
         self._snapshot_taken = True
+
+        # Tear down /throughput bind before the tun is torn down.
+        if self.echo_server is not None:
+            from censprobe_core.echo_ports import VPN_TUN_LISTENER_IPS
+
+            with contextlib.suppress(Exception):
+                await self.echo_server.remove_tun_bind(
+                    "amneziawg", VPN_TUN_LISTENER_IPS["amneziawg"]
+                )
 
         if self._tmpdir and self._conf_path:
             loop = asyncio.get_running_loop()

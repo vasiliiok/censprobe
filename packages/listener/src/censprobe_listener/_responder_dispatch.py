@@ -79,27 +79,31 @@ class Responder(Protocol):
 
 
 # Each factory takes (creds, echo_server) and returns a fresh, unstarted
-# responder. ``echo_server`` is None for protocols that don't use the
-# loopback echo path (OpenVPN/WG/AWG); the factory ignores the argument
-# in that case.
+# responder. All three VPN responders (OpenVPN/WG/AWG) now also accept
+# the echo_server so they can register a tun-bound /throughput endpoint
+# after their tun device is up — see EchoServer.add_tun_bind.
 ResponderFactory = Callable[[ProtocolCredentials, EchoServer | None], Responder]
 
 
-def _factory_openvpn(creds: ProtocolCredentials, _echo: EchoServer | None) -> Responder:
-    return OpenVPNResponder(creds.openvpn_psk_pem, creds.openvpn_port)
+def _factory_openvpn(creds: ProtocolCredentials, echo: EchoServer | None) -> Responder:
+    r = OpenVPNResponder(creds.openvpn_psk_pem, creds.openvpn_port)
+    r.echo_server = echo
+    return r
 
 
-def _factory_wireguard(creds: ProtocolCredentials, _echo: EchoServer | None) -> Responder:
-    return WireGuardResponder(
+def _factory_wireguard(creds: ProtocolCredentials, echo: EchoServer | None) -> Responder:
+    r = WireGuardResponder(
         creds.wg_server_private,
         creds.wg_client_public,
         creds.wg_preshared_key,
         creds.wg_port,
     )
+    r.echo_server = echo
+    return r
 
 
-def _factory_amneziawg(creds: ProtocolCredentials, _echo: EchoServer | None) -> Responder:
-    return AmneziaWGResponder(
+def _factory_amneziawg(creds: ProtocolCredentials, echo: EchoServer | None) -> Responder:
+    r = AmneziaWGResponder(
         creds.awg_server_private,
         creds.awg_client_public,
         creds.awg_preshared_key,
@@ -116,6 +120,8 @@ def _factory_amneziawg(creds: ProtocolCredentials, _echo: EchoServer | None) -> 
             h4=creds.awg_h4,
         ),
     )
+    r.echo_server = echo
+    return r
 
 
 def _factory_shadowsocks(creds: ProtocolCredentials, echo: EchoServer | None) -> Responder:

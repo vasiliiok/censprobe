@@ -150,6 +150,23 @@
               {
                 "id": "noValue",
                 "value": "\u2014"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {"color": "red", "value": null},
+                    {"color": "yellow", "value": 5},
+                    {"color": "green", "value": 50}
+                  ]
+                }
               }
             ]
           },
@@ -334,6 +351,149 @@
           }
         }
       ]
+    },
+    {
+      "id": 4,
+      "title": "Throughput by protocol (per session, Mbps)",
+      "description": "Sustained throughput measured by curl through the tunnel (SOCKS-routed for SS/VLESS/Hy2; direct via tun for OpenVPN/WG/AWG). MTProto protocols don't expose an echo and stay absent. Throttled rows are hidden (the bar would be 0); see the matrix panel above for the throttled flag.",
+      "type": "barchart",
+      "gridPos": {
+        "x": 0,
+        "y": 23,
+        "w": 18,
+        "h": 10
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "DS_CENSPROBE_PG"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT (COALESCE(ls.client_meta->'asn'->>'org', '\u2014') || ' / ' || ls.session_id) AS session, pr.protocol, pr.avg_throughput_mbps AS mbps FROM protocol_results pr JOIN listener_sessions ls ON ls.id = pr.session_id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE (tr.test_id IN (${test_id:singlequote})) AND pr.avg_throughput_mbps IS NOT NULL ORDER BY session, pr.protocol",
+          "format": "table",
+          "refId": "A",
+          "editorMode": "code",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "DS_CENSPROBE_PG"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 5
+              },
+              {
+                "color": "green",
+                "value": 50
+              }
+            ]
+          },
+          "unit": "Mbits",
+          "decimals": 1,
+          "noValue": "\u2014"
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "xField": "session",
+        "groupWidth": 0.7,
+        "barWidth": 0.97,
+        "stacking": "none",
+        "showValue": "auto",
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "right"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Median throughput (across all OK sessions, by protocol)",
+      "description": "Per-protocol median of avg_throughput_mbps over every session that reached data_ok. Useful for cross-protocol comparison without per-session noise.",
+      "type": "stat",
+      "gridPos": {
+        "x": 18,
+        "y": 23,
+        "w": 6,
+        "h": 10
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "DS_CENSPROBE_PG"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT pr.protocol, PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY pr.avg_throughput_mbps) AS median_mbps FROM protocol_results pr JOIN listener_sessions ls ON ls.id = pr.session_id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE (tr.test_id IN (${test_id:singlequote})) AND pr.avg_throughput_mbps IS NOT NULL GROUP BY pr.protocol ORDER BY median_mbps DESC",
+          "format": "table",
+          "refId": "A",
+          "editorMode": "code",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "DS_CENSPROBE_PG"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 5
+              },
+              {
+                "color": "green",
+                "value": 50
+              }
+            ]
+          },
+          "unit": "Mbits",
+          "decimals": 1,
+          "noValue": "\u2014"
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/^median_mbps$/",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value_and_name",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      }
     }
   ]
 }
