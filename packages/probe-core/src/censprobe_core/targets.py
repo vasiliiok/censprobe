@@ -315,54 +315,79 @@ def load_targets(
             f"*.yaml file."
         )
 
-    if files:
-        candidates = [directory / f"{name}.yaml" for name in files]
-    else:
-        candidates = sorted(directory.glob("*.yaml"))
+    candidates = (
+        [directory / f"{name}.yaml" for name in files]
+        if files
+        else sorted(directory.glob("*.yaml"))
+    )
 
     for path in candidates:
-        if path.is_symlink():
-            # Symlink guard: importer/runner refuse to follow symlinks in
-            # the targets tree (a malicious PR could ship a symlink at
-            # targets/foo.yaml → /etc/passwd). Skip silently — not an
-            # operator typo, so no actionable error to raise.
-            logger.warning("Skipping symlink %s in targets/", path)
+        loaded = _load_one_target_file(path, files_explicit=bool(files))
+        if loaded is None:
             continue
-        if not path.exists():
-            # When ``files=`` is explicit and one of the requested
-            # basenames is missing on disk, that's a configuration bug
-            # worth surfacing rather than silently shrinking the run.
-            if files:
-                raise ValueError(
-                    f"Target file {path} listed in censprobe.yaml::"
-                    f"targets.files does not exist on disk."
-                )
-            continue
-        basename = path.stem
-        try:
-            text = path.read_text(encoding="utf-8")
-        except OSError as e:
-            raise ValueError(f"Could not read target file {path}: {e}") from e
-        try:
-            raw = yaml.safe_load(text) or {}
-        except yaml.YAMLError as e:
-            raise ValueError(f"Invalid YAML in target file {path}: {e}") from e
-        if not isinstance(raw, dict):
-            raise ValueError(
-                f"Target file {path} must be a YAML mapping at the top level "
-                f"(got {type(raw).__name__})."
-            )
-        try:
-            tf = TargetFile.model_validate(raw)
-        except Exception as e:
-            raise ValueError(f"Invalid schema in target file {path}: {e}") from e
-        out.files[basename] = tf
-        logger.debug("Loaded target file: %s", basename)
+        out.files[path.stem] = loaded
 
-    # module_owned cross-check: every entry must correspond to an
-    # actually-loaded basename. A typo ``[telegrm]`` would otherwise
-    # silently leak Telegram's MTProto-shaped targets into the generic
-    # dns/tcp/tls/http view and produce spurious BLOCKED rows there.
+    _validate_module_owned(out, directory)
+    return out
+
+
+def _load_one_target_file(path: Path, *, files_explicit: bool) -> TargetFile | None:
+    """Parse + validate a single ``targets/*.yaml`` file.
+
+    Returns ``None`` to signal "skip this entry" (symlink guard, or
+    auto-discovered path that doesn't exist). Raises ``ValueError`` for
+    operator-visible failures (file requested explicitly but missing,
+    read error, YAML syntax, schema validation, non-mapping top level).
+
+    ``files_explicit=True`` tightens the missing-file path: when the
+    operator listed a basename in ``censprobe.yaml::targets.files`` we
+    refuse to silently shrink the run, while glob-discovered entries
+    that vanish between ``glob`` and ``exists`` (rare, but possible on
+    a CI cleanup race) are tolerated.
+    """
+    if path.is_symlink():
+        # Symlink guard: importer/runner refuse to follow symlinks in
+        # the targets tree (a malicious PR could ship a symlink at
+        # targets/foo.yaml → /etc/passwd). Skip silently — not an
+        # operator typo, so no actionable error to raise.
+        logger.warning("Skipping symlink %s in targets/", path)
+        return None
+    if not path.exists():
+        if files_explicit:
+            raise ValueError(
+                f"Target file {path} listed in censprobe.yaml::"
+                f"targets.files does not exist on disk."
+            )
+        return None
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as e:
+        raise ValueError(f"Could not read target file {path}: {e}") from e
+    try:
+        raw = yaml.safe_load(text) or {}
+    except yaml.YAMLError as e:
+        raise ValueError(f"Invalid YAML in target file {path}: {e}") from e
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"Target file {path} must be a YAML mapping at the top level "
+            f"(got {type(raw).__name__})."
+        )
+    try:
+        tf = TargetFile.model_validate(raw)
+    except Exception as e:
+        raise ValueError(f"Invalid schema in target file {path}: {e}") from e
+    logger.debug("Loaded target file: %s", path.stem)
+    return tf
+
+
+def _validate_module_owned(out: TargetSet, directory: Path) -> None:
+    """Reject ``module_owned`` entries that point at no discovered file.
+
+    A typo ``[telegrm]`` would otherwise silently leak Telegram's
+    MTProto-shaped targets into the generic dns/tcp/tls/http view and
+    produce spurious BLOCKED rows there. Fail-loud so the operator
+    catches the typo at startup, not from a confused dashboard.
+    """
     orphan_owned = [name for name in out.module_owned if name not in out.files]
     if orphan_owned:
         raise ValueError(
@@ -370,5 +395,3 @@ def load_targets(
             f"not discovered under {directory}: {orphan_owned}. "
             f"Either fix the typo, or create the file."
         )
-
-    return out
