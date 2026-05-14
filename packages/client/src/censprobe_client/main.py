@@ -693,6 +693,22 @@ def _print_single_result(name: str, result: ProbeResult) -> None:
     console.print(f"  {name:<20} {v_str}{duration_str}")
 
 
+def _format_throughput(r: ProbeResult) -> str:
+    if r.throughput_throttled:
+        return "[red]throttled[/red]"
+    if r.throughput_mbps is not None:
+        return f"{r.throughput_mbps:,.1f} Mbps"
+    return "[dim]—[/dim]"
+
+
+def _summary_color(ok_count: int, total: int) -> str:
+    if ok_count == total:
+        return "green"
+    if ok_count > 0:
+        return "yellow"
+    return "red"
+
+
 def _print_results(results: dict[str, ProbeResult], server_host: str) -> None:
     table = Table(
         title=f"Client probe results → {server_host}",
@@ -733,12 +749,7 @@ def _print_results(results: dict[str, ProbeResult], server_host: str) -> None:
         v_str = f"[{color}]{r.verdict}[/{color}]"
         elapsed_str = f"{r.elapsed_ms:.0f}ms" if r.elapsed_ms is not None else "—"
         rtt_str = f"{r.rtt_ms:.0f}ms" if r.rtt_ms is not None else "—"
-        if r.throughput_throttled:
-            tp_str = "[red]throttled[/red]"
-        elif r.throughput_mbps is not None:
-            tp_str = f"{r.throughput_mbps:,.1f} Mbps"
-        else:
-            tp_str = "[dim]—[/dim]"
+        tp_str = _format_throughput(r)
         table.add_row(name, v_str, elapsed_str, rtt_str, tp_str, r.error or "")
         if r.verdict in (Verdict.OK, Verdict.HANDSHAKE_ONLY):
             ok_count += 1
@@ -746,13 +757,8 @@ def _print_results(results: dict[str, ProbeResult], server_host: str) -> None:
     console.print("\n")
     console.print(table)
 
-    if ok_count == len(results):
-        summary_color = "green"
-    elif ok_count > 0:
-        summary_color = "yellow"
-    else:
-        summary_color = "red"
-    body = f"[{summary_color}]{ok_count}/{len(results)} protocols reached[/{summary_color}]"
+    color = _summary_color(ok_count, len(results))
+    body = f"[{color}]{ok_count}/{len(results)} protocols reached[/{color}]"
     has_handshake_only = any(r.verdict == Verdict.HANDSHAKE_ONLY for r in results.values())
     if has_handshake_only:
         body += (
