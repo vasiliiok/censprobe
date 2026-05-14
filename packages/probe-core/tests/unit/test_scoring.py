@@ -159,15 +159,19 @@ class TestLatencyToScore:
     @pytest.mark.parametrize(
         ("rtt_ms", "expected"),
         [
-            (10.0, 100.0),  # <50
-            (49.999, 100.0),  # boundary
-            (50.0, 80.0),  # 50–100
-            (99.999, 80.0),
-            (100.0, 60.0),  # 100–200
-            (150.0, 60.0),
-            (200.0, 30.0),  # 200–500
-            (499.999, 30.0),
-            (500.0, 0.0),  # >=500
+            # Post-2026-05-14 buckets, calibrated for kernel-measured RTT
+            # (see ``_latency_to_score`` docstring).
+            (0.5, 100.0),  # sub-millisecond datacenter→anycast (e.g. Frankfurt→1.1.1.1)
+            (9.999, 100.0),  # boundary <10
+            (10.0, 90.0),  # 10–50: residential broadband
+            (49.999, 90.0),
+            (50.0, 75.0),  # 50–100: cellular / EU↔US-east
+            (99.999, 75.0),
+            (100.0, 50.0),  # 100–200: intercontinental
+            (199.999, 50.0),
+            (200.0, 25.0),  # 200–500: satellite / heavy DPI rerouting
+            (499.999, 25.0),
+            (500.0, 0.0),  # ≥500: broken
             (5000.0, 0.0),
         ],
     )
@@ -184,8 +188,9 @@ class TestLatencyToScore:
 
     def test_uses_median_not_mean(self) -> None:
         # 9 fast samples + 1 slow outlier should resolve to "fast".
+        # Post-2026-05-14 buckets: 10ms hits the [10, 50) tier → 90.
         rtts = [10.0] * 9 + [10000.0]
-        assert _latency_to_score(rtts) == pytest.approx(100.0)
+        assert _latency_to_score(rtts) == pytest.approx(90.0)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -251,16 +256,19 @@ class TestComputeScores:
         assert scores.detected_techniques == []
 
     def test_all_ok_solo_scores_high(self) -> None:
+        # NOTE: ``rtt_ms`` on http rows is ignored as of 2026-05-14 (the
+        # scoring filter is tcp-only — see scoring.py:147). Only the tcp
+        # row's 5ms RTT feeds latency_score → 100 (under-10ms bucket).
         results = [
             _make_result(Verdict.OK, category="dns"),
             _make_result(Verdict.OK, category="tls"),
             _make_result(Verdict.OK, category="http", rtt_ms=20.0),
-            _make_result(Verdict.OK, category="tcp", rtt_ms=20.0),
+            _make_result(Verdict.OK, category="tcp", rtt_ms=5.0),
         ]
         scores = compute_scores(results, None)
         assert scores.dns_integrity == pytest.approx(100.0)
         assert scores.tls_integrity == pytest.approx(100.0)
-        # uplink = 1.0 (all http OK), latency_score = 1.0 (rtt < 50ms),
+        # uplink = 1.0 (all http OK), latency_score = 1.0 (tcp rtt <10ms),
         # protocol_reach = 0.5 (no listener data).
         # entry = (0.5*0.6 + 1.0*0.3 + 1.0*0.1) * 100 = 70.0
         assert scores.entry_score == pytest.approx(70.0)
@@ -273,16 +281,15 @@ class TestComputeScores:
         assert scores.overall == pytest.approx(100.0)
 
     def test_overall_with_listener_averages_three_axes(self) -> None:
-        # entry + exit + relay all distinct → overall = mean of all three.
         # Listener present: protocol_reach = 1.0 (one OK protocol).
-        # results: 4/4 OK across http/tcp with 20ms RTT.
+        # tcp rtt=5ms → latency_score = 1.0 (<10ms bucket).
         # entry = (1.0*0.6 + 1.0*0.3 + 1.0*0.1) * 100 = 100.0
         # exit  = (1.0*0.6 + 1.0*0.4) * 100 = 100.0
         # relay = (1.0*0.7 + 1.0*0.3) * 100 = 100.0
         # overall = mean(100, 100, 100) = 100
         results = [
             _make_result(Verdict.OK, category="http", rtt_ms=20.0),
-            _make_result(Verdict.OK, category="tcp", rtt_ms=20.0),
+            _make_result(Verdict.OK, category="tcp", rtt_ms=5.0),
         ]
         listener = _make_listener_report({"wireguard": Verdict.OK})
         scores = compute_scores(results, [listener])
@@ -297,12 +304,11 @@ class TestComputeScores:
         # listener absent, entry is artificially capped (0.5 neutral
         # protocol_reach) and must be excluded from overall so the
         # number reflects actual exit/relay observations only.
-        # uplink = 1.0, latency = 1.0 → entry = 70, exit = 100, relay = 100.
-        # overall (no listener) = mean(100, 100) = 100 — correctly built
-        # from observed signals, not pulled down by the neutral entry.
+        # uplink = 1.0, tcp latency 5ms → score 100 → entry = 70.
+        # overall (no listener) = mean(exit=100, relay=100) = 100.
         results = [
             _make_result(Verdict.OK, category="http", rtt_ms=20.0),
-            _make_result(Verdict.OK, category="tcp", rtt_ms=20.0),
+            _make_result(Verdict.OK, category="tcp", rtt_ms=5.0),
         ]
         scores = compute_scores(results, None)
         assert scores.listener_session_count == 0

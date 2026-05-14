@@ -61,7 +61,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT tr.test_id AS server, ls.session_id, COALESCE(ls.client_meta->'asn'->>'org', '\u2014') AS client_org, pr.protocol, pr.verdict, pr.handshake_count, pr.data_transfer_ok, COALESCE(pr.client_avg_throughput_mbps, pr.avg_throughput_mbps) AS avg_throughput_mbps, pr.throughput_throttled, pr.note FROM protocol_results pr JOIN listener_sessions ls ON ls.id = pr.session_id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE (tr.test_id IN (${test_id:singlequote})) ORDER BY ls.session_id, pr.protocol",
+          "rawSql": "SELECT tr.test_id AS server, ls.session_id, COALESCE(ls.client_meta->'asn'->>'org', '\u2014') AS client_org, pr.protocol, pr.verdict, pr.handshake_count, pr.data_transfer_ok, COALESCE(pr.avg_throughput_mbps, pr.client_avg_throughput_mbps) AS avg_throughput_mbps, pr.throughput_throttled, pr.note FROM protocol_results pr JOIN listener_sessions ls ON ls.id = pr.session_id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE (tr.test_id IN (${test_id:singlequote})) ORDER BY ls.session_id, pr.protocol",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -370,7 +370,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT (COALESCE(ls.client_meta->'asn'->>'org', '\u2014') || ' / ' || ls.session_id) AS session, pr.protocol, COALESCE(pr.client_avg_throughput_mbps, pr.avg_throughput_mbps) AS mbps FROM protocol_results pr JOIN listener_sessions ls ON ls.id = pr.session_id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE (tr.test_id IN (${test_id:singlequote})) AND COALESCE(pr.client_avg_throughput_mbps, pr.avg_throughput_mbps) IS NOT NULL ORDER BY session, pr.protocol",
+          "rawSql": "SELECT (COALESCE(ls.client_meta->'asn'->>'org', '\u2014') || ' / ' || ls.session_id) AS session, pr.protocol, COALESCE(pr.avg_throughput_mbps, pr.client_avg_throughput_mbps) AS mbps FROM protocol_results pr JOIN listener_sessions ls ON ls.id = pr.session_id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE (tr.test_id IN (${test_id:singlequote})) AND COALESCE(pr.avg_throughput_mbps, pr.client_avg_throughput_mbps) IS NOT NULL ORDER BY session, pr.protocol",
           "format": "table",
           "refId": "A",
           "editorMode": "code",
@@ -447,7 +447,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT pr.protocol, PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY COALESCE(pr.client_avg_throughput_mbps, pr.avg_throughput_mbps)) AS median_mbps FROM protocol_results pr JOIN listener_sessions ls ON ls.id = pr.session_id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE (tr.test_id IN (${test_id:singlequote})) AND COALESCE(pr.client_avg_throughput_mbps, pr.avg_throughput_mbps) IS NOT NULL GROUP BY pr.protocol ORDER BY median_mbps DESC",
+          "rawSql": "SELECT pr.protocol, PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY COALESCE(pr.avg_throughput_mbps, pr.client_avg_throughput_mbps)) AS median_mbps FROM protocol_results pr JOIN listener_sessions ls ON ls.id = pr.session_id JOIN test_runs tr ON tr.id = ls.test_run_id WHERE (tr.test_id IN (${test_id:singlequote})) AND COALESCE(pr.avg_throughput_mbps, pr.client_avg_throughput_mbps) IS NOT NULL GROUP BY pr.protocol ORDER BY median_mbps DESC",
           "format": "table",
           "refId": "A",
           "editorMode": "code",

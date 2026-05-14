@@ -142,10 +142,14 @@ def compute_scores(
     proto_ok = _protocol_reachability(listener_reports)
 
     # ── Latency score ─────────────────────────────────────────────────────────
-    # Based on median RTT to external resources
-    rtts = [
-        r.rtt_ms for r in solo_results if r.rtt_ms is not None and r.category in ("tcp", "http")
-    ]
+    # Based on median RTT to external resources. Category restricted to
+    # ``tcp`` since 2026-05-14: the TCP module reads kernel ``tcpi_rtt``
+    # (network-only, no asyncio overhead — see ``_tcp_kernel_rtt``). The
+    # HTTP module never populated ``rtt_ms`` (always NULL in DB), and
+    # any future HTTP roundtrip-time stored there would be inflated
+    # vs pure network RTT (TLS handshake + request/response serialisation
+    # all mixed in), so even nominal inclusion would dilute the signal.
+    rtts = [r.rtt_ms for r in solo_results if r.rtt_ms is not None and r.category == "tcp"]
     latency_score = _latency_to_score(rtts) / 100.0 if rtts else 0.5
 
     # ── Entry score ───────────────────────────────────────────────────────────
@@ -326,19 +330,42 @@ def _protocol_reachability(
 
 
 def _latency_to_score(rtts: list[float]) -> float:
-    """Convert median RTT to [0–100] score. Lower RTT = higher score."""
+    """Convert median RTT to [0–100] score. Lower RTT = higher score.
+
+    Buckets calibrated for kernel-measured network RTT (post-Phase 7,
+    via ``_tcp_kernel_rtt``) to anycast DNS targets (1.1.1.1, 8.8.8.8,
+    9.9.9.9, 77.88.8.8). On a typical VPS the kernel RTT to these
+    anycast POPs is <5 ms; cellular/satellite/heavily-routed paths
+    push it past 100 ms.
+
+    Pre-2026-05-14 buckets were calibrated against wall-clock RTT
+    inflated by asyncio event-loop scheduling — so the old 50-ms
+    "perfect" bound was actually catching ~10 ms of real RTT + 40 ms
+    of overhead. After the kernel-RTT switch the overhead is gone,
+    so the same "perfect" bound is now stricter. We widen the upper
+    bucket boundaries proportionally to keep the score-vs-real-RTT
+    mapping intuitive: a realistic 5 ms VPS path still scores 100,
+    a cellular 80 ms path still scores ~80 (not 0).
+    """
     if not rtts:
         return 50.0
     median_rtt = sorted(rtts)[len(rtts) // 2]
-    # <50ms → 100, 50–100ms → 80, 100–200ms → 60, 200–500ms → 30, >500ms → 0
-    if median_rtt < 50:
+    # <10ms  → 100  (datacenter to anycast POP, optimal)
+    # <50ms  → 90   (residential broadband to anycast)
+    # <100ms → 75   (cellular / EU↔US-east)
+    # <200ms → 50   (intercontinental / heavy routing)
+    # <500ms → 25   (satellite / mobile in congested cell)
+    # ≥500ms → 0    (broken or DPI-rerouted path)
+    if median_rtt < 10:
         return 100.0
+    elif median_rtt < 50:
+        return 90.0
     elif median_rtt < 100:
-        return 80.0
+        return 75.0
     elif median_rtt < 200:
-        return 60.0
+        return 50.0
     elif median_rtt < 500:
-        return 30.0
+        return 25.0
     return 0.0
 
 

@@ -455,15 +455,22 @@ async def _test_https_domains(
             try:
                 t0 = time.monotonic()
                 r = await client.get(url, headers={"User-Agent": _ua_tg()})
-                rtt = (time.monotonic() - t0) * 1000
+                # ``http_response_ms`` is the full HTTPS roundtrip (TLS
+                # handshake + request + body read), NOT pure network
+                # RTT — surfaced as evidence rather than rtt_ms so the
+                # latency-axis scoring (kernel-rtt only, tcp category)
+                # isn't polluted by application-layer time.
+                http_response_ms = (time.monotonic() - t0) * 1000
                 verdict = Verdict.OK if r.status_code < 500 else Verdict.ANOMALY
                 return TestResult(
                     test=test_name,
                     category="telegram",
                     target=url,
                     verdict=verdict,
-                    rtt_ms=rtt,
-                    evidence={"status": r.status_code},
+                    evidence={
+                        "status": r.status_code,
+                        "http_response_ms": round(http_response_ms, 1),
+                    },
                 )
             except httpx.ConnectTimeout:
                 return TestResult(

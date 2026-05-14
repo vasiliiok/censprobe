@@ -689,7 +689,17 @@ def _slug(s: str) -> str:
 
 @stamp_test_elapsed
 async def _test_http(domain: str, url: str, expected_status: int) -> TestResult:
-    """HTTPS GET to a Cloudflare platform URL."""
+    """HTTPS GET to a Cloudflare platform URL.
+
+    The elapsed wall-clock here is HTTP-roundtrip time (TLS handshake
+    + request + response + body read) — NOT pure network RTT. We keep
+    it in ``evidence.http_response_ms`` for the dashboard's
+    "Cloudflare HTTP latency" panel but do NOT populate ``rtt_ms`` —
+    that field is reserved for kernel-measured network RTT (see
+    ``_tcp_kernel_rtt``) and feeds scoring's latency axis directly.
+    Conflating "HTTP request roundtrip" with "network RTT" inflated
+    the latency_score signal by 80-300 ms pre-2026-05-14.
+    """
     test_name = f"cloudflare_http_{_slug(domain)}"
     t0 = time.monotonic()
     try:
@@ -699,7 +709,7 @@ async def _test_http(domain: str, url: str, expected_status: int) -> TestResult:
             verify=True,
         ) as client:
             r = await client.get(url)
-        rtt_ms = (time.monotonic() - t0) * 1000
+        http_response_ms = (time.monotonic() - t0) * 1000
 
         if r.status_code in (403, 429, 451):
             return TestResult(
@@ -707,8 +717,7 @@ async def _test_http(domain: str, url: str, expected_status: int) -> TestResult:
                 category="cloudflare",
                 target=url,
                 verdict=Verdict.SERVER_REFUSED,
-                rtt_ms=rtt_ms,
-                evidence={"status": r.status_code},
+                evidence={"status": r.status_code, "http_response_ms": round(http_response_ms, 1)},
             )
 
         verdict = Verdict.OK if r.status_code == expected_status else Verdict.ANOMALY
@@ -717,8 +726,11 @@ async def _test_http(domain: str, url: str, expected_status: int) -> TestResult:
             category="cloudflare",
             target=url,
             verdict=verdict,
-            rtt_ms=rtt_ms,
-            evidence={"status": r.status_code, "expected": expected_status},
+            evidence={
+                "status": r.status_code,
+                "expected": expected_status,
+                "http_response_ms": round(http_response_ms, 1),
+            },
         )
 
     except httpx.ConnectTimeout:

@@ -290,7 +290,7 @@ class EchoServer:
                 await self._serve_throughput(proto, data, writer)
                 return
 
-            if data.startswith(b"GET ") or data.startswith(b"POST "):
+            if data.startswith((b"GET ", b"POST ")):
                 body = b"pong"
                 writer.write(
                     b"HTTP/1.1 200 OK\r\n"

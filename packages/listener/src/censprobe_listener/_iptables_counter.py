@@ -73,6 +73,64 @@ class InstallStatus:
 _IPTABLES_TIMEOUT_S = 5.0
 
 
+async def _iptables_check(cmd: str, chain: str, rule_args: list[str], comment: str) -> bool:
+    """Run ``<cmd> -C <chain> <rule_args>`` and return True iff the rule
+    already exists (rc==0). Suppress process errors as False; caller logs.
+    """
+    try:
+        proc = await asyncio.wait_for(
+            asyncio.create_subprocess_exec(
+                cmd,
+                "-C",
+                chain,
+                *rule_args,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            ),
+            timeout=_IPTABLES_TIMEOUT_S,
+        )
+        rc = await asyncio.wait_for(proc.wait(), timeout=_IPTABLES_TIMEOUT_S)
+    except (TimeoutError, OSError) as e:
+        logger.warning("%s -C %s for %r failed: %s", cmd, chain, comment, e)
+        return False
+    return rc == 0
+
+
+async def _iptables_add(cmd: str, chain: str, rule_args: list[str], comment: str) -> bool:
+    """Run ``<cmd> -A <chain> <rule_args>`` and return True iff the
+    rule was successfully added (rc==0). False on timeout, OSError, or
+    non-zero rc (typically EACCES from missing CAP_NET_ADMIN).
+    """
+    try:
+        proc = await asyncio.wait_for(
+            asyncio.create_subprocess_exec(
+                cmd,
+                "-A",
+                chain,
+                *rule_args,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            ),
+            timeout=_IPTABLES_TIMEOUT_S,
+        )
+        rc = await asyncio.wait_for(proc.wait(), timeout=_IPTABLES_TIMEOUT_S)
+    except (TimeoutError, OSError) as e:
+        logger.warning("%s -A %s for %r failed: %s", cmd, chain, comment, e)
+        return False
+    if rc != 0:
+        logger.warning(
+            "%s -A %s rule install for %r returned rc=%d (likely missing "
+            "CAP_NET_ADMIN); listener verdict will fall back to the "
+            "non-counter heuristic for this protocol.",
+            cmd,
+            chain,
+            comment,
+            rc,
+        )
+        return False
+    return True
+
+
 async def install_counter(chain: str, rule_args: list[str], comment: str) -> InstallStatus:
     """Install the counter rule on iptables AND ip6tables.
 
@@ -93,53 +151,15 @@ async def install_counter(chain: str, rule_args: list[str], comment: str) -> Ins
     for cmd in _IPTABLES_FAMILIES:
         if shutil.which(cmd) is None:
             continue
-        try:
-            check = await asyncio.wait_for(
-                asyncio.create_subprocess_exec(
-                    cmd,
-                    "-C",
-                    chain,
-                    *rule_args,
-                    stdout=asyncio.subprocess.DEVNULL,
-                    stderr=asyncio.subprocess.DEVNULL,
-                ),
-                timeout=_IPTABLES_TIMEOUT_S,
-            )
-            check_rc = await asyncio.wait_for(check.wait(), timeout=_IPTABLES_TIMEOUT_S)
-        except (TimeoutError, OSError) as e:
-            logger.warning("%s -C %s for %r failed: %s", cmd, chain, comment, e)
-            continue
-        if check_rc == 0:
+        # -C succeeded → rule already present from a previous run.
+        # -C failed AND -A succeeded → we just added it.
+        # Either way the family ends up in the installed set; only
+        # both-fail leaves the family out (no rule on this family,
+        # remove_counter will skip it).
+        if await _iptables_check(cmd, chain, rule_args, comment) or await _iptables_add(
+            cmd, chain, rule_args, comment
+        ):
             installed.add(cmd)
-            continue
-        try:
-            add = await asyncio.wait_for(
-                asyncio.create_subprocess_exec(
-                    cmd,
-                    "-A",
-                    chain,
-                    *rule_args,
-                    stdout=asyncio.subprocess.DEVNULL,
-                    stderr=asyncio.subprocess.DEVNULL,
-                ),
-                timeout=_IPTABLES_TIMEOUT_S,
-            )
-            rc = await asyncio.wait_for(add.wait(), timeout=_IPTABLES_TIMEOUT_S)
-        except (TimeoutError, OSError) as e:
-            logger.warning("%s -A %s for %r failed: %s", cmd, chain, comment, e)
-            continue
-        if rc != 0:
-            logger.warning(
-                "%s -A %s rule install for %r returned rc=%d (likely missing "
-                "CAP_NET_ADMIN); listener verdict will fall back to the "
-                "non-counter heuristic for this protocol.",
-                cmd,
-                chain,
-                comment,
-                rc,
-            )
-            continue
-        installed.add(cmd)
     return InstallStatus(installed_families=frozenset(installed))
 
 
@@ -170,6 +190,50 @@ async def read_counter(chain: str, comment: str) -> int:
     return await _scrape_counter_column(chain, comment, column=0)
 
 
+async def _iptables_list(cmd: str, chain: str, comment: str) -> str:
+    """Capture ``<cmd> -L <chain> -v -n -x`` stdout as a decoded string.
+
+    Returns ``""`` on subprocess failure so the caller's parsing loop
+    becomes a no-op (no families contribute counters when iptables is
+    broken — same behaviour as before the helper extraction).
+    """
+    try:
+        proc = await asyncio.wait_for(
+            asyncio.create_subprocess_exec(
+                cmd,
+                "-L",
+                chain,
+                "-v",
+                "-n",
+                "-x",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            ),
+            timeout=_IPTABLES_TIMEOUT_S,
+        )
+        out_b, _ = await asyncio.wait_for(proc.communicate(), timeout=_IPTABLES_TIMEOUT_S)
+    except (TimeoutError, OSError) as e:
+        logger.warning("%s -L %s for %r failed: %s", cmd, chain, comment, e)
+        return ""
+    return out_b.decode(errors="replace")
+
+
+def _sum_column_for_comment(output: str, comment: str, column: int) -> int:
+    """Parse iptables -L output; sum ``column`` for rows matching ``comment``."""
+    total = 0
+    for ln in output.splitlines():
+        if comment not in ln:
+            continue
+        parts = ln.split()
+        if len(parts) <= column:
+            continue
+        try:
+            total += int(parts[column])
+        except ValueError:
+            continue
+    return total
+
+
 async def _scrape_counter_column(chain: str, comment: str, *, column: int) -> int:
     """Shared scrape: read ``column`` (0=pkts, 1=bytes) summed across
     iptables and ip6tables for the rule with ``--comment <comment>``.
@@ -178,34 +242,8 @@ async def _scrape_counter_column(chain: str, comment: str, *, column: int) -> in
     for cmd in _IPTABLES_FAMILIES:
         if shutil.which(cmd) is None:
             continue
-        try:
-            proc = await asyncio.wait_for(
-                asyncio.create_subprocess_exec(
-                    cmd,
-                    "-L",
-                    chain,
-                    "-v",
-                    "-n",
-                    "-x",
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.DEVNULL,
-                ),
-                timeout=_IPTABLES_TIMEOUT_S,
-            )
-            out_b, _ = await asyncio.wait_for(proc.communicate(), timeout=_IPTABLES_TIMEOUT_S)
-        except (TimeoutError, OSError) as e:
-            logger.warning("%s -L %s for %r failed: %s", cmd, chain, comment, e)
-            continue
-        for ln in out_b.decode(errors="replace").splitlines():
-            if comment not in ln:
-                continue
-            parts = ln.split()
-            if len(parts) <= column:
-                continue
-            try:
-                total += int(parts[column])
-            except ValueError:
-                continue
+        out = await _iptables_list(cmd, chain, comment)
+        total += _sum_column_for_comment(out, comment, column)
     return total
 
 
