@@ -17,6 +17,7 @@ side, which means the listener's own echo endpoint.
 from __future__ import annotations
 
 import asyncio
+import collections
 import contextlib
 import functools
 import json
@@ -795,6 +796,48 @@ async def tunnel_throughput(
 # ─────────────────────────────────────────────────────────────────────────────
 # OpenVPN probe
 # ─────────────────────────────────────────────────────────────────────────────
+
+
+# OpenVPN prints a "Current Parameter Settings" dump on every start that runs
+# to ~150 lines before any meaningful event. Stripping these stamps means a
+# real critical line — ``ERROR: Cannot ioctl TUNSETIFF``, ``Cannot allocate
+# TUN/TAP``, ``UDPv4: connection refused`` — survives in the bounded tail
+# even after the ring buffer wraps.
+_OVPN_BOILERPLATE_PREFIXES = (
+    "  ",  # parameter dump rows (indented two spaces)
+    "DEPRECATED OPTION:",
+    "DEPRECATION:",
+    "WARNING: ",
+    "Note: ",
+    "Current Parameter Settings:",
+    "Connection profiles ",
+    "OpenVPN 2.",
+    "library versions:",
+    "DCO version:",
+    "net_route_v",
+    "net_iface_",
+)
+
+
+def _summarise_openvpn_failure(tail: collections.deque[str]) -> str:
+    """Pick the most diagnostic substring from the openvpn output ring buffer.
+
+    Strategy: prefer any line containing ``ERROR``/``error``/``Cannot``/
+    ``denied``/``permitted`` (substring match — captures both ``ERROR:`` and
+    ``[ERR]`` styles). If none present, fall back to the last 4 non-boilerplate
+    lines joined by ``\\n``. Capped at 600 chars so a runaway dump can't bloat
+    the JSON report.
+    """
+    error_keys = ("ERROR", "error", "Cannot", "Operation not permitted", "denied")
+    for line in reversed(tail):
+        if any(k in line for k in error_keys):
+            return line[:600]
+    filtered = [line for line in tail if not line.startswith(_OVPN_BOILERPLATE_PREFIXES)]
+    if not filtered:
+        filtered = list(tail)
+    return " | ".join(filtered[-4:])[:600]
+
+
 @_stamp_elapsed
 async def probe_openvpn(host: str, port: int, psk_pem: str) -> ProbeResult:
     result = ProbeResult()
@@ -853,13 +896,23 @@ verb 1
         try:
             t0 = time.monotonic()
             hs_ok = False
+            # Ring-buffer the last ~15 lines openvpn printed before either
+            # success or early exit. On failure we promote the tail into
+            # ``result.error`` so the operator can attribute the BLOCKED
+            # verdict without re-running. Without this the early-exit path
+            # (e.g. ``ioctl TUNSETIFF: Operation not permitted`` inside a
+            # rootless container) leaves error=None and elapsed≈20 ms — the
+            # operator has no signal beyond "BLOCKED with no reason".
+            tail_lines: collections.deque[str] = collections.deque(maxlen=15)
             while time.monotonic() - t0 < PROBE_TIMEOUT:
                 try:
                     async with asyncio.timeout(1.0):
                         line_bytes = await proc_stdout.readline()
                     if not line_bytes:
                         break
-                    line = line_bytes.decode(errors="replace")
+                    line = line_bytes.decode(errors="replace").rstrip()
+                    if line:
+                        tail_lines.append(line)
                     if "Initialization Sequence Completed" in line:
                         hs_ok = True
                         result.rtt_ms = (time.monotonic() - t0) * 1000
@@ -868,6 +921,8 @@ verb 1
                     continue
 
             result.handshake_ok = hs_ok
+            if not hs_ok and tail_lines:
+                result.error = _summarise_openvpn_failure(tail_lines)
             if hs_ok:
                 # Once handshake is done, openvpn keeps logging. Drain stdout
                 # in the background so verb-1 status pings don't fill the
