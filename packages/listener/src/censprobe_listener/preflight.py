@@ -269,7 +269,7 @@ def _fetch_url_to_path(url: str, dest: Path, timeout_s: float) -> bool:
         # need cookie support and the URLs are fixed at module level so
         # this is not user-input — S310 (URL-based filesystem write) is
         # bounded by the constants above.
-        with urlopen(url, timeout=timeout_s) as resp:  # noqa: S310
+        with urlopen(url, timeout=timeout_s) as resp:  # noqa: S310  # nosec B310
             if resp.status != 200:
                 logger.debug("preflight: %s returned HTTP %s", url, resp.status)
                 return False
