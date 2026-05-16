@@ -249,6 +249,13 @@ services:
       GF_SNAPSHOTS_PUBLIC_MODE: "false"
       GF_HELP_ENABLED: "false"
       GF_SECURITY_DISABLE_GRAVATAR: "true"
+      # Server-side image rendering (PDF/PNG export, /render REST API)
+      # is NOT enabled in the default stack — the operator's primary
+      # workflow is the interactive browser UI, which is fully
+      # client-side. The official ``grafana-image-renderer`` sidecar
+      # adds ~250 MB of resident Chromium for a feature most operators
+      # never use. Opt in by dropping the snippet from
+      # ``docs/dashboard-renderer.md`` into a local docker-compose.override.yml.
     volumes:
       - grafana_data:/var/lib/grafana
       - ./packages/dashboard/grafana/provisioning:/etc/grafana/provisioning:ro
