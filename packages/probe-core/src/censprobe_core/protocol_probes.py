@@ -125,9 +125,18 @@ class ProbeResult:
     handshake_ok: bool = False
     data_ok: bool = False
     # Protocol-specific latency signal. Semantics differ by probe:
-    #   * openvpn / wireguard / amneziawg — ICMP-ping RTT measured
-    #     *through* the established tunnel (data-plane). None until
-    #     handshake completed.
+    #   * wireguard / amneziawg — ICMP-ping RTT measured *through* the
+    #     established tunnel (data-plane). None until handshake done.
+    #   * openvpn — time from probe start to OpenVPN's "Initialization
+    #     Sequence Completed" marker, i.e. handshake-COMPLETION latency,
+    #     NOT a data-plane ping. ``probe_openvpn`` still runs the
+    #     data-plane ping (it gates the OK verdict) but intentionally
+    #     discards its RTT: for OpenVPN the control-channel handshake
+    #     (TLS-in-UDP + reliability-layer retransmits) is the dominant
+    #     slow step on flaky links and the metric operators expect. A
+    #     multi-second value here therefore reflects handshake
+    #     retransmits, not tunnel latency — so it is NOT comparable to
+    #     the wg/awg data-plane figure despite sharing the column.
     #   * shadowsocks / hysteria2 / vless_reality — TCP/QUIC connect
     #     RTT to the listener.
     #   * mtproto_proxy / mtproto_proxy_alt / mtproto_orig — TCP connect
