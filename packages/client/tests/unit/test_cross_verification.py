@@ -54,6 +54,40 @@ class TestListenerVerdict:
         snap = LiveSnapshot(handshake_count=0, data_transfer_ok=True, data_packets=8)
         assert _listener_verdict(snap) == Verdict.OK
 
+    def test_mtg_with_dc_unreachable_caps_false_ok_at_handshake_only(self) -> None:
+        # Dual-vantage mtg case: listener egress can't reach Telegram DCs,
+        # so the PSH+ACK counter ticks on just the FakeTLS WelcomePacket →
+        # data_transfer_ok=True → raw finalize() would say OK. The listener
+        # caps this at HANDSHAKE_ONLY in _finalize_protocol_result; the
+        # client's mirror must do the same or the cross-verify "Listener"
+        # column contradicts the listener's own JSON report.
+        snap = LiveSnapshot(handshake_count=1, data_transfer_ok=True, dc_reach_ok=False)
+        assert _listener_verdict(snap, protocol="mtproto_proxy") == Verdict.HANDSHAKE_ONLY
+
+    def test_mtg_with_dc_reachable_keeps_ok(self) -> None:
+        # dc_reach_ok=True → no cap, the false-OK concern doesn't apply.
+        snap = LiveSnapshot(handshake_count=1, data_transfer_ok=True, dc_reach_ok=True)
+        assert _listener_verdict(snap, protocol="mtproto_proxy") == Verdict.OK
+
+    def test_mtg_with_dc_reach_none_keeps_ok(self) -> None:
+        # dc_reach_ok=None is the no-signal path (older listener / preflight
+        # didn't run) — don't cap, fall back to the raw finalize() verdict.
+        snap = LiveSnapshot(handshake_count=1, data_transfer_ok=True, dc_reach_ok=None)
+        assert _listener_verdict(snap, protocol="mtproto_proxy") == Verdict.OK
+
+    def test_non_mtg_protocol_ignores_dc_reach_signal(self) -> None:
+        # The cap is mtg-only — a non-mtg protocol with dc_reach_ok=False
+        # keeps its raw OK verdict.
+        snap = LiveSnapshot(handshake_count=1, data_transfer_ok=True, dc_reach_ok=False)
+        assert _listener_verdict(snap, protocol="shadowsocks") == Verdict.OK
+
+    def test_mtg_cap_does_not_promote_blocked(self) -> None:
+        # cap_at only LOWERS a verdict — a genuinely BLOCKED mtg snapshot
+        # (no handshake, no data) stays BLOCKED, never rises to
+        # HANDSHAKE_ONLY. This is the mtproto_orig-skipped shape.
+        snap = LiveSnapshot(handshake_count=0, data_transfer_ok=False, dc_reach_ok=False)
+        assert _listener_verdict(snap, protocol="mtproto_proxy") == Verdict.BLOCKED
+
 
 class TestAgreedVerdict:
     """``_agreed_verdict`` returns (final_verdict, note) — listener wins."""

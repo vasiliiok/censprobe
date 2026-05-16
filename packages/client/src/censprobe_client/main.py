@@ -1051,13 +1051,26 @@ def _print_results(results: dict[str, ProbeResult], server_host: str) -> None:
     console.print(Panel.fit(body, title="Summary"))
 
 
-def _listener_verdict(snap: LiveSnapshot) -> Verdict:
+def _listener_verdict(snap: LiveSnapshot, protocol: str | None = None) -> Verdict:
     """Apply :meth:`ProtocolResult.finalize` semantics to a live snapshot.
 
-    Same predicates the listener will use when committing the JSON
-    report at session end — delegated to ``ProtocolResult.finalize()``
-    so client + listener agree on the verdict shape on both sides of
-    the cross-verification.
+    Same predicates the listener applies in ``_finalize_protocol_result``
+    when committing the JSON report at session end — delegated to
+    ``ProtocolResult.finalize()`` so client + listener agree on the
+    verdict shape on both sides of the cross-verification.
+
+    That mirror INCLUDES the ``cap_at=HANDSHAKE_ONLY`` branch: for an
+    mtg-based protocol whose listener-egress preflight could not reach
+    Telegram's DC fleet (``snap.dc_reach_ok is False``), the iptables
+    PSH+ACK counter ticks on just the FakeTLS WelcomePacket emission, so
+    ``data_transfer_ok`` is True and the raw derived verdict is OK — but
+    the inner Telegram session never had a backend to relay to. The
+    listener caps that false-OK at HANDSHAKE_ONLY (see
+    ``_finalize_protocol_result``); without the same cap here the
+    cross-verify "Listener" column would read OK while the listener's
+    own authoritative JSON report reads HANDSHAKE_ONLY for the very same
+    protocol. ``protocol`` defaults to ``None`` (no cap) for callers
+    that only need the raw ``finalize()`` shape.
 
     Since 2026-05-14 ``finalize()`` no longer downgrades BLOCKED→ERROR
     on a failed self-test — a wedged listener responder produces the
@@ -1071,7 +1084,10 @@ def _listener_verdict(snap: LiveSnapshot) -> Verdict:
         data_transfer_ok=snap.data_transfer_ok,
         responder_self_test_ok=snap.responder_self_test_ok,
     )
-    pr.finalize()
+    cap_at: Verdict | None = None
+    if protocol is not None and is_mtg_protocol(protocol) and snap.dc_reach_ok is False:
+        cap_at = Verdict.HANDSHAKE_ONLY
+    pr.finalize(cap_at=cap_at)
     return pr.verdict
 
 
@@ -1217,7 +1233,7 @@ def _print_cross_verification(
             # so the table cell is still meaningful instead of blank.
             snap = LiveSnapshot()
 
-        listener_v = _listener_verdict(snap)
+        listener_v = _listener_verdict(snap, protocol=name)
         final, note = _agreed_verdict(
             client_r.verdict,
             listener_v,
