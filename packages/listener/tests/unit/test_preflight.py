@@ -234,21 +234,22 @@ class TestRunPreflight:
         monkeypatch.setattr(preflight, "_NF_MAX", nf_max)
         monkeypatch.setattr(preflight, "_NF_COUNT", nf_count)
 
-        # Stub the DC reach check so the test stays hermetic
-        # (no real outbound TCP) and finishes in milliseconds.
+        # Stub the DC reach check + the upstream probe so the test stays
+        # hermetic (no real outbound TCP) and finishes in milliseconds.
         async def _fake_dc(timeout_s: float = 3.0) -> preflight.CheckResult:
             return preflight.CheckResult("telegram-dc-reach", "skip", "stubbed in unit test")
 
-        async def _fake_upstream(timeout_s: float = 3.0) -> preflight.CheckResult:
-            return preflight.CheckResult("mtproxy-orig-upstream", "skip", "stubbed in unit test")
+        async def _fake_upstreams(*args: object, **kwargs: object) -> tuple[list, list]:  # type: ignore[type-arg]
+            # Empty partition → _mtproxy_upstream_checkresult yields a skip.
+            return [], []
 
         monkeypatch.setattr(preflight, "_check_telegram_dc_reach", _fake_dc)
-        monkeypatch.setattr(preflight, "_check_mtproxy_orig_upstream_reach", _fake_upstream)
+        monkeypatch.setattr(preflight, "probe_all_proxy_multi_upstreams", _fake_upstreams)
 
         import asyncio
 
-        results = asyncio.run(preflight.run_preflight(udp_ports=[1194, 51820, 51821, 443]))
-        names = [r.name for r in results]
+        result = asyncio.run(preflight.run_preflight(udp_ports=[1194, 51820, 51821, 443]))
+        names = [r.name for r in result.checks]
         # Order is fixed for deterministic operator-facing output:
         # orphan cleanup runs FIRST so subsequent installs aren't shadowed
         # by leftover rules; cap check is reported next so a missing-CAP
@@ -267,7 +268,9 @@ class TestRunPreflight:
             "mtproxy-orig-upstream",
         ]
         # No warnings on a healthy host with stubbed-out tools.
-        assert all(r.status in {"ok", "skip", "warn"} for r in results)
+        assert all(r.status in {"ok", "skip", "warn"} for r in result.checks)
+        # The full upstream probe is surfaced for the responder to reuse.
+        assert result.mtproxy_upstreams.total == 0
 
 
 class TestParseProxyMultiUpstreams:
@@ -317,66 +320,52 @@ class TestParseProxyMultiUpstreams:
         assert preflight._parse_proxy_multi_upstreams(tmp_path / "absent.conf") == []
 
 
-class TestMtproxyOrigUpstreamReach:
-    """``_check_mtproxy_orig_upstream_reach`` samples + tcp-probes."""
+class TestMtproxyUpstreamCheckresult:
+    """``_mtproxy_upstream_checkresult`` renders the operator-facing line
+    from an already-completed ``UpstreamProbe`` — pure, no I/O.
 
-    def test_skip_when_conf_missing(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        monkeypatch.setattr(preflight, "_PROXY_MULTI_CONF_PATH", tmp_path / "absent.conf")
-        import asyncio
+    The single full probe (``probe_all_proxy_multi_upstreams``, exercised
+    in :class:`TestProbeAllProxyMultiUpstreams`) feeds both this line and
+    the responder prune, so they can never disagree — the old
+    sample-6-at-preflight vs probe-all-at-launch split is gone.
+    """
 
-        r = asyncio.run(preflight._check_mtproxy_orig_upstream_reach())
+    def test_skip_when_no_upstreams(self) -> None:
+        # total == 0 → proxy-multi.conf absent/empty (image built without
+        # the mtproxy-orig stage).
+        r = preflight._mtproxy_upstream_checkresult(preflight.UpstreamProbe([], []))
         assert r.status == "skip"
         assert "proxy-multi.conf" in r.message
 
-    def test_warn_when_zero_reachable(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        p = tmp_path / "proxy-multi.conf"
-        p.write_text("proxy_for 1 1.2.3.4:8888;\nproxy_for 2 5.6.7.8:8888;\n")
-        monkeypatch.setattr(preflight, "_PROXY_MULTI_CONF_PATH", p)
-
-        async def _all_fail(host: str, port: int) -> tuple:  # type: ignore[type-arg]
-            raise TimeoutError
-
-        # asyncio.open_connection is what _connect inside the check calls;
-        # stub it to fail so we test the WARN branch deterministically.
-        monkeypatch.setattr(preflight.asyncio, "open_connection", _all_fail)
-
-        import asyncio
-
-        r = asyncio.run(preflight._check_mtproxy_orig_upstream_reach(timeout_s=0.05))
-        assert r.status == "warn"
-        # The error message must explain WHY this is not a network block —
-        # operators reading the listener startup banner need to know that
-        # mtproto_orig BLOCKED verdicts are being rewritten to ERROR.
-        assert "8888" in r.message
-        assert "ERROR" in r.message
-
-    def test_one_ip_per_cluster_sample(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        # Cluster 4 has 10 entries in real proxy-multi.conf; preflight
-        # MUST pick at most one of them so the sample exercises distinct
-        # clusters rather than the same DC ten times.
-        p = tmp_path / "proxy-multi.conf"
-        p.write_text(
-            "".join(f"proxy_for 4 91.108.4.{i}:8888;\n" for i in (133, 143, 149, 158))
-            + "proxy_for 5 91.108.56.110:8888;\n"
+    def test_warn_when_zero_alive(self) -> None:
+        probe = preflight.UpstreamProbe(
+            alive=[],
+            unreachable=[("1.2.3.4", 8888, "1"), ("5.6.7.8", 8888, "2")],
         )
-        monkeypatch.setattr(preflight, "_PROXY_MULTI_CONF_PATH", p)
-        attempted: list[tuple[str, int]] = []
+        r = preflight._mtproxy_upstream_checkresult(probe)
+        assert r.status == "warn"
+        # The message must explain WHY this is not client-side DPI and
+        # what the session verdict will be.
+        assert "0/2" in r.message
+        assert "8888" in r.message
+        assert "BLOCKED" in r.message
 
-        async def _record(host: str, port: int) -> tuple:  # type: ignore[type-arg]
-            attempted.append((host, port))
-            raise OSError
+    def test_ok_when_some_alive(self) -> None:
+        probe = preflight.UpstreamProbe(
+            alive=[("1.2.3.4", 8888, "1")],
+            unreachable=[("5.6.7.8", 8888, "2")],
+        )
+        r = preflight._mtproxy_upstream_checkresult(probe)
+        assert r.status == "ok"
+        # K/N reflects the FULL probe — N is every upstream, not a sample.
+        assert "1/2" in r.message
 
-        monkeypatch.setattr(preflight.asyncio, "open_connection", _record)
-
-        import asyncio
-
-        asyncio.run(preflight._check_mtproxy_orig_upstream_reach(timeout_s=0.05))
-        # First IP for each of cluster 4 and 5 — not all 5 entries.
-        assert attempted == [("91.108.4.133", 8888), ("91.108.56.110", 8888)]
+    def test_total_property(self) -> None:
+        probe = preflight.UpstreamProbe(
+            alive=[("1.2.3.4", 8888, "1")],
+            unreachable=[("5.6.7.8", 8888, "2"), ("9.9.9.9", 8888, "3")],
+        )
+        assert probe.total == 3
 
 
 class TestMtproxyOrigSelfTest:

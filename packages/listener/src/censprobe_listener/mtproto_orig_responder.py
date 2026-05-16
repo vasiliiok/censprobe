@@ -44,6 +44,7 @@ from censprobe_listener._iptables_counter import (
     remove_counter,
 )
 from censprobe_listener.preflight import (
+    UpstreamProbe,
     probe_all_proxy_multi_upstreams,
     write_pruned_proxy_multi_conf,
 )
@@ -123,6 +124,13 @@ class MTProxyOrigResponder:
         # so stop() can unlink it (without leaking /tmp entries across
         # repeated listener launches in long-running CI hosts).
         self._pruned_conf_path: Path | None = None
+        # Pre-completed upstream probe threaded in from run_preflight
+        # (listener main sets this before calling start()). When present,
+        # start() reuses it instead of re-probing all proxy-multi.conf
+        # IPs — the preflight signal and the prune then derive from one
+        # measurement. ``None`` for standalone use (e.g. unit tests):
+        # start() falls back to probing itself.
+        self.upstream_probe: UpstreamProbe | None = None
 
     async def start(self) -> None:
         # Prune unreachable upstreams BEFORE spawning the daemon. See
@@ -130,7 +138,14 @@ class MTProxyOrigResponder:
         # vantage rationale: launching mtproto-proxy with a config
         # full of unreachable IPs guarantees a 100% CPU reconnect
         # storm and starved accept queue.
-        alive, unreachable = await probe_all_proxy_multi_upstreams()
+        #
+        # Reuse the preflight probe when the listener threaded one in;
+        # otherwise probe here (standalone / unit-test path).
+        if self.upstream_probe is not None:
+            alive = self.upstream_probe.alive
+            unreachable = self.upstream_probe.unreachable
+        else:
+            alive, unreachable = await probe_all_proxy_multi_upstreams()
         self.upstream_alive_count = len(alive)
         self.upstream_total_count = len(alive) + len(unreachable)
         if self.upstream_total_count == 0:
@@ -152,7 +167,7 @@ class MTProxyOrigResponder:
                 "(sample: %s%s) — Telegram proxy fleet not reachable from this vantage. "
                 "Launching mtproto-proxy in this state would trigger a ~145 connect/s "
                 "auth_cluster reconnect storm and starve accept(); sessions for this "
-                "protocol will report ERROR with the same 'upstream unreachable' note.",
+                "protocol will report BLOCKED with the 'upstream unreachable' note.",
                 self.upstream_total_count,
                 unreachable_sample,
                 "..." if len(unreachable) > 5 else "",

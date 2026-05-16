@@ -70,8 +70,10 @@ from censprobe_listener.credentials import (
     generate_credentials,
 )
 from censprobe_listener.echo_server import EchoServer
+from censprobe_listener.mtproto_orig_responder import MTProxyOrigResponder
 from censprobe_listener.preflight import (
     CheckResult,
+    UpstreamProbe,
     run_mtproxy_orig_self_test,
     run_preflight,
 )
@@ -419,9 +421,10 @@ async def _async_main(
     # before responders see them). Never aborts startup — operators may
     # not have permission to fix sysctls — but every WARN is loud.
     cfg = get_config()
-    preflight_results = await run_preflight(
+    preflight = await run_preflight(
         udp_ports=_listener_udp_ports(cfg.protocols.enabled, cfg.protocols.ports)
     )
+    preflight_results = preflight.checks
     _print_preflight(preflight_results)
     # Structured INFO summary mirroring the panel — operator-pasting
     # logs to a diagnostician means the panel ANSI is stripped and the
@@ -465,7 +468,12 @@ async def _async_main(
     echo_server = await _start_echo_server_or_none()
 
     # ── Step 3b: Start all responders ─────────────────────────────────────────
-    responders, start_errors = await _start_responders(creds, echo_server)
+    # ``preflight.mtproxy_upstreams`` is the single full upstream probe;
+    # _start_responders threads it into the mtproto_orig responder so it
+    # reuses the result instead of re-probing proxy-multi.conf at launch.
+    responders, start_errors = await _start_responders(
+        creds, echo_server, preflight.mtproxy_upstreams
+    )
 
     if not responders:
         console.print("[red]All responders failed to start. Exiting.[/red]")
@@ -751,12 +759,20 @@ def _finalize_session_results(
 async def _start_responders(
     creds: ProtocolCredentials,
     echo_server: EchoServer | None,
+    mtproxy_upstreams: UpstreamProbe,
 ) -> tuple[dict[str, Responder], dict[str, str]]:
     """Start all protocol responders.
 
     Iterates :data:`censprobe_core.protocol_registry.PROTOCOLS` filtered
     by ``censprobe.yaml::protocols.enabled``. Per-protocol factories
     live in :mod:`censprobe_listener._responder_dispatch`.
+
+    ``mtproxy_upstreams`` is the preflight upstream probe; it's handed to
+    the mtproto_orig responder before ``start()`` so the responder
+    reuses it for its config-prune instead of re-probing. The shared
+    ``ResponderFactory`` signature stays two-arg — only mtproto_orig
+    needs this, so it's set via an isinstance check rather than widening
+    every factory.
 
     Returns ``(started, errors)`` keyed by canonical protocol name.
     """
@@ -786,6 +802,10 @@ async def _start_responders(
             continue
         try:
             responder = factory(creds, echo_server)
+            if isinstance(responder, MTProxyOrigResponder):
+                # Reuse the preflight upstream probe — see _start_responders
+                # docstring and MTProxyOrigResponder.upstream_probe.
+                responder.upstream_probe = mtproxy_upstreams
             await responder.start()
             responders[spec.name] = responder
             logger.info("%s started", spec.name)

@@ -135,6 +135,38 @@ class TestStartSkipsWhenAllUpstreamsUnreachable:
         assert r.is_running is False
 
     @pytest.mark.asyncio
+    async def test_start_reuses_preflight_upstream_probe(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # When the listener threads in a preflight UpstreamProbe, start()
+        # MUST reuse it and NOT re-probe proxy-multi.conf — the preflight
+        # signal and the prune then derive from one measurement (no
+        # sample-vs-full split, no TOCTOU re-probe).
+        import censprobe_listener.mtproto_orig_responder as mod
+        from censprobe_listener.preflight import UpstreamProbe
+
+        async def _must_not_probe(*_a: object, **_kw: object) -> tuple[list, list]:  # type: ignore[type-arg]
+            raise AssertionError("start() MUST reuse upstream_probe, not re-probe")
+
+        async def _fail_spawn(*args: object, **kwargs: object) -> object:
+            raise AssertionError("subprocess MUST NOT be spawned when 0 alive")
+
+        monkeypatch.setattr(mod, "probe_all_proxy_multi_upstreams", _must_not_probe)
+        monkeypatch.setattr(mod.asyncio, "create_subprocess_exec", _fail_spawn)
+
+        r = MTProxyOrigResponder(port=2080, secret="dd" + "00" * 16)
+        # Preflight found 0/2 alive — the responder must skip the spawn
+        # off the threaded-in probe without issuing its own SYNs.
+        r.upstream_probe = UpstreamProbe(
+            alive=[], unreachable=[("1.2.3.4", 8888, "1"), ("5.6.7.8", 8888, "2")]
+        )
+        await r.start()
+        assert r.unavailable is True
+        assert r.upstream_alive_count == 0
+        assert r.upstream_total_count == 2
+        assert r.is_running is False
+
+    @pytest.mark.asyncio
     async def test_stop_is_noop_when_unavailable(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # An unavailable responder never installed an iptables rule
         # and never spawned a subprocess. stop() MUST short-circuit
