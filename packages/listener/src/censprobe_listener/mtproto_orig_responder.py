@@ -33,6 +33,7 @@ import socket
 import tempfile
 from pathlib import Path
 
+from censprobe_core.ephemeral_cert import detect_nat_pair
 from censprobe_core.models import LiveSnapshot
 from censprobe_core.utils import graceful_terminate
 
@@ -140,12 +141,18 @@ class MTProxyOrigResponder:
         # storm and starved accept queue.
         #
         # Reuse the preflight probe when the listener threaded one in;
-        # otherwise probe here (standalone / unit-test path).
+        # otherwise probe here (standalone / unit-test path). The probe
+        # also carries the conf + secret paths to launch against (fresh
+        # copies if preflight could refresh them, baked-in otherwise).
         if self.upstream_probe is not None:
             alive = self.upstream_probe.alive
             unreachable = self.upstream_probe.unreachable
+            conf_source: Path = self.upstream_probe.conf_path
+            secret_path: Path = self.upstream_probe.secret_path
         else:
             alive, unreachable = await probe_all_proxy_multi_upstreams()
+            conf_source = Path(_PROXY_MULTI_CONF_PATH)
+            secret_path = Path(_PROXY_SECRET_PATH)
         self.upstream_alive_count = len(alive)
         self.upstream_total_count = len(alive) + len(unreachable)
         if self.upstream_total_count == 0:
@@ -190,7 +197,12 @@ class MTProxyOrigResponder:
         self._pruned_conf_path = (
             Path(tempfile.gettempdir()) / f"proxy-multi-pruned-{secrets.token_hex(8)}.conf"
         )
-        await asyncio.to_thread(write_pruned_proxy_multi_conf, alive, self._pruned_conf_path)
+        await asyncio.to_thread(
+            write_pruned_proxy_multi_conf,
+            alive,
+            self._pruned_conf_path,
+            source=conf_source,
+        )
         logger.info(
             "mtproto_orig: pruned proxy-multi.conf — %d/%d upstreams reachable",
             self.upstream_alive_count,
@@ -209,11 +221,39 @@ class MTProxyOrigResponder:
             "-S",
             self._secret_for_argv,
             "--aes-pwd",
-            _PROXY_SECRET_PATH,
+            str(secret_path),
             str(self._pruned_conf_path),
             "-M",
             "1",
         ]
+        # ── NAT-info ──────────────────────────────────────────────────────
+        # Cloud VMs (GCP/AWS/DigitalOcean private VPCs) sit behind a 1:1
+        # NAT: the daemon sees a private source IP on egress, but the
+        # upstream Telegram DC sees the NAT-translated public IP. The
+        # original C MTProxy embeds the local source IP it observed into
+        # the auth_cluster RPC handshake; upstream validates it against
+        # the TCP source-IP it received, finds the mismatch, and silently
+        # drops the connection after the nonce exchange.
+        #
+        # Empirically reproduced 2026-05-16 on GCP southamerica1 + us-central1:
+        # without --nat-info, 1954/2106 connections disconnected in 8 s
+        # (every key_select=-1). With ``--nat-info <private>:<public>``,
+        # 8/160 (5%) — the proxy reaches steady-state and serves clients.
+        #
+        # Detection is best-effort: when the host is on a directly-attached
+        # public IP (bare metal, most budget VPS), :func:`detect_nat_pair`
+        # returns ``None`` and we skip the flag rather than guess at IPs.
+        nat_pair = await asyncio.to_thread(detect_nat_pair)
+        if nat_pair is not None:
+            private_ip, public_ip = nat_pair
+            cmd.extend(["--nat-info", f"{private_ip}:{public_ip}"])
+            logger.info(
+                "mtproto_orig: detected NAT, passing --nat-info %s:%s",
+                private_ip,
+                public_ip,
+            )
+        else:
+            logger.debug("mtproto_orig: no NAT detected; running without --nat-info")
         logger.info(
             "Starting mtproto-proxy (original C) on port %d with dd-secret",
             self.port,

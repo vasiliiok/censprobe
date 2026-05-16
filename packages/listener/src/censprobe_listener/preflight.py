@@ -28,11 +28,14 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import secrets
 import shutil
 import subprocess  # noqa: S404 — listener already shells out elsewhere
+import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.request import urlopen
 
 logger = logging.getLogger(__name__)
 
@@ -173,6 +176,22 @@ def _load_telegram_dc_probes() -> tuple[tuple[str, int, str], ...]:
 # https://core.telegram.org/getProxyConfig and baked into the runtime
 # image at this path — see packages/listener/Dockerfile.
 _PROXY_MULTI_CONF_PATH = Path("/usr/local/share/mtproxy-orig/proxy-multi.conf")
+# proxy-secret is the AES password file used by mtproto-proxy to derive
+# its RPC auth keys when talking to upstream Telegram DCs. Baked from
+# https://core.telegram.org/getProxySecret in the same Dockerfile ADD
+# block; refreshed at runtime alongside the multi-conf via
+# :func:`_refresh_proxy_runtime_config`.
+_PROXY_SECRET_PATH = Path("/usr/local/share/mtproxy-orig/proxy-secret")  # noqa: S105
+
+# Telegram serves the dynamic upstream config + matching AES password
+# file at these URLs. The DC IP rotation cadence is days-to-weeks: a
+# build that's a month old typically has 70-90% stale DC4/DC5 entries,
+# triggering an auth-cluster reconnect storm that the responder
+# self-test reads as "wedged". Refreshed once per listener startup so
+# the rotation lag is bounded by session duration, not by image age.
+_PROXY_MULTI_CONF_URL = "https://core.telegram.org/getProxyConfig"
+_PROXY_SECRET_URL = "https://core.telegram.org/getProxySecret"  # noqa: S105 — URL, not a credential
+_PROXY_CONFIG_FETCH_TIMEOUT_S = 5.0
 
 # Per-IP TCP-connect budget for the proxy-multi.conf upstream probe.
 # 1.5 s is the default used by the responder-side FALLBACK probe (kept
@@ -216,14 +235,123 @@ class UpstreamProbe:
     ``alive`` / ``unreachable`` are ``(ip, port, cluster_id)`` tuples in
     proxy-multi.conf order. ``total == 0`` means proxy-multi.conf was
     absent or empty (image built without the mtproxy-orig stage).
+
+    ``conf_path`` / ``secret_path`` are the paths the mtproto_orig
+    responder must launch ``mtproto-proxy`` against. They point at the
+    freshly-fetched copies under ``/tmp/...`` when the runtime refresh
+    succeeded, or fall back to the baked-in
+    ``/usr/local/share/mtproxy-orig/*`` paths otherwise. Threading them
+    here keeps the responder oblivious to the freshness mechanism — it
+    just uses what preflight handed it.
     """
 
     alive: list[tuple[str, int, str]]
     unreachable: list[tuple[str, int, str]]
+    conf_path: Path = _PROXY_MULTI_CONF_PATH
+    secret_path: Path = _PROXY_SECRET_PATH
 
     @property
     def total(self) -> int:
         return len(self.alive) + len(self.unreachable)
+
+
+def _fetch_url_to_path(url: str, dest: Path, timeout_s: float) -> bool:
+    """Download ``url`` into ``dest`` atomically. Return True on success.
+
+    Atomicity: write to a sibling temp file in the same directory and
+    ``rename()`` once the body is fully buffered, so a partial download
+    can never leave a half-written file the C binary would parse.
+    Sync I/O wrapped by the caller in ``asyncio.to_thread``.
+    """
+    tmp = dest.with_suffix(dest.suffix + f".tmp-{secrets.token_hex(4)}")
+    try:
+        # urllib's default opener honours both HTTP and HTTPS; we don't
+        # need cookie support and the URLs are fixed at module level so
+        # this is not user-input — S310 (URL-based filesystem write) is
+        # bounded by the constants above.
+        with urlopen(url, timeout=timeout_s) as resp:  # noqa: S310
+            if resp.status != 200:
+                logger.debug("preflight: %s returned HTTP %s", url, resp.status)
+                return False
+            body = resp.read()
+        if not body:
+            logger.debug("preflight: %s returned empty body", url)
+            return False
+        tmp.write_bytes(body)
+        tmp.chmod(0o600)
+        tmp.rename(dest)
+        return True
+    except (OSError, ValueError, TimeoutError) as e:
+        logger.debug("preflight: fetch %s failed: %s: %s", url, type(e).__name__, e)
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+        return False
+
+
+async def _refresh_proxy_runtime_config(
+    *,
+    conf_url: str = _PROXY_MULTI_CONF_URL,
+    secret_url: str = _PROXY_SECRET_URL,
+    timeout_s: float = _PROXY_CONFIG_FETCH_TIMEOUT_S,
+) -> tuple[Path, Path, Path | None]:
+    """Try to refresh both proxy-multi.conf and proxy-secret at startup.
+
+    Telegram rotates the DC4/DC5 IPs over days-to-weeks. Baking the
+    config into the Docker image at build time means a release shipped
+    on day 0 has fully-stale DC4 entries by ~day 7 — the responder's
+    proxy-multi.conf prune still finds the *IPs* reachable (the IPs
+    exist; they just no longer terminate the auth_cluster RPC), and the
+    self-test then wedges with the symptom every operator has seen:
+    "0 mtproto_orig clients in 12s — responder appears wedged".
+
+    Refresh strategy:
+      * Write fresh copies to a per-process tempdir under /tmp.
+      * If BOTH fetches succeed, return the fresh paths.
+      * If either fails, return the baked-in paths so the responder
+        still launches — degraded but not broken.
+
+    Returns ``(conf_path, secret_path, tmp_dir)`` where ``tmp_dir`` is
+    the per-process directory the fresh files live in (``None`` when
+    the refresh failed and the baked-in paths are returned instead).
+    The listener owns the tmpdir's lifetime and must ``shutil.rmtree``
+    it at session teardown to avoid leaking ``/tmp/censprobe-mtorig-*``
+    across restarts.
+    """
+    tmp_dir = Path(tempfile.gettempdir()) / f"censprobe-mtorig-{secrets.token_hex(4)}"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    tmp_dir.chmod(0o700)
+    fresh_conf = tmp_dir / "proxy-multi.conf"
+    fresh_secret = tmp_dir / "proxy-secret"
+
+    # Parallelise the two fetches so the worst-case wallclock is one
+    # ``timeout_s`` rather than two. Both endpoints are independent
+    # subresources on the same host; serialising them was an oversight.
+    conf_ok, secret_ok = await asyncio.gather(
+        asyncio.to_thread(_fetch_url_to_path, conf_url, fresh_conf, timeout_s),
+        asyncio.to_thread(_fetch_url_to_path, secret_url, fresh_secret, timeout_s),
+    )
+
+    if conf_ok and secret_ok:
+        logger.info(
+            "mtproto_orig: refreshed proxy-multi.conf + proxy-secret from "
+            "core.telegram.org (replacing baked-in image copies)"
+        )
+        return fresh_conf, fresh_secret, tmp_dir
+
+    # At least one fetch failed → fall back to baked-in. Clean up the
+    # half-populated tempdir immediately so we don't leak it; the caller
+    # then sees ``tmp_dir=None`` and skips its own rmtree.
+    logger.warning(
+        "mtproto_orig: failed to refresh runtime config (conf_ok=%s secret_ok=%s); "
+        "falling back to baked-in proxy-multi.conf and proxy-secret. "
+        "The image's copies may be stale — if mtproto_orig wedges, rebuild "
+        "the listener image or check egress to core.telegram.org.",
+        conf_ok,
+        secret_ok,
+    )
+    with contextlib.suppress(OSError):
+        shutil.rmtree(tmp_dir)
+    return _PROXY_MULTI_CONF_PATH, _PROXY_SECRET_PATH, None
 
 
 @dataclass(frozen=True)
@@ -234,10 +362,16 @@ class PreflightResult:
     pre-flight panel. ``mtproxy_upstreams`` carries the full upstream
     probe so the listener can hand it to the mtproto_orig responder
     without a second round of SYNs — see :class:`UpstreamProbe`.
+
+    ``mtproxy_runtime_dir`` is the per-process tempdir into which the
+    fresh proxy-multi.conf + proxy-secret were fetched (``None`` when
+    the runtime refresh failed and the responder is using the baked-in
+    paths instead). Listener teardown should ``rmtree`` it.
     """
 
     checks: list[CheckResult]
     mtproxy_upstreams: UpstreamProbe
+    mtproxy_runtime_dir: Path | None = None
 
 
 def _read_int(path: Path) -> int | None:
@@ -1053,12 +1187,25 @@ async def run_preflight(udp_ports: Sequence[int]) -> PreflightResult:
     conntrack = _check_conntrack(notrack_installed=notrack.status == "ok")
     dmesg = _check_dmesg_recent_drops()
     dc = await _check_telegram_dc_reach()
+    # Refresh proxy-multi.conf + proxy-secret BEFORE probing upstreams, so
+    # the alive/unreachable partition matches the IPs the responder will
+    # actually dial. Fetch is best-effort: on failure both paths fall back
+    # to the baked-in copies (degraded — and likely why the operator is
+    # seeing a wedged self-test in the first place).
+    conf_path, secret_path, runtime_dir = await _refresh_proxy_runtime_config()
     alive, unreachable = await probe_all_proxy_multi_upstreams(
-        timeout_s=_PROXY_MULTI_PREFLIGHT_TIMEOUT_S
+        path=conf_path,
+        timeout_s=_PROXY_MULTI_PREFLIGHT_TIMEOUT_S,
     )
-    upstreams = UpstreamProbe(alive=alive, unreachable=unreachable)
+    upstreams = UpstreamProbe(
+        alive=alive,
+        unreachable=unreachable,
+        conf_path=conf_path,
+        secret_path=secret_path,
+    )
     upstream = _mtproxy_upstream_checkresult(upstreams)
     return PreflightResult(
         checks=[orphan, cap, setpriv, notrack, conntrack, dmesg, dc, upstream],
         mtproxy_upstreams=upstreams,
+        mtproxy_runtime_dir=runtime_dir,
     )

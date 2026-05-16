@@ -34,6 +34,7 @@ import json
 import logging
 import os
 import secrets
+import shutil
 import signal
 import sys
 from datetime import UTC, datetime
@@ -50,6 +51,7 @@ from censprobe_core.protocol_registry import (
     is_mtg_protocol,
     known_names,
     requires_telegram_dc,
+    uses_iptables_counter,
 )
 from censprobe_core.server_meta import enrich_endpoint
 from censprobe_core.utils import validate_id
@@ -280,6 +282,47 @@ def _extract_dc_reach_ok(results: list[CheckResult]) -> bool | None:
     return None
 
 
+def _extract_iptables_cap_ok(results: list[CheckResult]) -> bool | None:
+    """Pull the iptables-cap pass/fail out of the preflight result list.
+
+    Drives ``LiveSnapshot.data_counters_available`` for the iptables-driven
+    protocols (openvpn + mtproto_*): when False, the listener cannot install
+    the PSH+ACK counter, ``data_transfer_ok`` will read False even on
+    successful probes, and the client-side cross-verify must NOT downgrade
+    ``client=OK`` to HANDSHAKE_ONLY on that signal alone.
+
+    ``ok`` → True · ``warn`` → False · anything else → None (no signal).
+    """
+    for r in results:
+        if r.name != "iptables-cap":
+            continue
+        if r.status == "ok":
+            return True
+        if r.status == "warn":
+            return False
+        return None
+    return None
+
+
+def _data_counters_available(name: str, iptables_cap_ok: bool | None) -> bool | None:
+    """Per-protocol value for ``LiveSnapshot.data_counters_available``.
+
+    Returns the (cap-gated) trust-the-counter signal:
+      * Protocols outside :func:`uses_iptables_counter` always get True
+        (their data signal is independent of iptables — echo-server or
+        ``wg show`` rx_bytes).
+      * iptables-protocols inherit the cap check: True if CAP_NET_ADMIN
+        is present, False if not. ``None`` if the cap check didn't run.
+
+    The per-protocol flag lives on :class:`ProtocolSpec` so adding a new
+    iptables-dependent protocol only needs the registry edit — this
+    function picks it up automatically.
+    """
+    if not uses_iptables_counter(name):
+        return True
+    return iptables_cap_ok
+
+
 def _print_preflight(results: list[CheckResult]) -> None:
     """Render pre-flight check results to the rich console.
 
@@ -440,6 +483,12 @@ async def _async_main(
     # when only the WelcomePacket leaked back to the client. ``None``
     # when the check didn't run (e.g. unit-test stubs).
     dc_reach_ok: bool | None = _extract_dc_reach_ok(preflight_results)
+    # iptables-cap drives ``LiveSnapshot.data_counters_available`` for the
+    # iptables-driven protocols. When the listener container lacks
+    # CAP_NET_ADMIN the PSH+ACK counters never tick — surface that to the
+    # client so its cross-verify doesn't downgrade ``client=OK`` to
+    # HANDSHAKE_ONLY on a counter that was structurally unable to read.
+    iptables_cap_ok: bool | None = _extract_iptables_cap_ok(preflight_results)
 
     # ── Step 1: Generate fresh credentials in memory ──────────────────────────
     # Each session gets its own one-time credential set; nothing is written
@@ -525,7 +574,9 @@ async def _async_main(
     # /snapshot then flips from 503 → 200 for the client's polling pull.
     # Doing this AFTER stop() makes the snapshot identical to what's
     # going into the JSON report — no more live-vs-final drift.
-    final_snapshots = _build_final_snapshots(responders, self_test_results, dc_reach_ok)
+    final_snapshots = _build_final_snapshots(
+        responders, self_test_results, dc_reach_ok, iptables_cap_ok
+    )
     cred_server.commit_final_snapshots(final_snapshots)
     if echo_server is not None:
         try:
@@ -560,6 +611,14 @@ async def _async_main(
     # cheap and bounded.
     cred_server.stop()
 
+    # Clean up the per-session tmpdir the preflight refresh wrote the
+    # fresh proxy-multi.conf + proxy-secret into. Skipped silently when
+    # the refresh failed (the helper already cleaned the directory) or
+    # when the responder is in unit-test mode without a tmpdir.
+    if preflight.mtproxy_runtime_dir is not None:
+        with contextlib.suppress(OSError):
+            shutil.rmtree(preflight.mtproxy_runtime_dir)
+
     # ── Step 6: Finalize verdicts from snapshotted state ─────────────────────
     # Per-protocol throughput the client measured via curl-through-tunnel
     # and POSTed in the body of /stop. Authoritative on fast links where
@@ -571,6 +630,7 @@ async def _async_main(
         responders,
         self_test_results=self_test_results,
         dc_reach_ok=dc_reach_ok,
+        iptables_cap_ok=iptables_cap_ok,
         client_throughput=client_throughput,
     )
 
@@ -689,6 +749,7 @@ def _build_final_snapshots(
     responders: dict[str, Responder],
     self_test_results: dict[str, bool],
     dc_reach_ok: bool | None,
+    iptables_cap_ok: bool | None,
 ) -> dict[str, dict[str, Any]]:
     """Capture per-responder live snapshots and decorate with cross-cutting fields.
 
@@ -719,6 +780,7 @@ def _build_final_snapshots(
             snap_dict["responder_self_test_ok"] = self_test_results[name]
         if requires_telegram_dc(name):
             snap_dict["dc_reach_ok"] = dc_reach_ok
+        snap_dict["data_counters_available"] = _data_counters_available(name, iptables_cap_ok)
         out[name] = snap_dict
     return out
 
@@ -728,6 +790,7 @@ def _finalize_session_results(
     *,
     self_test_results: dict[str, bool],
     dc_reach_ok: bool | None,
+    iptables_cap_ok: bool | None,
     client_throughput: dict[str, float],
 ) -> dict[str, ProtocolResult]:
     """Build the per-protocol ``ProtocolResult`` for the JSON report.
@@ -746,6 +809,7 @@ def _finalize_session_results(
             responder,
             self_test_ok=self_test_results.get(name),
             dc_reach_ok=dc_reach_ok if is_mtg_protocol(name) else None,
+            data_counters_available=_data_counters_available(name, iptables_cap_ok),
         )
         pr.client_avg_throughput_mbps = client_throughput.get(name)
         if name == "mtproto_orig":
@@ -866,6 +930,8 @@ def _finalize_protocol_result(
     responder: Responder,
     self_test_ok: bool | None = None,
     dc_reach_ok: bool | None = None,
+    *,
+    data_counters_available: bool | None = None,
 ) -> ProtocolResult:
     """Build ProtocolResult from a responder's post-stop snapshot.
 
@@ -935,7 +1001,7 @@ def _finalize_protocol_result(
         avg_throughput_mbps=avg_throughput,
         responder_self_test_ok=self_test_ok,
     )
-    pr.finalize(cap_at=cap_at)
+    pr.finalize(cap_at=cap_at, data_counters_available=data_counters_available)
 
     # Diagnostic note for the same dual-vantage shape — kept inside
     # this function so the verdict-cap and the human-readable
@@ -1004,9 +1070,17 @@ def _mtproto_orig_failure_note(responder: Responder, self_test_ok: bool | None) 
         f"after 12 s — the C MTProxy slave never accepted its own "
         f"connection. On RU vantages this is consistently caused by "
         f"L7 ТСПУ filtering of the daemon's auth_cluster RPC heartbeat "
-        f"(TCP/8888 SYN passes prune but the RPC payload is dropped). "
-        f"On non-RU vantages it can also be a local daemon issue — "
-        f"strace the slave pid + tune -M N to disambiguate."
+        f"(TCP/8888 SYN passes prune but the RPC payload is dropped); "
+        f"the prune signal is positive evidence of L7 censorship. On "
+        f"non-RU vantages the same shape means NAT detection at startup "
+        f"failed: cloud VMs (AWS/GCP/DO private VPC) sit behind a 1:1 "
+        f"NAT and the C MTProxy embeds the LOCAL source IP into its "
+        f"auth_cluster RPC handshake, but upstream sees the PUBLIC IP "
+        f"from the NAT — the mismatch causes silent disconnect after "
+        f"the nonce exchange. The responder auto-detects this and "
+        f"passes ``--nat-info <private>:<public>``; if it fired on a "
+        f"bare-metal host with a directly-attached public IP, no "
+        f"--nat-info is added and the cause is genuinely upstream-side."
     )
 
 

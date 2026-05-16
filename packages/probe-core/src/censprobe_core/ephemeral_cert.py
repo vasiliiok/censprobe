@@ -148,6 +148,45 @@ def detect_external_ip() -> str | None:
     return public_ip or local_ip
 
 
+def detect_nat_pair() -> tuple[str, str] | None:
+    """Return ``(private_ip, public_ip)`` when the host is behind a 1:1 NAT
+    (cloud VM / AWS / GCP / DO droplets in private VPC), else ``None``.
+
+    The original Telegram C MTProxy embeds the local source IP it sees on
+    its egress interface into its RPC ``auth_cluster`` handshake — that
+    IP is then validated against the TCP source-IP that arrives at the
+    upstream TG-DC. On a cloud VM those two diverge:
+
+        local IP   = 10.x.y.z   (private, what the daemon sees)
+        public IP  = 34.a.b.c   (NAT-translated, what TG-DC sees)
+
+    The mismatch causes TG-DC to silently close every RPC connection
+    after the nonce exchange — empirically reproduced on GCP southamerica1
+    (CL) and us-central1 (US) 2026-05-16: 1954/2106 disconnects in 8 s,
+    every single ``key_select=-1``. Passing ``--nat-info <local>:<public>``
+    to mtproto-proxy lets it embed the public IP in the RPC handshake,
+    matching what TG-DC actually sees, and the connections survive.
+
+    Detection:
+      * if ``_udp_connect_local_ip()`` returns a non-unroutable address,
+        the host is on a directly-attached public IP (bare metal, most
+        budget VPS) — no NAT, return ``None`` (caller skips ``--nat-info``).
+      * if local is unroutable AND ``_query_public_ip_echo`` succeeds AND
+        the two differ → NAT pair, return both.
+      * otherwise return ``None`` (degraded — we don't know the public
+        side; caller should skip ``--nat-info`` rather than guess).
+    """
+    local_ip = _udp_connect_local_ip()
+    if local_ip is None:
+        return None
+    if not _is_unroutable(local_ip):
+        return None
+    public_ip = _query_public_ip_echo()
+    if public_ip is None or public_ip == local_ip:
+        return None
+    return local_ip, public_ip
+
+
 def _udp_connect_local_ip() -> str | None:
     """Return the IPv4 source address the kernel would use for a public destination."""
     try:

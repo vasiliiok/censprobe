@@ -21,7 +21,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from censprobe_core.models import Verdict
-from censprobe_listener.main import _extract_dc_reach_ok, _finalize_protocol_result
+from censprobe_listener.main import (
+    _data_counters_available,
+    _extract_dc_reach_ok,
+    _extract_iptables_cap_ok,
+    _finalize_protocol_result,
+)
 from censprobe_listener.preflight import CheckResult
 
 
@@ -63,6 +68,60 @@ class TestExtractDcReachOk:
             CheckResult("orphan-rules", "ok", "no orphan rules"),
         ]
         assert _extract_dc_reach_ok(results) is True
+
+
+class TestExtractIptablesCapOk:
+    """``_extract_iptables_cap_ok`` mirrors the dc-reach extractor for the
+    CAP_NET_ADMIN preflight signal that drives
+    ``LiveSnapshot.data_counters_available``.
+    """
+
+    def test_ok_status_returns_true(self) -> None:
+        results = [CheckResult("iptables-cap", "ok", "counters available")]
+        assert _extract_iptables_cap_ok(results) is True
+
+    def test_warn_status_returns_false(self) -> None:
+        # Hit on rootless-docker / no-CAP_NET_ADMIN containers; the
+        # downstream effect is that data_counters_available propagates
+        # False and the client cross-verify stops downgrading client=OK.
+        results = [CheckResult("iptables-cap", "warn", "Operation not permitted")]
+        assert _extract_iptables_cap_ok(results) is False
+
+    def test_missing_check_returns_none(self) -> None:
+        results = [CheckResult("telegram-dc-reach", "ok", "3/3 DCs reachable")]
+        assert _extract_iptables_cap_ok(results) is None
+
+    def test_skip_status_returns_none(self) -> None:
+        results = [CheckResult("iptables-cap", "skip", "stubbed in test")]
+        assert _extract_iptables_cap_ok(results) is None
+
+
+class TestDataCountersAvailablePerProtocol:
+    """``_data_counters_available`` answers: do counters work for this
+    protocol's data-phase signal on this host?
+    """
+
+    def test_iptables_protocol_inherits_cap_ok(self) -> None:
+        for name in ("openvpn", "mtproto_proxy", "mtproto_proxy_alt", "mtproto_orig"):
+            assert _data_counters_available(name, True) is True
+
+    def test_iptables_protocol_inherits_cap_warn(self) -> None:
+        for name in ("openvpn", "mtproto_proxy", "mtproto_proxy_alt", "mtproto_orig"):
+            assert _data_counters_available(name, False) is False
+
+    def test_iptables_protocol_inherits_cap_none(self) -> None:
+        for name in ("openvpn", "mtproto_proxy"):
+            assert _data_counters_available(name, None) is None
+
+    def test_non_iptables_protocol_always_true(self) -> None:
+        # SS/VLESS/Hy2 signal data via the loopback echo server; WG/AWG
+        # use kernel ``wg show`` rx_bytes. Both paths are independent of
+        # the iptables-cap preflight, so the per-protocol availability
+        # is True regardless of the host-wide cap state.
+        for name in ("shadowsocks", "vless_reality", "hysteria2", "wireguard", "amneziawg"):
+            assert _data_counters_available(name, True) is True
+            assert _data_counters_available(name, False) is True
+            assert _data_counters_available(name, None) is True
 
 
 @dataclass
