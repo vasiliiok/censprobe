@@ -1087,7 +1087,13 @@ def _listener_verdict(snap: LiveSnapshot, protocol: str | None = None) -> Verdic
     cap_at: Verdict | None = None
     if protocol is not None and is_mtg_protocol(protocol) and snap.dc_reach_ok is False:
         cap_at = Verdict.HANDSHAKE_ONLY
-    pr.finalize(cap_at=cap_at)
+    # ``data_counters_available=False`` means the listener could not
+    # install its iptables PSH+ACK counter (rootless / no CAP_NET_ADMIN).
+    # In that case ``data_transfer_ok=False`` is an environmental artefact
+    # rather than evidence that no bytes flowed — finalize() then derives
+    # the verdict from ``handshake_count`` alone, which matches the
+    # listener-side ProtocolResult exactly so the two columns agree.
+    pr.finalize(cap_at=cap_at, data_counters_available=snap.data_counters_available)
     return pr.verdict
 
 

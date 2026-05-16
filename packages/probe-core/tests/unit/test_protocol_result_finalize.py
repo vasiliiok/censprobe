@@ -193,3 +193,62 @@ class TestFinalizeCapAt:
             pr = ProtocolResult(handshake_count=hsk, data_transfer_ok=data)
             pr.finalize(cap_at=Verdict.BLOCKED)
             assert pr.verdict == Verdict.BLOCKED
+
+
+class TestFinalizeDataCountersUnavailable:
+    """``finalize(data_counters_available=False)`` treats a
+    ``data_transfer_ok=False`` reading as a degraded-environment artefact
+    rather than evidence of blocking.
+
+    Canonical case: listener in a container without CAP_NET_ADMIN (rootless
+    docker, restricted PaaS sandbox) — iptables PSH+ACK counters never tick
+    even when bytes do flow. Without this branch every successful client
+    probe would be silently downgraded to HANDSHAKE_ONLY on a counter that
+    was structurally unable to read.
+    """
+
+    def test_counters_unavailable_promotes_handshake_only_to_ok(self) -> None:
+        pr = ProtocolResult(handshake_count=1, data_transfer_ok=False)
+        pr.finalize(data_counters_available=False)
+        assert pr.verdict == Verdict.OK
+
+    def test_counters_unavailable_keeps_zero_handshake_as_blocked(self) -> None:
+        # No handshake means there's still nothing to credit — the cap
+        # only changes the data-signal interpretation, not the no-signal
+        # case. Otherwise we'd promote silent listeners to false OK.
+        pr = ProtocolResult(handshake_count=0, data_transfer_ok=False)
+        pr.finalize(data_counters_available=False)
+        assert pr.verdict == Verdict.BLOCKED
+
+    def test_counters_available_keeps_legacy_handshake_only(self) -> None:
+        # CAP_NET_ADMIN present → ``data_transfer_ok=False`` is meaningful
+        # "no bytes flowed", so the conservative HANDSHAKE_ONLY shape stays.
+        pr = ProtocolResult(handshake_count=1, data_transfer_ok=False)
+        pr.finalize(data_counters_available=True)
+        assert pr.verdict == Verdict.HANDSHAKE_ONLY
+
+    def test_counters_unavailable_does_not_override_real_data(self) -> None:
+        # If the counter DID tick (some other code path, e.g. wg show
+        # rx_bytes), the verdict is OK irrespective of the cap.
+        pr = ProtocolResult(handshake_count=1, data_transfer_ok=True)
+        pr.finalize(data_counters_available=False)
+        assert pr.verdict == Verdict.OK
+
+    def test_cap_at_still_applies_when_counters_unavailable(self) -> None:
+        # The mtg dual-vantage cap still wins over the counter-unavailable
+        # promotion. A degraded listener on a no-DC vantage must not
+        # accidentally promote handshake_count=1 to OK when the cap_at
+        # branch says HANDSHAKE_ONLY is the ceiling.
+        pr = ProtocolResult(handshake_count=1, data_transfer_ok=False)
+        pr.finalize(
+            cap_at=Verdict.HANDSHAKE_ONLY,
+            data_counters_available=False,
+        )
+        assert pr.verdict == Verdict.HANDSHAKE_ONLY
+
+    def test_counters_none_is_legacy_finalize(self) -> None:
+        # data_counters_available=None — older listener that didn't set
+        # the field; consumer must default to "trust the counter".
+        pr = ProtocolResult(handshake_count=1, data_transfer_ok=False)
+        pr.finalize(data_counters_available=None)
+        assert pr.verdict == Verdict.HANDSHAKE_ONLY

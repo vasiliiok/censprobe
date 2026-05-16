@@ -88,6 +88,40 @@ class TestListenerVerdict:
         snap = LiveSnapshot(handshake_count=0, data_transfer_ok=False, dc_reach_ok=False)
         assert _listener_verdict(snap, protocol="mtproto_proxy") == Verdict.BLOCKED
 
+    def test_data_counters_unavailable_promotes_to_ok(self) -> None:
+        # Listener without CAP_NET_ADMIN: PSH+ACK counter never ticked even
+        # though L4 handshake completed. ``data_transfer_ok=False`` is an
+        # environmental artefact, not "no bytes flowed" — verdict must NOT
+        # silently downgrade to HANDSHAKE_ONLY here, otherwise every
+        # client=OK probe against a rootless listener gets false-clamped.
+        snap = LiveSnapshot(
+            handshake_count=1,
+            data_transfer_ok=False,
+            data_counters_available=False,
+        )
+        assert _listener_verdict(snap, protocol="mtproto_proxy_alt") == Verdict.OK
+
+    def test_data_counters_unavailable_keeps_blocked_without_handshake(self) -> None:
+        # No handshake → no positive evidence at all. The promotion path
+        # only applies when there's a handshake to credit.
+        snap = LiveSnapshot(
+            handshake_count=0,
+            data_transfer_ok=False,
+            data_counters_available=False,
+        )
+        assert _listener_verdict(snap, protocol="openvpn") == Verdict.BLOCKED
+
+    def test_data_counters_available_keeps_handshake_only(self) -> None:
+        # CAP_NET_ADMIN present and counter says no data → the conservative
+        # HANDSHAKE_ONLY shape stays. Sanity-check that the promotion branch
+        # is gated correctly.
+        snap = LiveSnapshot(
+            handshake_count=1,
+            data_transfer_ok=False,
+            data_counters_available=True,
+        )
+        assert _listener_verdict(snap, protocol="openvpn") == Verdict.HANDSHAKE_ONLY
+
 
 class TestAgreedVerdict:
     """``_agreed_verdict`` returns (final_verdict, note) — listener wins."""

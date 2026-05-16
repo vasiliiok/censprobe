@@ -302,6 +302,24 @@ class LiveSnapshot(BaseModel):
     #     no actionable signal to either operator or the cross-verifier,
     #     so collapsing them keeps the consumer-side branching simple.
     dc_reach_ok: bool | None = None
+    # Are the listener's data-transfer counters trustworthy for this
+    # protocol? Three states:
+    #   * True  — iptables / kernel counters installed and ticking; a
+    #     ``data_transfer_ok=False`` reading is meaningful "no bytes flowed".
+    #   * False — listener is running in a degraded environment (no
+    #     CAP_NET_ADMIN, iptables-cap preflight warned) AND this protocol's
+    #     data-phase signal comes from those degraded counters. The
+    #     ``data_transfer_ok=False`` reading is then an artefact, NOT
+    #     evidence of blocking. Verdict derivation must fall back to
+    #     ``handshake_count`` alone.
+    #   * None  — older listener that didn't set the field (back-compat),
+    #     OR not applicable. Consumer treats this as "trust the counter"
+    #     to preserve historical behaviour.
+    # Threaded through to :meth:`ProtocolResult.finalize` and to the
+    # client-side cross-verify so a rootless / no-CAP_NET_ADMIN listener
+    # can't falsely downgrade ``client=OK`` to HANDSHAKE_ONLY when its
+    # own counters never had a chance to tick.
+    data_counters_available: bool | None = None
 
 
 class ProtocolResult(BaseModel):
@@ -356,7 +374,12 @@ class ProtocolResult(BaseModel):
     # where the wedge is a daemon issue rather than TSPU.
     responder_self_test_ok: bool | None = None
 
-    def finalize(self, cap_at: Verdict | None = None) -> None:
+    def finalize(
+        self,
+        cap_at: Verdict | None = None,
+        *,
+        data_counters_available: bool | None = None,
+    ) -> None:
         """Derive verdict from the two responder signals.
 
         ``data_transfer_ok`` wins over ``handshake_count`` because it is the
@@ -399,6 +422,14 @@ class ProtocolResult(BaseModel):
         verdicts pass through unchanged.
         """
         if self.data_transfer_ok:
+            self.verdict = Verdict.OK
+        elif data_counters_available is False and self.handshake_count > 0:
+            # Listener can't measure data (no CAP_NET_ADMIN), but it DID see
+            # the L4 handshake. ``data_transfer_ok=False`` here is an
+            # environmental artefact — promote to OK rather than the
+            # conservative HANDSHAKE_ONLY so a rootless listener stops
+            # silently downgrading every client=OK to HANDSHAKE_ONLY.
+            # The note carries the attribution for the operator.
             self.verdict = Verdict.OK
         elif self.handshake_count > 0:
             self.verdict = Verdict.HANDSHAKE_ONLY

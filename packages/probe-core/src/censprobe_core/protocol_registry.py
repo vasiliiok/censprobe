@@ -90,6 +90,16 @@ class ProtocolSpec:
     three Telegram-flavoured protocols (``mtproto_proxy`` /
     ``mtproto_proxy_alt`` / ``mtproto_orig``)."""
 
+    uses_iptables_counter: bool = False
+    """True iff this protocol derives ``data_transfer_ok`` from an
+    iptables PSH+ACK counter rather than a higher-level source (echo
+    server reply, ``wg show`` rx_bytes). When the listener lacks
+    CAP_NET_ADMIN (rootless docker, restricted PaaS) those counters
+    silently read zero — driving ``LiveSnapshot.data_counters_available``
+    to False for these protocols only. Drives the verdict-cap branch in
+    :meth:`ProtocolResult.finalize` so a structurally-degraded counter
+    can't downgrade a working ``client=OK`` to HANDSHAKE_ONLY."""
+
 
 PROTOCOLS: tuple[ProtocolSpec, ...] = (
     ProtocolSpec(
@@ -97,6 +107,7 @@ PROTOCOLS: tuple[ProtocolSpec, ...] = (
         label="OpenVPN",
         transport="udp",
         uses_socks_echo=False,
+        uses_iptables_counter=True,
     ),
     ProtocolSpec(
         name="wireguard",
@@ -135,6 +146,7 @@ PROTOCOLS: tuple[ProtocolSpec, ...] = (
         uses_socks_echo=False,
         is_mtg_protocol=True,
         requires_telegram_dc=True,
+        uses_iptables_counter=True,
     ),
     # Sibling of mtproto_proxy on a non-443 port. Same protocol/responder,
     # different bind. Lets a single test distinguish port-keyed DPI ("TSPU
@@ -148,6 +160,7 @@ PROTOCOLS: tuple[ProtocolSpec, ...] = (
         uses_socks_echo=False,
         is_mtg_protocol=True,
         requires_telegram_dc=True,
+        uses_iptables_counter=True,
     ),
     # Original Telegram MTProxy (TelegramMessenger/MTProxy, written in C).
     # Speaks legacy obfuscated2 — no fakeTLS camouflage. Co-runs with the
@@ -162,6 +175,7 @@ PROTOCOLS: tuple[ProtocolSpec, ...] = (
         uses_socks_echo=False,
         is_mtg_protocol=False,
         requires_telegram_dc=True,
+        uses_iptables_counter=True,
     ),
 )
 
@@ -225,3 +239,18 @@ def requires_telegram_dc(name: str) -> bool:
     """
     spec = _BY_NAME.get(name)
     return spec is not None and spec.requires_telegram_dc
+
+
+def uses_iptables_counter(name: str) -> bool:
+    """Whether ``name`` derives ``data_transfer_ok`` from an iptables counter.
+
+    Wraps :data:`ProtocolSpec.uses_iptables_counter`. Used by the
+    listener's per-protocol ``data_counters_available`` decision: only
+    these protocols are vulnerable to a structurally-broken counter in
+    rootless / no-CAP_NET_ADMIN environments. Unknown names return
+    False — safest default (treat counters as trustworthy by absence
+    of evidence, rather than triggering a counter-bypass for an
+    unrecognised protocol).
+    """
+    spec = _BY_NAME.get(name)
+    return spec is not None and spec.uses_iptables_counter
